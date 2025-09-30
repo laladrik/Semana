@@ -1,0 +1,10 @@
+[workspace.package]
+name = "semana"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [
+    "crates/application", "crates/calendar",
+    "crates/sdl3-sys",
+]
