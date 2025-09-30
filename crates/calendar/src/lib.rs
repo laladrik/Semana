@@ -1,158 +1,10 @@
+pub mod obtain;
+pub mod render;
+
+use core::str::FromStr;
+use std::num::ParseIntError;
+
 use nanoserde::DeJson;
-use nanoserde::SerJson;
-// extern crate alloc;
-//  use alloc::string::String;
-//  use alloc::vec::Vec;
-//  use alloc::str;
-
-use std::ffi::OsStr;
-use std::io::Write;
-pub trait AgendaSource {
-    type Data;
-    type Error;
-    fn obtain<S: AsRef<OsStr>>(&self, args: &[S]) -> Result<Self::Data, Self::Error>;
-}
-
-pub struct AgendaSourceStd;
-
-impl AgendaSource for AgendaSourceStd {
-    type Data = Vec<u8>;
-    type Error = std::io::Error;
-
-    fn obtain<S: AsRef<OsStr>>(&self, args: &[S]) -> Result<Self::Data, Self::Error> {
-        use std::process;
-        let mut cmd = process::Command::new(&args[0]);
-        cmd.args(args[1..].iter());
-        cmd.stdout(process::Stdio::piped());
-        let child: process::Child = cmd.spawn()?;
-        let output: process::Output = child.wait_with_output()?;
-        if !output.status.success() {
-            panic!("the command failed");
-        }
-        Ok(output.stdout)
-    }
-}
-
-pub trait JsonParser {
-    type Error;
-
-    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<Agenda, Self::Error>;
-}
-
-pub struct NanoSerde;
-impl JsonParser for NanoSerde {
-    type Error = nanoserde::DeJsonErr;
-
-    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<Agenda, Self::Error> {
-        nanoserde::DeJson::deserialize_json(bytes)
-    }
-}
-
-pub struct Date {
-    pub year: u16,
-    pub month: u8,
-    pub day: u8,
-}
-
-impl DeJson for Date {
-    fn de_json(
-        state: &mut nanoserde::DeJsonState,
-        input: &mut core::str::Chars,
-    ) -> Result<Self, nanoserde::DeJsonErr> {
-        let year: u16 = parse_digits::<4, u16>(state, input)?;
-        let month: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 12 {
-                return Err(state.err_parse("invalid month"));
-            }
-            two_digit_number
-        };
-
-        skip_delimeter(state, input, ':')?;
-        let day: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 31 {
-                return Err(state.err_parse("invalid day"));
-            }
-            two_digit_number
-        };
-
-        Ok(Date { year, month, day })
-    }
-}
-
-pub struct Time {
-    pub hour: u8,
-    pub minute: u8,
-}
-
-fn parse_digits<const N: usize, Out: core::str::FromStr>(
-    state: &mut nanoserde::DeJsonState,
-    input: &mut core::str::Chars,
-) -> Result<Out, nanoserde::DeJsonErr> {
-    let mut ret: [char; N] = [' '; N];
-    for i in 0..N {
-        state.next(input);
-        let maybe_digit = state.cur;
-        ret[i] = maybe_digit;
-    }
-
-    let s = String::from_iter(ret.iter());
-    Out::from_str(&s).map_err(|_| state.err_parse("the hour of the time is invalid"))
-}
-
-fn parse_two_digits(
-    state: &mut nanoserde::DeJsonState,
-    input: &mut core::str::Chars,
-) -> Result<u8, nanoserde::DeJsonErr> {
-    parse_digits::<2, u8>(state, input)
-}
-
-fn skip_delimeter(
-    state: &mut nanoserde::DeJsonState,
-    input: &mut core::str::Chars,
-    expected_delimeter: char,
-) -> Result<(), nanoserde::DeJsonErr> {
-    state.next(input);
-    let actual_delimeter = state.cur;
-    if actual_delimeter != expected_delimeter {
-        Err(nanoserde::DeJsonErr {
-            msg: nanoserde::DeJsonErrReason::CannotParse("colon after the hour in Time".to_owned()),
-            line: state.line,
-            col: state.col,
-        })
-    } else {
-        Ok(())
-    }
-}
-
-// parses  a string like 12:34, 09:23
-impl DeJson for Time {
-    fn de_json(
-        state: &mut nanoserde::DeJsonState,
-        input: &mut core::str::Chars,
-    ) -> Result<Self, nanoserde::DeJsonErr> {
-        let hour: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 23 {
-                return Err(state.err_parse("the hour is too big"));
-            }
-            two_digit_number
-        };
-
-        skip_delimeter(state, input, ':')?;
-        let minute: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 59 {
-                return Err(state.err_parse("the minute is too big"));
-            }
-            two_digit_number
-        };
-
-        Ok(Time { hour, minute })
-    }
-}
-
 #[derive(DeJson, Debug)]
 pub struct Item {
     pub title: String,
@@ -166,114 +18,131 @@ pub struct Item {
     pub end_time: String,
 }
 
-pub type Agenda = Vec<Item>;
-
 #[derive(Debug)]
-pub enum Error<PE> {
-    Io(std::io::Error),
-    InvalidUnicode(core::str::Utf8Error),
-    Parse(PE),
-    DurationIsTooBig,
+struct Date {
+    year: u16,
+    month: u8,
+    day: u8,
 }
 
-const MAX_DURATION_DAYS: u8 = 35;
-pub mod khal {
-    use super::ObtainArguments;
-    pub fn week_arguments(from: &str) -> ObtainArguments<'_> {
-        ObtainArguments { from, duration_days: 7, backend_bin_path: "khal" }
+pub enum ParseDateError {
+    InvalidInput(InvalidInput),
+    ParseIntError(ParseIntError),
+}
+
+pub struct InvalidInput;
+
+impl FromStr for Date {
+    type Err = ParseDateError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let year = u16::from_str(&s[0..4]).map_err(ParseDateError::ParseIntError)?;
+        let month = u8::from_str(&s[5..7]).map_err(ParseDateError::ParseIntError)?;
+        let day = u8::from_str(&s[8..10]).map_err(ParseDateError::ParseIntError)?;
+        Date::try_new(year, month, day).map_err(ParseDateError::InvalidInput)
     }
 }
 
-pub struct ObtainArguments<'s> {
-    // date in the format YYYY-MM-DD
-    pub from: &'s str,
-    // date in the format YYYY-MM-DD
-    pub duration_days: u8,
-    // path to khal
-    pub backend_bin_path: &'s str,
+impl Date {
+    fn try_new(year: u16, month: u8, day: u8) -> Result<Date, InvalidInput> {
+        if !(month > 0 && month <= 12) {
+            return Err(InvalidInput);
+        }
+
+        let day_max = match month {
+            2 => {
+                if Self::is_leap_year(year) {
+                    29
+                } else {
+                    28
+                }
+            }
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+
+        if !(day > 0 && day < day_max) {
+            return Err(InvalidInput);
+        }
+
+        Ok(Date { year, month, day })
+    }
+
+    #[inline(always)]
+    fn is_leap_year(year: u16) -> bool {
+        year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    }
+
+    fn days_from_epoch(&self) -> i32 {
+        let mut total_days = 0;
+
+        const START: i32 = 1970;
+        let years_since_the_start: i32 = (self.year as i32) - START;
+        // Days from years
+        total_days += years_since_the_start * 365;
+        total_days += years_since_the_start / 4;
+        total_days -= years_since_the_start / 100;
+        total_days += years_since_the_start / 400;
+
+        // Days from months (approximate)
+        let month_days = [1, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        for m in 1..(self.month as usize) {
+            total_days += month_days[m - 1];
+        }
+
+        // Add days
+        total_days += self.day as i32;
+
+        // Adjust for leap years in current year
+        if self.month > 2 && Self::is_leap_year(self.year) {
+            total_days += 1;
+        }
+
+        total_days
+    }
+
+    fn subtract(&self, other: &Date) -> i32 {
+        let self_days = self.days_from_epoch();
+        let other_days = other.days_from_epoch();
+        self_days - other_days
+    }
 }
 
-pub fn obtain<AS, JP, O>(
-    agenda_source: &AS,
-    json_parser: &JP,
-    arguments: &ObtainArguments,
-) -> Result<Agenda, Error<JP::Error>>
-where
-    AS: AgendaSource<Data = O, Error = std::io::Error>,
-    JP: JsonParser,
-    O: AsRef<[u8]>,
-{
-    if arguments.duration_days > MAX_DURATION_DAYS {
-        return Err(Error::DurationIsTooBig)
-    }
-
-    let args = [
-        arguments.backend_bin_path,
-        "list",
-        "--json",
-        "title",
-        "--json",
-        "start-date",
-        "--json",
-        "start-time",
-        "--json",
-        "end-date",
-        "--json",
-        "end-time",
-        arguments.from,
-        &format!("{}d", arguments.duration_days),
-    ];
-
-    let data: AS::Data = agenda_source.obtain(&args).map_err(Error::Io)?;
-    let bytes: &str = std::str::from_utf8(data.as_ref()).map_err(Error::InvalidUnicode)?;
-    let mut agenda = Agenda::new();
-    for part in bytes.split('\n').filter(|p| !p.is_empty()) {
-        let agenda_part = json_parser.parse(part).map_err(Error::Parse)?;
-        agenda.extend(agenda_part);
-    }
-    Ok(agenda)
+struct Time {
+    hour: u8,
+    minute: u8,
 }
 
-pub fn parse() {
-    let input = r#"[{"title": "MC Kieran office hours"}, {"title": "Café"}, {"title": "Ejercicio r2"}, {"title": "Desayuno"}, {"title": "Almuerzo"}, {"title": "Tocar la batería"}, {"title": "Networking"}, {"title": "Preparar para dormir"}]"#;
-    let _: Agenda = DeJson::deserialize_json(input).unwrap();
+const MINUTES_PER_HOUR: u8 = 60;
+const MINUTES_PER_DAY: u16 = MINUTES_PER_HOUR as u16 * 24;
+
+pub enum ParseTimeError {
+    InvalidInput(InvalidInput),
+    ParseIntError(ParseIntError),
 }
 
-#[test]
-fn rename() {
-    #[derive(DeJson, SerJson, PartialEq)]
-    #[nserde(default)]
-    pub struct Test {
-        #[nserde(rename = "foo-field")]
-        pub a: i32,
-        #[nserde(rename = "bar-field")]
-        pub b: Bar,
-    }
+impl FromStr for Time {
+    type Err = ParseTimeError;
 
-    #[derive(DeJson, SerJson, PartialEq, Debug)]
-    pub enum Bar {
-        #[nserde(rename = "fooValue")]
-        A,
-        #[nserde(rename = "barValue")]
-        B,
+    // format 23:59
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let hour = u8::from_str(&s[0..2]).map_err( ParseTimeError::ParseIntError)?;
+        let minute = u8::from_str(&s[3..5]).map_err(ParseTimeError::ParseIntError)?;
+        Time::try_new(hour, minute).map_err(ParseTimeError::InvalidInput)
     }
+}
 
-    impl Default for Bar {
-        fn default() -> Self {
-            Self::A
+impl Time {
+    fn try_new(hour: u8, minute: u8) -> Result<Time, InvalidInput> {
+        if hour > 23 || minute > 59 {
+            Err(InvalidInput)
+        } else {
+            Ok(Time { hour, minute })
         }
     }
 
-    let json = r#"{
-        "foo-field": 1,
-        "bar-field": "fooValue",
-    }"#;
+    fn minutes_from_midnight(&self) -> u16 {
+        (self.hour as u16 * MINUTES_PER_HOUR as u16) + self.minute as u16
+    }
 
-    let test: Test = DeJson::deserialize_json(json).unwrap();
-    assert_eq!(test.a, 1);
-    assert_eq!(test.b, Bar::A);
-
-    let bytes = SerJson::serialize_json(&test);
-    let test_deserialized = DeJson::deserialize_json(&bytes).unwrap();
-    assert!(test == test_deserialized);
 }
