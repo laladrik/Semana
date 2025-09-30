@@ -91,15 +91,14 @@ fn parse_digits<const N: usize, Out: core::str::FromStr>(
     input: &mut core::str::Chars,
 ) -> Result<Out, nanoserde::DeJsonErr> {
     let mut ret: [char; N] = [' '; N];
-    for i in 0 .. N {
+    for i in 0..N {
         state.next(input);
         let maybe_digit = state.cur;
         ret[i] = maybe_digit;
     }
 
     let s = String::from_iter(ret.iter());
-    Out::from_str(&s)
-        .map_err(|_| state.err_parse("the hour of the time is invalid"))
+    Out::from_str(&s).map_err(|_| state.err_parse("the hour of the time is invalid"))
 }
 
 fn parse_two_digits(
@@ -174,16 +173,42 @@ pub enum Error<PE> {
     Io(std::io::Error),
     InvalidUnicode(core::str::Utf8Error),
     Parse(PE),
+    DurationIsTooBig,
 }
 
-pub fn obtain_agenda<AS, JP, O>(agenda_source: &AS, json_parser: &JP) -> Result<Agenda, Error<JP::Error>>
+const MAX_DURATION_DAYS: u8 = 35;
+pub mod khal {
+    use super::ObtainArguments;
+    pub fn week_arguments(from: &str) -> ObtainArguments<'_> {
+        ObtainArguments { from, duration_days: 7, backend_bin_path: "khal" }
+    }
+}
+
+pub struct ObtainArguments<'s> {
+    // date in the format YYYY-MM-DD
+    pub from: &'s str,
+    // date in the format YYYY-MM-DD
+    pub duration_days: u8,
+    // path to khal
+    pub backend_bin_path: &'s str,
+}
+
+pub fn obtain<AS, JP, O>(
+    agenda_source: &AS,
+    json_parser: &JP,
+    arguments: &ObtainArguments,
+) -> Result<Agenda, Error<JP::Error>>
 where
     AS: AgendaSource<Data = O, Error = std::io::Error>,
     JP: JsonParser,
     O: AsRef<[u8]>,
 {
+    if arguments.duration_days > MAX_DURATION_DAYS {
+        return Err(Error::DurationIsTooBig)
+    }
+
     let args = [
-        "khal",
+        arguments.backend_bin_path,
         "list",
         "--json",
         "title",
@@ -195,6 +220,8 @@ where
         "end-date",
         "--json",
         "end-time",
+        arguments.from,
+        &format!("{}d", arguments.duration_days),
     ];
 
     let data: AS::Data = agenda_source.obtain(&args).map_err(Error::Io)?;
@@ -205,7 +232,6 @@ where
         agenda.extend(agenda_part);
     }
     Ok(agenda)
-
 }
 
 pub fn parse() {

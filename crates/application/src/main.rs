@@ -7,6 +7,7 @@ enum SdlError {
     RenderDrawColorIsNotSet,
     RenderIsNotPresent,
     RenderClearFailed,
+    TimeError(TimeError),
 }
 
 type SdlResult<R> = Result<R, SdlError>;
@@ -23,6 +24,61 @@ fn sdl_init<R>(body: impl Fn() -> SdlResult<R>) -> SdlResult<R> {
         sdl::SDL_Quit();
     }
     r
+}
+
+enum TimeError {
+    FailGettingNow,
+    FailConvertingNowToDate,
+}
+
+#[inline(always)]
+fn format_date(date: (u16, u8, u8)) -> String {
+    format!("{}-{:02}-{:02}", date.0, date.1, date.2)
+}
+
+fn get_week_start() -> Result<(u16, u8, u8), TimeError> {
+    unsafe {
+        let mut now: sdl::SDL_Time = 0;
+        if !sdl::SDL_GetCurrentTime(&mut now as *mut _) {
+            return Err(TimeError::FailGettingNow);
+        }
+
+        let mut today: sdl::SDL_DateTime = std::mem::zeroed();
+        let local_time = true;
+        if !sdl::SDL_TimeToDateTime(now, &mut today as *mut _, local_time) {
+            return Err(TimeError::FailConvertingNowToDate);
+        }
+
+        //let sunday: std::ffi::c_int = 0;
+        // from 0 to 6
+        let current_weekday: std::ffi::c_int =
+            sdl::SDL_GetDayOfWeek(today.year, today.month, today.day);
+        //let mut week_offset: std::ffi::c_int = current_weekday - sunday;
+
+        // from 1 to 7
+        let natural_weekday: i32 = current_weekday + 7 * ((7 - current_weekday) / 7);
+        // TODO: implement for the case Sunday is the first day.
+        // monday => 0
+        // ...
+        // sunday => -6
+        let week_offset_days: i32 = -(natural_weekday - 1);
+        const NANOSECONDS_PER_DAY: i64 = (sdl::SDL_NS_PER_SECOND as i64) * 60 * 60 * 24;
+        let offset_ns: i64 = (week_offset_days as i64) * NANOSECONDS_PER_DAY;
+        let mut first_day_of_week: sdl::SDL_DateTime = std::mem::zeroed();
+        if !sdl::SDL_TimeToDateTime(
+            now - offset_ns,
+            &mut first_day_of_week as *mut _,
+            local_time,
+        ) {
+            return Err(TimeError::FailConvertingNowToDate);
+        }
+
+        Ok((
+            first_day_of_week.year as u16,
+            first_day_of_week.month as u8,
+            first_day_of_week.day as u8,
+        ))
+    }
 }
 
 fn unsafe_main() {
@@ -49,11 +105,18 @@ fn unsafe_main() {
                 return Err(SdlError::CannotSetVsync);
             }
 
-            //let agenda_source = calendar::AgendaSourceStd;
-            //calendar::parse();
+            let from: String = get_week_start()
+                .map(format_date)
+                .map_err(SdlError::TimeError)?;
+            let mut arguments = calendar::khal::week_arguments(&from);
+            let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
+            arguments.backend_bin_path = match bin {
+                Ok(ref v) => v.as_ref(),
+                Err(_) => "khal",
+            };
 
-            //let agenda_source = calendar::AgendaSourceStd;
-            let res: Result<calendar::Agenda, _> = calendar::obtain_agenda(&calendar::AgendaSourceStd, &calendar::NanoSerde);
+            let res: Result<calendar::Agenda, _> =
+                calendar::obtain(&calendar::AgendaSourceStd, &calendar::NanoSerde, &arguments);
             match res {
                 Ok(agenda) => {
                     println!("agenda {:?}", agenda);
@@ -71,7 +134,11 @@ fn unsafe_main() {
                     }
 
                     if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
-                        _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
+                        _ = sdl::SDL_GetWindowSize(
+                            root_window,
+                            &mut window_size.x,
+                            &mut window_size.y,
+                        );
                     }
                 }
 
@@ -82,15 +149,27 @@ fn unsafe_main() {
 
                 set_color(renderer.as_mut(), Color::from_rgb(0xdddddd))?;
                 let row_ratio: f32 = window_size.y as f32 / 24.0;
-                for i in  0..24{
-                    let  ordinate = i as f32 * row_ratio;
-                    let _ = sdl::SDL_RenderLine(renderer.as_mut(), 0., ordinate, window_size.x as f32, ordinate);
+                for i in 0..24 {
+                    let ordinate = i as f32 * row_ratio;
+                    let _ = sdl::SDL_RenderLine(
+                        renderer.as_mut(),
+                        0.,
+                        ordinate,
+                        window_size.x as f32,
+                        ordinate,
+                    );
                 }
 
                 let col_ratio: f32 = window_size.x as f32 / 7.;
                 for i in 0..7 {
                     let absciss: f32 = i as f32 * col_ratio;
-                    _ = sdl::SDL_RenderLine(renderer.as_mut(), absciss, 0., absciss, window_size.y as f32);
+                    _ = sdl::SDL_RenderLine(
+                        renderer.as_mut(),
+                        absciss,
+                        0.,
+                        absciss,
+                        window_size.y as f32,
+                    );
                 }
 
                 if !sdl::SDL_RenderPresent(renderer.as_mut()) {
@@ -122,6 +201,9 @@ fn unsafe_main() {
                 }
                 SdlError::InitError => {
                     println!("failed to initialize")
+                }
+                SdlError::TimeError(_) => {
+                    println!("failed to process date and time");
                 }
             }
         }
@@ -158,4 +240,11 @@ fn set_color(renderer: &mut sdl::SDL_Renderer, color: Color) -> SdlResult<()> {
 
 fn main() {
     unsafe_main();
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn div() {
+        assert_eq!(0, 6 / 7);
+    }
 }
