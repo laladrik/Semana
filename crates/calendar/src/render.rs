@@ -5,10 +5,10 @@ use super::Item as AgendaItem;
 use super::MINUTES_PER_DAY;
 use super::Time;
 
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct Point {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 pub type Size = Point;
@@ -21,16 +21,16 @@ pub struct Rectange<'s> {
 }
 
 pub struct Arguments {
-    column_width: u32,
-    column_height: u32,
+    pub column_width: f32,
+    pub column_height: f32,
 }
 
 fn create_point<'ev>(
     first_date: &'_ Date,
     event_date: &'ev str,
     event_time: &'ev str,
-    column_width: u32,
-    height: u32,
+    column_width: f32,
+    height: f32,
 ) -> Result<Point, Error<'ev>> {
     let start_date: Date =
         Date::from_str(event_date).map_err(|_| Error::InvalidDate(event_date))?;
@@ -43,12 +43,12 @@ fn create_point<'ev>(
         "the first date in the calendar must be earlier than the date of the event",
     );
 
-    let x = days as f32 * column_width as f32;
-    let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * height as f32;
+    let x = days as f32 * column_width;
+    let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * height;
     Ok(Point { x, y })
 }
 
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 pub enum Error<'s> {
     InvalidDate(&'s str),
     InvalidTime(&'s str),
@@ -85,14 +85,14 @@ pub fn into_rectangles<'ev>(
         let size: Size = {
             let end_point: Point = create_point(
                 &first_date,
-                &event.start_date,
-                &event.start_time,
+                &event.end_date,
+                &event.end_time,
                 arguments.column_width,
                 arguments.column_height,
             )?;
 
             Size {
-                x: end_point.x - start_point.x,
+                x: end_point.x - start_point.x + arguments.column_width,
                 y: end_point.y - start_point.y,
             }
         };
@@ -104,6 +104,21 @@ pub fn into_rectangles<'ev>(
         });
     }
     Ok(ret)
+}
+
+pub trait RenderRectangles {
+    type Result;
+    fn render_rectangles<'r, 's: 'r, I>(&self, data: I) -> Self::Result
+    where
+        I: Iterator<Item = &'r Rectange<'s>>;
+}
+
+pub fn render_rectangles<'r, 's: 'r, I, DR, R>(rectangles: I, dr: &DR) -> R
+where
+    DR: RenderRectangles<Result = R>,
+    I: Iterator<Item = &'r Rectange<'s>>,
+{
+    dr.render_rectangles(rectangles)
 }
 
 #[cfg(test)]
@@ -122,19 +137,33 @@ mod tests {
         }];
 
         let arguments = Arguments {
-            column_width: 125,
-            column_height: 600,
+            column_width: 125.0,
+            column_height: 600.0,
         };
+
         let ret: Result<Rectangles, Error> = into_rectangles(&events, &arguments);
+        const ONE_HOUR: f32 = 600.0 / 24.0;
         match ret {
-            Ok(x) => assert!(matches!(
-                x[0],
-                Rectange {
-                    at: Point { x: 0.0, y: 0.0 },
-                    ..
-                }
-            )),
-            Err(e) => panic!("the rectangles must be built.  However, the error occurred: {:?}", e),
+            Ok(x) => assert!(
+                matches!(
+                    x[0],
+                    Rectange {
+                        at: Point { x: 0.0, y: 0.0 },
+                        size: Point {
+                            x: 125.0,
+                            y: ONE_HOUR
+                        },
+                        ..
+                    },
+                ),
+                "the actual at {:?}, the actual size {:?}",
+                x[0].at,
+                x[0].size,
+            ),
+            Err(e) => panic!(
+                "the rectangles must be built.  However, the error occurred: {:?}",
+                e
+            ),
         }
     }
 }

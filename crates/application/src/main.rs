@@ -1,3 +1,5 @@
+use std::cell::RefMut;
+
 use sdl3_sys as sdl;
 
 enum SdlError {
@@ -8,6 +10,7 @@ enum SdlError {
     RenderIsNotPresent,
     RenderClearFailed,
     TimeError(TimeError),
+    RectangleIsNotDrawn,
 }
 
 type SdlResult<R> = Result<R, SdlError>;
@@ -100,31 +103,31 @@ fn unsafe_main() {
                 return Err(SdlError::WindowIsNotCreated);
             }
 
-            let mut renderer = Box::from_raw(renderer);
-            if !sdl::SDL_SetRenderVSync(renderer.as_mut(), 1) {
+            let rectangle_render = RectangleRender { renderer };
+            if !sdl::SDL_SetRenderVSync(renderer, 1) {
                 return Err(SdlError::CannotSetVsync);
             }
 
             let from: String = get_week_start()
                 .map(format_date)
                 .map_err(SdlError::TimeError)?;
-            let mut arguments = calendar::khal::week_arguments(&from);
+            let mut arguments = calendar::obtain::khal::week_arguments(&from);
             let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
             arguments.backend_bin_path = match bin {
                 Ok(ref v) => v.as_ref(),
                 Err(_) => "khal",
             };
 
-            let res: Result<calendar::Agenda, _> =
-                calendar::obtain(&calendar::AgendaSourceStd, &calendar::NanoSerde, &arguments);
-            match res {
-                Ok(agenda) => {
-                    println!("agenda {:?}", agenda);
-                }
-                Err(err) => {
-                    println!("failed to obtain the calendar agenda {:?}", err);
-                }
-            }
+            let res: Result<calendar::obtain::Agenda, _> = calendar::obtain::obtain(
+                &calendar::obtain::AgendaSourceStd,
+                &calendar::obtain::NanoSerde,
+                &arguments,
+            );
+
+            let agenda = match res {
+                Ok(agenda) => agenda,
+                Err(err) => panic!("can't get the agenda: {:?}", err),
+            };
 
             let mut event: sdl::SDL_Event = std::mem::zeroed();
             'outer_loop: loop {
@@ -142,37 +145,28 @@ fn unsafe_main() {
                     }
                 }
 
-                set_color(renderer.as_mut(), Color::from_rgb(0xffffff))?;
-                if !sdl::SDL_RenderClear(renderer.as_mut()) {
+                set_color(renderer, Color::from_rgb(0xffffff))?;
+                if !sdl::SDL_RenderClear(renderer) {
                     return Err(SdlError::RenderClearFailed);
                 }
 
-                set_color(renderer.as_mut(), Color::from_rgb(0xdddddd))?;
-                let row_ratio: f32 = window_size.y as f32 / 24.0;
-                for i in 0..24 {
-                    let ordinate = i as f32 * row_ratio;
-                    let _ = sdl::SDL_RenderLine(
-                        renderer.as_mut(),
-                        0.,
-                        ordinate,
-                        window_size.x as f32,
-                        ordinate,
-                    );
-                }
-
                 let col_ratio: f32 = window_size.x as f32 / 7.;
-                for i in 0..7 {
-                    let absciss: f32 = i as f32 * col_ratio;
-                    _ = sdl::SDL_RenderLine(
-                        renderer.as_mut(),
-                        absciss,
-                        0.,
-                        absciss,
-                        window_size.y as f32,
-                    );
+                let arguments = calendar::render::Arguments {
+                    column_width: col_ratio,
+                    column_height: window_size.y as f32,
+                };
+
+                let render_res: Result<_, _> =
+                    calendar::render::into_rectangles(&agenda, &arguments);
+                match render_res {
+                    Ok(rectangles) => {
+                        calendar::render::render_rectangles(rectangles.iter(), &rectangle_render)?;
+                    }
+                    Err(err) => panic!("fail to turn the events into the rectangles {:?}", err),
                 }
 
-                if !sdl::SDL_RenderPresent(renderer.as_mut()) {
+                render_grid(renderer, window_size)?;
+                if !sdl::SDL_RenderPresent(renderer) {
                     return Err(SdlError::RenderIsNotPresent);
                 }
             }
@@ -205,8 +199,61 @@ fn unsafe_main() {
                 SdlError::TimeError(_) => {
                     println!("failed to process date and time");
                 }
+                SdlError::RectangleIsNotDrawn => todo!(),
             }
         }
+    }
+}
+
+fn render_grid(
+    renderer: *mut sdl::SDL_Renderer,
+    window_size: sdl::SDL_Point,
+) -> Result<(), SdlError> {
+    unsafe {
+        set_color(renderer, Color::from_rgb(0x333333))?;
+        let row_ratio: f32 = window_size.y as f32 / 24.0;
+        for i in 0..24 {
+            let ordinate = i as f32 * row_ratio;
+            let _ = sdl::SDL_RenderLine(renderer, 0., ordinate, window_size.x as f32, ordinate);
+        }
+
+        let col_ratio: f32 = window_size.x as f32 / 7.;
+        for i in 0..7 {
+            let absciss: f32 = i as f32 * col_ratio;
+            _ = sdl::SDL_RenderLine(renderer, absciss, 0., absciss, window_size.y as f32);
+        }
+    }
+    Ok(())
+}
+
+struct RectangleRender {
+    renderer: *mut sdl::SDL_Renderer,
+}
+
+fn create_sdl_frect(from: &calendar::render::Rectange<'_>) -> sdl::SDL_FRect {
+    sdl::SDL_FRect {
+        x: from.at.x,
+        y: from.at.y,
+        w: from.size.x,
+        h: from.size.y,
+    }
+}
+
+impl calendar::render::RenderRectangles for RectangleRender {
+    type Result = Result<(), SdlError>;
+
+    fn render_rectangles<'r, 's: 'r, I>(&self, rectangles: I) -> Self::Result
+    where
+        I: Iterator<Item = &'r calendar::render::Rectange<'s>>,
+    {
+        set_color(self.renderer, Color::from_rgb(0x9999ff))?;
+        let data = Vec::from_iter(rectangles.map(create_sdl_frect));
+        unsafe {
+            if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
+                return Err(SdlError::RectangleIsNotDrawn);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -228,7 +275,7 @@ impl Color {
     }
 }
 
-fn set_color(renderer: &mut sdl::SDL_Renderer, color: Color) -> SdlResult<()> {
+fn set_color(renderer: *mut sdl::SDL_Renderer, color: Color) -> SdlResult<()> {
     unsafe {
         if !sdl::SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a) {
             Err(SdlError::RenderDrawColorIsNotSet)
