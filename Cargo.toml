@@ -6,5 +6,5 @@ edition = "2024"
 [workspace]
 members = [
     "crates/application", "crates/calendar",
-    "crates/sdl3-sys",
+    "crates/sdl3-sys", "crates/sdl3-ttf-sys",
 ]
