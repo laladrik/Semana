@@ -1,6 +1,5 @@
-use std::cell::RefMut;
-
 use sdl3_sys as sdl;
+use sdl3_ttf_sys as sdl3_ttf;
 
 enum SdlError {
     InitError,
