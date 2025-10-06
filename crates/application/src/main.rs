@@ -2,7 +2,7 @@ use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 mod sdlext;
 
-use crate::sdlext::{sdl_init, sdl_ttf_init, set_color, Color, SdlError, SdlFont, SdlResult, TimeError};
+use crate::sdlext::{Color, Error, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
 
 #[inline(always)]
 fn format_date(date: (u16, u8, u8)) -> String {
@@ -54,17 +54,16 @@ fn get_week_start() -> Result<(u16, u8, u8), TimeError> {
     }
 }
 
-
 fn unsafe_main() {
     unsafe {
-        let ret: Result<(), SdlError> = sdl_init(
+        let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
                 sdl_ttf_init(renderer, move |engine: *mut sdl_ttf::TTF_TextEngine| {
                     let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
-                    let mut font = SdlFont::open(font_path, 22.0).map_err(SdlError::from)?;
+                    let mut font = Font::open(font_path, 22.0).map_err(Error::from)?;
                     let monday = c"Monday";
                     let color: sdl_ttf::SDL_Color = Color::from_rgb(0xff0000).into();
                     let surface: *mut sdl::SDL_Surface = sdl_ttf::TTF_RenderText_Solid_Wrapped(
@@ -79,6 +78,7 @@ fn unsafe_main() {
                         panic!("the surface for the text is not created");
                     }
 
+                    let rectangle_render = RectangleRender { renderer };
                     let texture: *mut sdl::SDL_Texture =
                         sdl::SDL_CreateTextureFromSurface(renderer, surface);
                     if texture.is_null() {
@@ -92,14 +92,11 @@ fn unsafe_main() {
                         h: (*surface).h as f32,
                     };
 
-                    let text =
-                        sdl_ttf::TTF_CreateText(engine, font.as_mut_ptr(), c"Laladrik".as_ptr(), 8);
-                    if text.is_null() {
-                        panic!("text is not created");
-                    }
-
+                    let mut text = sdlext::Text::try_new(engine, &mut font, c"Laladrik")
+                        .map_err(sdlext::Error::from)?;
                     let (mut r, mut g, mut b, mut a) = (0, 0, 0, 0);
-                    if !sdl_ttf::TTF_GetTextColor(text, &mut r, &mut g, &mut b, &mut a) {
+                    if !sdl_ttf::TTF_GetTextColor(text.as_mut_ptr(), &mut r, &mut g, &mut b, &mut a)
+                    {
                         panic!("can't get text color");
                     } else {
                         println!("text color {} {} {} {}", r, g, b, a);
@@ -107,7 +104,7 @@ fn unsafe_main() {
 
                     let from: String = get_week_start()
                         .map(format_date)
-                        .map_err(SdlError::TimeError)?;
+                        .map_err(Error::TimeError)?;
                     let mut arguments = calendar::obtain::khal::week_arguments(&from);
                     let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
                     arguments.backend_bin_path = match bin {
@@ -144,27 +141,32 @@ fn unsafe_main() {
 
                         set_color(renderer, Color::from_rgb(0x000000))?;
                         if !sdl::SDL_RenderClear(renderer) {
-                            return Err(SdlError::RenderClearFailed);
+                            return Err(Error::RenderClearFailed);
                         }
 
-                        // let col_ratio: f32 = window_size.x as f32 / 7.;
-                        // let arguments = calendar::render::Arguments {
-                        //     column_width: col_ratio,
-                        //     column_height: window_size.y as f32,
-                        // };
+                        let col_ratio: f32 = window_size.x as f32 / 7.;
+                        let arguments = calendar::render::Arguments {
+                            column_width: col_ratio,
+                            column_height: window_size.y as f32,
+                        };
 
-                        // let render_res: Result<_, _> =
-                        //     calendar::render::into_rectangles(&agenda, &arguments);
-                        // match render_res {
-                        //     Ok(rectangles) => {
-                        //         calendar::render::render_rectangles(rectangles.iter(), &rectangle_render)?;
-                        //     }
-                        //     Err(err) => panic!("fail to turn the events into the rectangles {:?}", err),
-                        // }
+                        let render_res: Result<_, _> =
+                            calendar::render::into_rectangles(&agenda, &arguments);
+                        match render_res {
+                            Ok(rectangles) => {
+                                calendar::render::render_rectangles(
+                                    rectangles.iter(),
+                                    &rectangle_render,
+                                )?;
+                            }
+                            Err(err) => {
+                                panic!("fail to turn the events into the rectangles {:?}", err)
+                            }
+                        }
 
-                        //render_grid(renderer, window_size)?;
+                        render_grid(renderer, window_size)?;
                         set_color(renderer, Color::from_rgb(0x111111))?;
-                        if !sdl_ttf::TTF_DrawRendererText(text, 100., 100.) {
+                        if !sdl_ttf::TTF_DrawRendererText(text.as_mut_ptr(), 100., 100.) {
                             panic!("text is not renderered");
                         }
 
@@ -179,7 +181,7 @@ fn unsafe_main() {
                         }
 
                         if !sdl::SDL_RenderPresent(renderer) {
-                            return Err(SdlError::RenderIsNotPresent);
+                            return Err(Error::RenderIsNotPresent);
                         }
                     }
 
@@ -192,38 +194,35 @@ fn unsafe_main() {
         if let Err(err) = ret {
             let err_text = std::ffi::CStr::from_ptr(sdl::SDL_GetError());
             match err {
-                SdlError::RenderClearFailed => {
+                Error::RenderClearFailed => {
                     println!("RenderClearFailed: {:?}", err_text);
                 }
-                SdlError::RenderIsNotPresent => {
+                Error::RenderIsNotPresent => {
                     println!("RenderIsNotPresent: {:?}", err_text);
                 }
-                SdlError::RenderDrawColorIsNotSet => {
+                Error::RenderDrawColorIsNotSet => {
                     println!("RenderDrawColorIsNotSet: {:?}", err_text);
                 }
-                SdlError::WindowIsNotCreated => {
+                Error::WindowIsNotCreated => {
                     println!("WindowIsNotCreated: {:?}", err_text);
                 }
-                SdlError::CannotSetVsync => {
+                Error::CannotSetVsync => {
                     println!("CannotSetVsync");
                 }
-                SdlError::InitError => {
+                Error::InitError => {
                     println!("failed to initialize")
                 }
-                SdlError::TimeError(_) => {
+                Error::TimeError(_) => {
                     println!("failed to process date and time");
                 }
-                SdlError::RectangleIsNotDrawn => todo!("handle rectangle render errors"),
-                SdlError::TtfError(_) => todo!("handle SDL TTF error"),
+                Error::RectangleIsNotDrawn => todo!("handle rectangle render errors"),
+                Error::TtfError(_) => todo!("handle SDL TTF error"),
             }
         }
     }
 }
 
-fn render_grid(
-    renderer: *mut sdl::SDL_Renderer,
-    window_size: sdl::SDL_Point,
-) -> Result<(), SdlError> {
+fn render_grid(renderer: *mut sdl::SDL_Renderer, window_size: sdl::SDL_Point) -> Result<(), Error> {
     unsafe {
         set_color(renderer, Color::from_rgb(0x333333))?;
         let row_ratio: f32 = window_size.y as f32 / 24.0;
@@ -255,7 +254,7 @@ fn create_sdl_frect(from: &calendar::render::Rectange<'_>) -> sdl::SDL_FRect {
 }
 
 impl calendar::render::RenderRectangles for RectangleRender {
-    type Result = Result<(), SdlError>;
+    type Result = Result<(), Error>;
 
     fn render_rectangles<'r, 's: 'r, I>(&self, rectangles: I) -> Self::Result
     where
@@ -265,7 +264,7 @@ impl calendar::render::RenderRectangles for RectangleRender {
         let data = Vec::from_iter(rectangles.map(create_sdl_frect));
         unsafe {
             if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
-                return Err(SdlError::RectangleIsNotDrawn);
+                return Err(Error::RectangleIsNotDrawn);
             }
         }
         Ok(())
