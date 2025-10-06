@@ -1,37 +1,8 @@
 use sdl3_sys as sdl;
-use sdl3_ttf_sys as sdl3_ttf;
+use sdl3_ttf_sys as sdl_ttf;
+mod sdlext;
 
-enum SdlError {
-    InitError,
-    WindowIsNotCreated,
-    CannotSetVsync,
-    RenderDrawColorIsNotSet,
-    RenderIsNotPresent,
-    RenderClearFailed,
-    TimeError(TimeError),
-    RectangleIsNotDrawn,
-}
-
-type SdlResult<R> = Result<R, SdlError>;
-
-fn sdl_init<R>(body: impl Fn() -> SdlResult<R>) -> SdlResult<R> {
-    unsafe {
-        if !sdl::SDL_Init(sdl::SDL_INIT_VIDEO) {
-            return Err(SdlError::InitError);
-        }
-    }
-
-    let r = body();
-    unsafe {
-        sdl::SDL_Quit();
-    }
-    r
-}
-
-enum TimeError {
-    FailGettingNow,
-    FailConvertingNowToDate,
-}
+use crate::sdlext::{sdl_init, sdl_ttf_init, set_color, Color, SdlError, SdlFont, SdlResult, TimeError};
 
 #[inline(always)]
 fn format_date(date: (u16, u8, u8)) -> String {
@@ -83,96 +54,140 @@ fn get_week_start() -> Result<(u16, u8, u8), TimeError> {
     }
 }
 
+
 fn unsafe_main() {
-    let window_title = std::ffi::CString::from(c"semana");
     unsafe {
-        let ret: Result<(), SdlError> = sdl_init(move || {
-            let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
-            let mut root_window: *mut sdl::SDL_Window = std::ptr::null_mut();
-            let mut renderer: *mut sdl::SDL_Renderer = std::ptr::null_mut();
-            let window_flags: sdl::SDL_WindowFlags = sdl::SDL_WINDOW_RESIZABLE;
-            if !sdl::SDL_CreateWindowAndRenderer(
-                window_title.as_ptr(),
-                window_size.x,
-                window_size.y,
-                window_flags,
-                &mut root_window as *mut *mut _,
-                &mut renderer as *mut *mut _,
-            ) {
-                return Err(SdlError::WindowIsNotCreated);
-            }
+        let ret: Result<(), SdlError> = sdl_init(
+            move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
+                let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
+                _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
-            let rectangle_render = RectangleRender { renderer };
-            if !sdl::SDL_SetRenderVSync(renderer, 1) {
-                return Err(SdlError::CannotSetVsync);
-            }
-
-            let from: String = get_week_start()
-                .map(format_date)
-                .map_err(SdlError::TimeError)?;
-            let mut arguments = calendar::obtain::khal::week_arguments(&from);
-            let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
-            arguments.backend_bin_path = match bin {
-                Ok(ref v) => v.as_ref(),
-                Err(_) => "khal",
-            };
-
-            let res: Result<calendar::obtain::Agenda, _> = calendar::obtain::obtain(
-                &calendar::obtain::AgendaSourceStd,
-                &calendar::obtain::NanoSerde,
-                &arguments,
-            );
-
-            let agenda = match res {
-                Ok(agenda) => agenda,
-                Err(err) => panic!("can't get the agenda: {:?}", err),
-            };
-
-            let mut event: sdl::SDL_Event = std::mem::zeroed();
-            'outer_loop: loop {
-                while sdl::SDL_PollEvent(&mut event as _) {
-                    if event.type_ == sdl::SDL_EVENT_QUIT {
-                        break 'outer_loop;
+                sdl_ttf_init(renderer, move |engine: *mut sdl_ttf::TTF_TextEngine| {
+                    let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
+                    let mut font = SdlFont::open(font_path, 22.0).map_err(SdlError::from)?;
+                    let monday = c"Monday";
+                    let color: sdl_ttf::SDL_Color = Color::from_rgb(0xff0000).into();
+                    let surface: *mut sdl::SDL_Surface = sdl_ttf::TTF_RenderText_Solid_Wrapped(
+                        font.as_mut_ptr(),
+                        monday.as_ptr(),
+                        monday.count_bytes(),
+                        color,
+                        0,
+                    )
+                    .cast();
+                    if surface.is_null() {
+                        panic!("the surface for the text is not created");
                     }
 
-                    if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
-                        _ = sdl::SDL_GetWindowSize(
-                            root_window,
-                            &mut window_size.x,
-                            &mut window_size.y,
-                        );
+                    let texture: *mut sdl::SDL_Texture =
+                        sdl::SDL_CreateTextureFromSurface(renderer, surface);
+                    if texture.is_null() {
+                        panic!("the texture for the text is not created");
                     }
-                }
 
-                set_color(renderer, Color::from_rgb(0xffffff))?;
-                if !sdl::SDL_RenderClear(renderer) {
-                    return Err(SdlError::RenderClearFailed);
-                }
+                    let destination_rectlangle = sdl::SDL_FRect {
+                        x: 200.0,
+                        y: 200.0,
+                        w: (*surface).w as f32,
+                        h: (*surface).h as f32,
+                    };
 
-                let col_ratio: f32 = window_size.x as f32 / 7.;
-                let arguments = calendar::render::Arguments {
-                    column_width: col_ratio,
-                    column_height: window_size.y as f32,
-                };
-
-                let render_res: Result<_, _> =
-                    calendar::render::into_rectangles(&agenda, &arguments);
-                match render_res {
-                    Ok(rectangles) => {
-                        calendar::render::render_rectangles(rectangles.iter(), &rectangle_render)?;
+                    let text =
+                        sdl_ttf::TTF_CreateText(engine, font.as_mut_ptr(), c"Laladrik".as_ptr(), 8);
+                    if text.is_null() {
+                        panic!("text is not created");
                     }
-                    Err(err) => panic!("fail to turn the events into the rectangles {:?}", err),
-                }
 
-                render_grid(renderer, window_size)?;
-                if !sdl::SDL_RenderPresent(renderer) {
-                    return Err(SdlError::RenderIsNotPresent);
-                }
-            }
+                    let (mut r, mut g, mut b, mut a) = (0, 0, 0, 0);
+                    if !sdl_ttf::TTF_GetTextColor(text, &mut r, &mut g, &mut b, &mut a) {
+                        panic!("can't get text color");
+                    } else {
+                        println!("text color {} {} {} {}", r, g, b, a);
+                    }
 
-            let _ = root_window;
-            Ok(())
-        });
+                    let from: String = get_week_start()
+                        .map(format_date)
+                        .map_err(SdlError::TimeError)?;
+                    let mut arguments = calendar::obtain::khal::week_arguments(&from);
+                    let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
+                    arguments.backend_bin_path = match bin {
+                        Ok(ref v) => v.as_ref(),
+                        Err(_) => "khal",
+                    };
+
+                    let res: Result<calendar::obtain::Agenda, _> = calendar::obtain::obtain(
+                        &calendar::obtain::AgendaSourceStd,
+                        &calendar::obtain::NanoSerde,
+                        &arguments,
+                    );
+
+                    let agenda = match res {
+                        Ok(agenda) => agenda,
+                        Err(err) => panic!("can't get the agenda: {:?}", err),
+                    };
+
+                    let mut event: sdl::SDL_Event = std::mem::zeroed();
+                    'outer_loop: loop {
+                        while sdl::SDL_PollEvent(&mut event as _) {
+                            if event.type_ == sdl::SDL_EVENT_QUIT {
+                                break 'outer_loop;
+                            }
+
+                            if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
+                                _ = sdl::SDL_GetWindowSize(
+                                    root_window,
+                                    &mut window_size.x,
+                                    &mut window_size.y,
+                                );
+                            }
+                        }
+
+                        set_color(renderer, Color::from_rgb(0x000000))?;
+                        if !sdl::SDL_RenderClear(renderer) {
+                            return Err(SdlError::RenderClearFailed);
+                        }
+
+                        // let col_ratio: f32 = window_size.x as f32 / 7.;
+                        // let arguments = calendar::render::Arguments {
+                        //     column_width: col_ratio,
+                        //     column_height: window_size.y as f32,
+                        // };
+
+                        // let render_res: Result<_, _> =
+                        //     calendar::render::into_rectangles(&agenda, &arguments);
+                        // match render_res {
+                        //     Ok(rectangles) => {
+                        //         calendar::render::render_rectangles(rectangles.iter(), &rectangle_render)?;
+                        //     }
+                        //     Err(err) => panic!("fail to turn the events into the rectangles {:?}", err),
+                        // }
+
+                        //render_grid(renderer, window_size)?;
+                        set_color(renderer, Color::from_rgb(0x111111))?;
+                        if !sdl_ttf::TTF_DrawRendererText(text, 100., 100.) {
+                            panic!("text is not renderered");
+                        }
+
+                        let rect_ptr: *const sdl::SDL_FRect = &destination_rectlangle;
+                        if !sdl::SDL_RenderTexture(
+                            renderer,
+                            texture,
+                            std::ptr::null(),
+                            rect_ptr.cast(),
+                        ) {
+                            panic!("fail to render the texture for the text");
+                        }
+
+                        if !sdl::SDL_RenderPresent(renderer) {
+                            return Err(SdlError::RenderIsNotPresent);
+                        }
+                    }
+
+                    let _ = root_window;
+                    Ok(())
+                })
+            },
+        );
 
         if let Err(err) = ret {
             let err_text = std::ffi::CStr::from_ptr(sdl::SDL_GetError());
@@ -198,7 +213,8 @@ fn unsafe_main() {
                 SdlError::TimeError(_) => {
                     println!("failed to process date and time");
                 }
-                SdlError::RectangleIsNotDrawn => todo!(),
+                SdlError::RectangleIsNotDrawn => todo!("handle rectangle render errors"),
+                SdlError::TtfError(_) => todo!("handle SDL TTF error"),
             }
         }
     }
@@ -253,34 +269,6 @@ impl calendar::render::RenderRectangles for RectangleRender {
             }
         }
         Ok(())
-    }
-}
-
-struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-}
-
-impl Color {
-    const fn from_rgb(value: u32) -> Self {
-        Self {
-            r: (value >> 16) as u8,
-            g: (value >> 8) as u8,
-            b: (value) as u8,
-            a: 0xff,
-        }
-    }
-}
-
-fn set_color(renderer: *mut sdl::SDL_Renderer, color: Color) -> SdlResult<()> {
-    unsafe {
-        if !sdl::SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a) {
-            Err(SdlError::RenderDrawColorIsNotSet)
-        } else {
-            Ok(())
-        }
     }
 }
 
