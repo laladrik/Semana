@@ -24,16 +24,16 @@ pub struct Arguments {
     pub column_width: f32,
     pub column_height: f32,
     pub offset_x: f32,
-    pub offret_y: f32,
+    pub offset_y: f32,
 }
 
 fn create_point<'ev>(
     first_date: &'_ Date,
     event_date: &'ev str,
     event_time: &'ev str,
-    column_width: f32,
-    height: f32,
+    arguments: &Arguments,
 ) -> Result<Point, Error<'ev>> {
+    let Arguments { column_width, column_height, offset_x, offset_y } = arguments;
     let start_date: Date =
         Date::from_str(event_date).map_err(|_| Error::InvalidDate(event_date))?;
     let start_time: Time =
@@ -45,8 +45,8 @@ fn create_point<'ev>(
         "the first date in the calendar must be earlier than the date of the event",
     );
 
-    let x = days as f32 * column_width;
-    let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * height;
+    let x = days as f32 * column_width + offset_x;
+    let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height + offset_y;
     Ok(Point { x, y })
 }
 
@@ -81,16 +81,14 @@ pub fn into_rectangles<'ev>(
             &first_date,
             &event.start_date,
             &event.start_time,
-            arguments.column_width,
-            arguments.column_height,
+            arguments,
         )?;
         let size: Size = {
             let end_point: Point = create_point(
                 &first_date,
                 &event.end_date,
                 &event.end_time,
-                arguments.column_width,
-                arguments.column_height,
+                arguments,
             )?;
 
             Size {
@@ -141,6 +139,8 @@ mod tests {
         let arguments = Arguments {
             column_width: 125.0,
             column_height: 600.0,
+            offset_x: todo!(),
+            offset_y: todo!(),
         };
 
         let ret: Result<Rectangles, Error> = into_rectangles(&events, &arguments);
