@@ -23,6 +23,8 @@ pub struct Rectange<'s> {
 pub struct Arguments {
     pub column_width: f32,
     pub column_height: f32,
+    pub offset_x: f32,
+    pub offret_y: f32,
 }
 
 fn create_point<'ev>(

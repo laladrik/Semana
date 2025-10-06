@@ -61,6 +61,7 @@ fn unsafe_main() {
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
+                let grid_offset = sdl::SDL_FPoint { x: 100., y: 100. };
                 sdl_ttf_init(renderer, move |engine: *mut sdl_ttf::TTF_TextEngine| {
                     let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
                     let mut font = Font::open(font_path, 22.0).map_err(Error::from)?;
@@ -148,6 +149,8 @@ fn unsafe_main() {
                         let arguments = calendar::render::Arguments {
                             column_width: col_ratio,
                             column_height: window_size.y as f32,
+                            offset_x: 0.,
+                            offret_y: 0.,
                         };
 
                         let render_res: Result<_, _> =
@@ -164,7 +167,11 @@ fn unsafe_main() {
                             }
                         }
 
-                        render_grid(renderer, window_size)?;
+                        let grid_size = sdl::SDL_FPoint {
+                            x: window_size.x as f32 - grid_offset.x,
+                            y: window_size.y as f32 - grid_offset.y,
+                        };
+                        render_grid(renderer, grid_size, grid_offset)?;
                         set_color(renderer, Color::from_rgb(0x111111))?;
                         if !sdl_ttf::TTF_DrawRendererText(text.as_mut_ptr(), 100., 100.) {
                             panic!("text is not renderered");
@@ -222,19 +229,29 @@ fn unsafe_main() {
     }
 }
 
-fn render_grid(renderer: *mut sdl::SDL_Renderer, window_size: sdl::SDL_Point) -> Result<(), Error> {
+fn render_grid(
+    renderer: *mut sdl::SDL_Renderer,
+    size: sdl::SDL_FPoint,
+    offset: sdl::SDL_FPoint,
+) -> Result<(), Error> {
     unsafe {
         set_color(renderer, Color::from_rgb(0x333333))?;
-        let row_ratio: f32 = window_size.y as f32 / 24.0;
+        let row_ratio: f32 = size.y / 24.0;
         for i in 0..24 {
-            let ordinate = i as f32 * row_ratio;
-            let _ = sdl::SDL_RenderLine(renderer, 0., ordinate, window_size.x as f32, ordinate);
+            let ordinate = i as f32 * row_ratio + offset.x;
+            let _ = sdl::SDL_RenderLine(renderer, offset.x, ordinate, size.x + offset.x, ordinate);
         }
 
-        let col_ratio: f32 = window_size.x as f32 / 7.;
+        let col_ratio: f32 = size.x / 7.;
         for i in 0..7 {
-            let absciss: f32 = i as f32 * col_ratio;
-            _ = sdl::SDL_RenderLine(renderer, absciss, 0., absciss, window_size.y as f32);
+            let absciss: f32 = i as f32 * col_ratio + offset.y;
+            _ = sdl::SDL_RenderLine(
+                renderer,
+                absciss,
+                offset.y,
+                absciss,
+                size.y + offset.y,
+            );
         }
     }
     Ok(())
