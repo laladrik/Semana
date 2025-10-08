@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 pub enum Error {
@@ -9,7 +11,7 @@ pub enum Error {
     RenderClearFailed,
     TimeError(TimeError),
     RectangleIsNotDrawn,
-    TtfError(SdlTtfError),
+    TtfError(TtfError),
 }
 
 pub enum TimeError {
@@ -17,16 +19,17 @@ pub enum TimeError {
     FailConvertingNowToDate,
 }
 
-impl From<SdlTtfError> for Error {
-    fn from(value: SdlTtfError) -> Self {
+impl From<TtfError> for Error {
+    fn from(value: TtfError) -> Self {
         Error::TtfError(value)
     }
 }
 
-pub enum SdlTtfError {
+pub enum TtfError {
     FontIsNotOpened,
     TextIsNotCreated,
     EngineIsNotCreated,
+    TextIsNotDrown,
 }
 
 pub type SdlResult<R> = Result<R, Error>;
@@ -36,11 +39,11 @@ pub struct Font {
 }
 
 impl Font {
-    pub fn open(path: &std::ffi::CStr, size: f32) -> Result<Self, SdlTtfError> {
+    pub fn open(path: &std::ffi::CStr, size: f32) -> Result<Self, TtfError> {
         let ptr = unsafe { sdl_ttf::TTF_OpenFont(path.as_ptr(), size) };
 
         if ptr.is_null() {
-            Err(SdlTtfError::FontIsNotOpened)
+            Err(TtfError::FontIsNotOpened)
         } else {
             Ok(Self { ptr })
         }
@@ -70,7 +73,7 @@ pub unsafe fn sdl_ttf_init<R>(
         let engine: *mut sdl_ttf::TTF_TextEngine =
             sdl_ttf::TTF_CreateRendererTextEngine(renderer.cast());
         if engine.is_null() {
-            return Err(Error::from(SdlTtfError::EngineIsNotCreated));
+            return Err(Error::from(TtfError::EngineIsNotCreated));
         }
 
         let r = body(engine);
@@ -153,7 +156,7 @@ pub fn set_color(renderer: *mut sdl::SDL_Renderer, color: Color) -> SdlResult<()
 }
 
 pub struct Text {
-    ptr: *mut sdl_ttf::TTF_Text,
+    ptr: Cell<*mut sdl_ttf::TTF_Text>,
 }
 
 impl Text {
@@ -161,7 +164,7 @@ impl Text {
         engine: *mut sdl_ttf::TTF_TextEngine,
         font: &mut Font,
         text: &std::ffi::CStr,
-    ) -> Result<Self, SdlTtfError> {
+    ) -> Result<Self, TtfError> {
         unsafe {
             let ptr = sdl_ttf::TTF_CreateText(
                 engine,
@@ -170,22 +173,22 @@ impl Text {
                 text.count_bytes(),
             );
             if ptr.is_null() {
-                Err(SdlTtfError::TextIsNotCreated)
+                Err(TtfError::TextIsNotCreated)
             } else {
-                Ok(Self { ptr })
+                Ok(Self { ptr: Cell::new(ptr) })
             }
         }
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut sdl_ttf::TTF_Text {
-        self.ptr
+    pub fn ptr(&self) -> Cell<*mut sdl_ttf::TTF_Text> {
+        self.ptr.clone()
     }
 }
 
 impl Drop for Text {
     fn drop(&mut self) {
         unsafe {
-            sdl_ttf::TTF_DestroyText(self.ptr);
+            sdl_ttf::TTF_DestroyText(self.ptr.get());
         }
     }
 }

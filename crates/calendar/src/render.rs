@@ -11,13 +11,9 @@ pub struct Point {
     pub y: f32,
 }
 
-pub type Size = Point;
-
-#[cfg_attr(test, derive(PartialEq))]
-pub struct Rectange<'s> {
-    pub at: Point,
-    pub size: Size,
-    pub text: &'s str,
+pub trait TextCreate {
+    type Result;
+    fn text_create(&self, s: &str) -> Self::Result;
 }
 
 pub struct Arguments {
@@ -27,13 +23,71 @@ pub struct Arguments {
     pub offset_y: f32,
 }
 
+pub fn create_weekday_texts<TF, R>(text_factory: &TF) -> [R; 7]
+where
+    TF: TextCreate<Result = R>,
+{
+    let weekdays = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    let ret: [R; 7] = core::array::from_fn(|i| text_factory.text_create(weekdays[i]));
+    ret
+}
+
+pub trait TextRender {
+    type Text;
+    type Result;
+    fn text_render(&self, text: &Self::Text, x: f32, y: f32) -> Self::Result;
+}
+
+pub fn render_weekdays<'text, TR, T: 'text, R>(
+    tr: &TR,
+    texts: impl Iterator<Item = &'text T>,
+    arguments: &Arguments,
+) -> impl Iterator<Item = R>
+where
+    TR: TextRender<Result = R, Text = T>,
+{
+    let Arguments {
+        column_width,
+        column_height: _column_height,
+        offset_x,
+        offset_y,
+    } = arguments;
+
+    texts.enumerate().map(move |(i, text)| {
+        let x = *offset_x + (i as f32) * column_width;
+        tr.text_render(text, x, *offset_y)
+    })
+}
+
+pub type Size = Point;
+
+#[cfg_attr(test, derive(PartialEq))]
+pub struct Rectange<'s> {
+    pub at: Point,
+    pub size: Size,
+    pub text: &'s str,
+}
+
 fn create_point<'ev>(
     first_date: &'_ Date,
     event_date: &'ev str,
     event_time: &'ev str,
     arguments: &Arguments,
 ) -> Result<Point, Error<'ev>> {
-    let Arguments { column_width, column_height, offset_x, offset_y } = arguments;
+    let Arguments {
+        column_width,
+        column_height,
+        offset_x,
+        offset_y,
+    } = arguments;
     let start_date: Date =
         Date::from_str(event_date).map_err(|_| Error::InvalidDate(event_date))?;
     let start_time: Time =
@@ -46,7 +100,8 @@ fn create_point<'ev>(
     );
 
     let x = days as f32 * column_width + offset_x;
-    let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height + offset_y;
+    let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height
+        + offset_y;
     Ok(Point { x, y })
 }
 
@@ -58,7 +113,7 @@ pub enum Error<'s> {
 
 pub type Rectangles<'ev> = Vec<Rectange<'ev>>;
 
-pub fn into_rectangles<'ev>(
+pub fn event_rectangles<'ev>(
     events: &'ev [AgendaItem],
     arguments: &Arguments,
 ) -> Result<Rectangles<'ev>, Error<'ev>> {
@@ -77,19 +132,11 @@ pub fn into_rectangles<'ev>(
     };
 
     for event in events {
-        let start_point: Point = create_point(
-            &first_date,
-            &event.start_date,
-            &event.start_time,
-            arguments,
-        )?;
+        let start_point: Point =
+            create_point(&first_date, &event.start_date, &event.start_time, arguments)?;
         let size: Size = {
-            let end_point: Point = create_point(
-                &first_date,
-                &event.end_date,
-                &event.end_time,
-                arguments,
-            )?;
+            let end_point: Point =
+                create_point(&first_date, &event.end_date, &event.end_time, arguments)?;
 
             Size {
                 x: end_point.x - start_point.x + arguments.column_width,
@@ -124,7 +171,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::into_rectangles;
+    use crate::render::event_rectangles;
 
     #[test]
     fn top_left_event() {
@@ -139,11 +186,11 @@ mod tests {
         let arguments = Arguments {
             column_width: 125.0,
             column_height: 600.0,
-            offset_x: todo!(),
-            offset_y: todo!(),
+            offset_x: 0.,
+            offset_y: 0.,
         };
 
-        let ret: Result<Rectangles, Error> = into_rectangles(&events, &arguments);
+        let ret: Result<Rectangles, Error> = event_rectangles(&events, &arguments);
         const ONE_HOUR: f32 = 600.0 / 24.0;
         match ret {
             Ok(x) => assert!(

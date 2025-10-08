@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 mod sdlext;
@@ -54,6 +56,38 @@ fn get_week_start() -> Result<(u16, u8, u8), TimeError> {
     }
 }
 
+struct WeekDayTextCreate {
+    engine: *mut sdl_ttf::TTF_TextEngine,
+    font: RefCell<sdlext::Font>,
+}
+
+impl calendar::render::TextCreate for WeekDayTextCreate {
+    type Result = Result<sdlext::Text, sdlext::TtfError>;
+
+    fn text_create(&self, s: &str) -> Self::Result {
+        let cstring = std::ffi::CString::new(s).unwrap();
+        sdlext::Text::try_new(self.engine, &mut self.font.borrow_mut(), cstring.as_c_str())
+    }
+}
+
+struct WeekDayRenderText;
+
+impl calendar::render::TextRender for WeekDayRenderText {
+    type Text = sdlext::Text;
+
+    type Result = Result<(), sdlext::TtfError>;
+
+    fn text_render(&self, text: &Self::Text, x: f32, y: f32) -> Self::Result {
+        unsafe {
+            if !sdl_ttf::TTF_DrawRendererText(text.ptr().get(), x, y) {
+                Err(sdlext::TtfError::TextIsNotDrown)
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -64,44 +98,17 @@ fn unsafe_main() {
                 let grid_offset = sdl::SDL_FPoint { x: 100., y: 50. };
                 sdl_ttf_init(renderer, move |engine: *mut sdl_ttf::TTF_TextEngine| {
                     let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
-                    let mut font = Font::open(font_path, 22.0).map_err(Error::from)?;
-                    let monday = c"Monday";
-                    let color: sdl_ttf::SDL_Color = Color::from_rgb(0xff0000).into();
-                    let surface: *mut sdl::SDL_Surface = sdl_ttf::TTF_RenderText_Solid_Wrapped(
-                        font.as_mut_ptr(),
-                        monday.as_ptr(),
-                        monday.count_bytes(),
-                        color,
-                        0,
-                    )
-                    .cast();
-                    if surface.is_null() {
-                        panic!("the surface for the text is not created");
-                    }
+                    let font: RefCell<Font> = Font::open(font_path, 22.0)
+                        .map_err(Error::from)
+                        .map(RefCell::new)?;
+
+                    let week_day_text_create = WeekDayTextCreate { engine, font };
+                    let texts: [Result<sdlext::Text, _>; 7] =
+                        calendar::render::create_weekday_texts(&week_day_text_create);
+                    let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
+                    let texts: Vec<sdlext::Text> = res?;
 
                     let rectangle_render = RectangleRender { renderer };
-                    let texture: *mut sdl::SDL_Texture =
-                        sdl::SDL_CreateTextureFromSurface(renderer, surface);
-                    if texture.is_null() {
-                        panic!("the texture for the text is not created");
-                    }
-
-                    let destination_rectlangle = sdl::SDL_FRect {
-                        x: 200.0,
-                        y: 200.0,
-                        w: (*surface).w as f32,
-                        h: (*surface).h as f32,
-                    };
-
-                    let mut text = sdlext::Text::try_new(engine, &mut font, c"Laladrik")
-                        .map_err(sdlext::Error::from)?;
-                    let (mut r, mut g, mut b, mut a) = (0, 0, 0, 0);
-                    if !sdl_ttf::TTF_GetTextColor(text.as_mut_ptr(), &mut r, &mut g, &mut b, &mut a)
-                    {
-                        panic!("can't get text color");
-                    } else {
-                        println!("text color {} {} {} {}", r, g, b, a);
-                    }
 
                     let from: String = get_week_start()
                         .map(format_date)
@@ -159,7 +166,7 @@ fn unsafe_main() {
                         };
 
                         let render_res: Result<_, _> =
-                            calendar::render::into_rectangles(&agenda, &arguments);
+                            calendar::render::event_rectangles(&agenda, &arguments);
                         match render_res {
                             Ok(rectangles) => {
                                 calendar::render::render_rectangles(
@@ -174,19 +181,19 @@ fn unsafe_main() {
 
                         render_grid(renderer, grid_size, grid_offset)?;
                         set_color(renderer, Color::from_rgb(0x111111))?;
-                        if !sdl_ttf::TTF_DrawRendererText(text.as_mut_ptr(), 100., 100.) {
-                            panic!("text is not renderered");
-                        }
+                        let render_weekdays_arguments = calendar::render::Arguments {
+                            column_width: col_ratio,
+                            column_height: 0.,
+                            offset_x: grid_offset.x,
+                            offset_y: 10.0,
+                        };
 
-                        let rect_ptr: *const sdl::SDL_FRect = &destination_rectlangle;
-                        if !sdl::SDL_RenderTexture(
-                            renderer,
-                            texture,
-                            std::ptr::null(),
-                            rect_ptr.cast(),
-                        ) {
-                            panic!("fail to render the texture for the text");
-                        }
+                        calendar::render::render_weekdays(
+                            &WeekDayRenderText,
+                            texts.iter(),
+                            &render_weekdays_arguments,
+                        )
+                        .collect::<Result<(), sdlext::TtfError>>()?;
 
                         if !sdl::SDL_RenderPresent(renderer) {
                             return Err(Error::RenderIsNotPresent);
