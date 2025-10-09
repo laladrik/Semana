@@ -23,6 +23,17 @@ pub struct Arguments {
     pub offset_y: f32,
 }
 
+pub fn create_hours_texts<TF, R>(text_factory: &TF) -> [R; 24]
+where
+    TF: TextCreate<Result = R>,
+{
+    let hours: [R; 24] = core::array::from_fn(|i| {
+        let s = format!("{:02}:00", i);
+        text_factory.text_create(s.as_str())
+    });
+    hours
+}
+
 pub fn create_weekday_texts<TF, R>(text_factory: &TF) -> [R; 7]
 where
     TF: TextCreate<Result = R>,
@@ -65,6 +76,53 @@ where
         let x = *offset_x + (i as f32) * column_width;
         tr.text_render(text, x, *offset_y)
     })
+}
+
+pub struct RenderHoursArgs {
+    pub row_height: f32,
+    pub offset_x: f32,
+    pub offset_y: f32,
+}
+
+pub fn render_hours<'text, TR, T: 'text, R>(
+    tr: &TR,
+    texts: impl Iterator<Item = &'text T>,
+    arguments: &RenderHoursArgs,
+) -> impl Iterator<Item = R>
+where
+    TR: TextRender<Result = R, Text = T>,
+{
+    let RenderHoursArgs {
+        row_height,
+        offset_x,
+        offset_y,
+    } = arguments;
+    texts.enumerate().map(move |(i, text)| {
+        let y = *offset_y + (i as f32) * row_height;
+        tr.text_render(text, *offset_x, y)
+    })
+}
+
+pub struct RenderWeekCaptionsArgs {
+    pub hours_arguments: RenderHoursArgs,
+    pub days_arguments: Arguments,
+}
+
+pub fn render_week_captions<'text, TR, TI, R, T: 'text>(
+    tr: &TR,
+    days: TI,
+    hours: TI,
+    args: &RenderWeekCaptionsArgs,
+) -> impl Iterator<Item = R>
+where
+    TR: TextRender<Result = R, Text = T>,
+    TI: Iterator<Item = &'text T>,
+{
+    let RenderWeekCaptionsArgs {
+        hours_arguments,
+        days_arguments,
+    } = args;
+    render_weekdays(tr, days, days_arguments).chain(render_hours(tr, hours, hours_arguments))
 }
 
 pub type Size = Point;

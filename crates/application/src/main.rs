@@ -56,12 +56,12 @@ fn get_week_start() -> Result<(u16, u8, u8), TimeError> {
     }
 }
 
-struct WeekDayTextCreate {
+struct SdlTextCreate {
     engine: *mut sdl_ttf::TTF_TextEngine,
     font: RefCell<sdlext::Font>,
 }
 
-impl calendar::render::TextCreate for WeekDayTextCreate {
+impl calendar::render::TextCreate for SdlTextCreate {
     type Result = Result<sdlext::Text, sdlext::TtfError>;
 
     fn text_create(&self, s: &str) -> Self::Result {
@@ -70,9 +70,9 @@ impl calendar::render::TextCreate for WeekDayTextCreate {
     }
 }
 
-struct WeekDayRenderText;
+struct SdlTextRender;
 
-impl calendar::render::TextRender for WeekDayRenderText {
+impl calendar::render::TextRender for SdlTextRender {
     type Text = sdlext::Text;
 
     type Result = Result<(), sdlext::TtfError>;
@@ -89,6 +89,7 @@ impl calendar::render::TextRender for WeekDayRenderText {
 }
 
 fn unsafe_main() {
+    let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
@@ -97,16 +98,24 @@ fn unsafe_main() {
 
                 let grid_offset = sdl::SDL_FPoint { x: 100., y: 50. };
                 sdl_ttf_init(renderer, move |engine: *mut sdl_ttf::TTF_TextEngine| {
-                    let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
                     let font: RefCell<Font> = Font::open(font_path, 22.0)
                         .map_err(Error::from)
                         .map(RefCell::new)?;
 
-                    let week_day_text_create = WeekDayTextCreate { engine, font };
-                    let texts: [Result<sdlext::Text, _>; 7] =
-                        calendar::render::create_weekday_texts(&week_day_text_create);
-                    let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
-                    let texts: Vec<sdlext::Text> = res?;
+                    let text_factory = SdlTextCreate { engine, font };
+                    let hours_texts: Vec<sdlext::Text> = {
+                        let texts: [Result<sdlext::Text, _>; 24] =
+                            calendar::render::create_hours_texts(&text_factory);
+                        let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
+                        res?
+                    };
+
+                    let texts: Vec<sdlext::Text> = {
+                        let texts: [Result<sdlext::Text, _>; 7] =
+                            calendar::render::create_weekday_texts(&text_factory);
+                        let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
+                        res?
+                    };
 
                     let rectangle_render = RectangleRender { renderer };
 
@@ -158,6 +167,7 @@ fn unsafe_main() {
                         }
 
                         let col_ratio: f32 = grid_size.x / 7.;
+                        let row_ratio: f32 = grid_size.y / 24.;
                         let arguments = calendar::render::Arguments {
                             column_width: col_ratio,
                             column_height: grid_size.y,
@@ -181,17 +191,25 @@ fn unsafe_main() {
 
                         render_grid(renderer, grid_size, grid_offset)?;
                         set_color(renderer, Color::from_rgb(0x111111))?;
-                        let render_weekdays_arguments = calendar::render::Arguments {
-                            column_width: col_ratio,
-                            column_height: 0.,
-                            offset_x: grid_offset.x,
-                            offset_y: 10.0,
+                        let render_week_captions_args = calendar::render::RenderWeekCaptionsArgs {
+                            hours_arguments: calendar::render::RenderHoursArgs {
+                                row_height: row_ratio,
+                                offset_x: 10.,
+                                offset_y: grid_offset.y + 5.,
+                            },
+                            days_arguments: calendar::render::Arguments {
+                                column_width: col_ratio,
+                                column_height: 0.,
+                                offset_x: grid_offset.x,
+                                offset_y: 10.0,
+                            },
                         };
 
-                        calendar::render::render_weekdays(
-                            &WeekDayRenderText,
+                        calendar::render::render_week_captions(
+                            &SdlTextRender,
                             texts.iter(),
-                            &render_weekdays_arguments,
+                            hours_texts.iter(),
+                            &render_week_captions_args,
                         )
                         .collect::<Result<(), sdlext::TtfError>>()?;
 
