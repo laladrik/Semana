@@ -18,11 +18,51 @@ pub struct Item {
     pub end_time: String,
 }
 
+fn increment_date(date: &Date) -> Date {
+    let Date { year, month, day } = date;
+
+    let month_day_count = Date::month_day_count(*year, *month);
+    if day + 1 > month_day_count {
+        let day = 1;
+        let (month, year) = match month + 1 {
+            13 => (1u8, year + 1),
+            m => (m, *year),
+        };
+        Date { day, month, year }
+    } else {
+        Date {
+            day: day + 1,
+            month: *month,
+            year: *year,
+        }
+    }
+}
+
+pub struct DateStream {
+    last_date: Date,
+}
+
+impl DateStream {
+    pub fn new(date: Date) -> Self {
+        Self { last_date: date }
+    }
+}
+
+impl Iterator for DateStream {
+    type Item = Date;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let new_date = increment_date(&self.last_date);
+        let ret = std::mem::replace(&mut self.last_date, new_date);
+        Some(ret)
+    }
+}
+
 #[derive(Debug)]
-struct Date {
-    year: u16,
-    month: u8,
-    day: u8,
+pub struct Date {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
 }
 
 pub enum ParseDateError {
@@ -44,12 +84,8 @@ impl FromStr for Date {
 }
 
 impl Date {
-    fn try_new(year: u16, month: u8, day: u8) -> Result<Date, InvalidInput> {
-        if !(month > 0 && month <= 12) {
-            return Err(InvalidInput);
-        }
-
-        let day_max = match month {
+    fn month_day_count(year: u16, month: u8) -> u8 {
+        match month {
             2 => {
                 if Self::is_leap_year(year) {
                     29
@@ -59,8 +95,15 @@ impl Date {
             }
             4 | 6 | 9 | 11 => 30,
             _ => 31,
-        };
+        }
+    }
 
+    fn try_new(year: u16, month: u8, day: u8) -> Result<Date, InvalidInput> {
+        if !(month > 0 && month <= 12) {
+            return Err(InvalidInput);
+        }
+
+        let day_max = Date::month_day_count(year, month);
         if !(day > 0 && day < day_max) {
             return Err(InvalidInput);
         }
@@ -126,7 +169,7 @@ impl FromStr for Time {
 
     // format 23:59
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let hour = u8::from_str(&s[0..2]).map_err( ParseTimeError::ParseIntError)?;
+        let hour = u8::from_str(&s[0..2]).map_err(ParseTimeError::ParseIntError)?;
         let minute = u8::from_str(&s[3..5]).map_err(ParseTimeError::ParseIntError)?;
         Time::try_new(hour, minute).map_err(ParseTimeError::InvalidInput)
     }
@@ -144,5 +187,4 @@ impl Time {
     fn minutes_from_midnight(&self) -> u16 {
         (self.hour as u16 * MINUTES_PER_HOUR as u16) + self.minute as u16
     }
-
 }
