@@ -11,49 +11,8 @@ fn format_date(date: (u16, u8, u8)) -> String {
     format!("{}-{:02}-{:02}", date.0, date.1, date.2)
 }
 
-fn get_week_start() -> Result<(u16, u8, u8), TimeError> {
-    unsafe {
-        let mut now: sdl::SDL_Time = 0;
-        if !sdl::SDL_GetCurrentTime(&mut now as *mut _) {
-            return Err(TimeError::FailGettingNow);
-        }
-
-        let mut today: sdl::SDL_DateTime = std::mem::zeroed();
-        let local_time = true;
-        if !sdl::SDL_TimeToDateTime(now, &mut today as *mut _, local_time) {
-            return Err(TimeError::FailConvertingNowToDate);
-        }
-
-        //let sunday: std::ffi::c_int = 0;
-        // from 0 to 6
-        let current_weekday: std::ffi::c_int =
-            sdl::SDL_GetDayOfWeek(today.year, today.month, today.day);
-        //let mut week_offset: std::ffi::c_int = current_weekday - sunday;
-
-        // from 1 to 7
-        let natural_weekday: i32 = current_weekday + 7 * ((7 - current_weekday) / 7);
-        // TODO: implement for the case Sunday is the first day.
-        // monday => 0
-        // ...
-        // sunday => -6
-        let week_offset_days: i32 = -(natural_weekday - 1);
-        const NANOSECONDS_PER_DAY: i64 = (sdl::SDL_NS_PER_SECOND as i64) * 60 * 60 * 24;
-        let offset_ns: i64 = (week_offset_days as i64) * NANOSECONDS_PER_DAY;
-        let mut first_day_of_week: sdl::SDL_DateTime = std::mem::zeroed();
-        if !sdl::SDL_TimeToDateTime(
-            now - offset_ns,
-            &mut first_day_of_week as *mut _,
-            local_time,
-        ) {
-            return Err(TimeError::FailConvertingNowToDate);
-        }
-
-        Ok((
-            first_day_of_week.year as u16,
-            first_day_of_week.month as u8,
-            first_day_of_week.day as u8,
-        ))
-    }
+fn get_current_week_start() -> Result<(u16, u8, u8), TimeError> {
+    sdlext::get_current_time().and_then(date::get_week_start)
 }
 
 struct SdlTextCreate {
@@ -88,6 +47,61 @@ impl calendar::render::TextRender for SdlTextRender {
     }
 }
 
+mod date {
+    use super::{TimeError, sdl, sdlext};
+
+    pub fn get_today() -> Result<calendar::Date, TimeError> {
+        let now = sdlext::get_current_time()?;
+        let today = sdlext::time_to_date_time(now, true)?;
+        Ok(calendar::Date {
+            day: today.day as u8,
+            month: today.month as u8,
+            year: today.year as u16,
+        })
+    }
+
+    pub fn get_week_start(now: sdl::SDL_Time) -> Result<(u16, u8, u8), TimeError> {
+        let local_time = true;
+        unsafe {
+            let today = sdlext::time_to_date_time(now, local_time)?;
+            //let sunday: std::ffi::c_int = 0;
+            // from 0 to 6
+            let current_weekday: std::ffi::c_int =
+                sdl::SDL_GetDayOfWeek(today.year, today.month, today.day);
+            //let mut week_offset: std::ffi::c_int = current_weekday - sunday;
+
+            let natural_weekday: i32 = match current_weekday {
+                0 => 7,
+                d @ 1..7 => d,
+                _ => panic!("SDL has returned an invalid week day"),
+            };
+            // from 1 to 7
+            //let natural_weekday: i32 = current_weekday + 7 * ((7 - current_weekday) / 7);
+            // TODO: implement for the case Sunday is the first day.
+            // monday => 0
+            // ...
+            // sunday => -6
+            let week_offset_days: i32 = -(natural_weekday - 1);
+            const NANOSECONDS_PER_DAY: i64 = (sdl::SDL_NS_PER_SECOND as i64) * 60 * 60 * 24;
+            let offset_ns: i64 = (week_offset_days as i64) * NANOSECONDS_PER_DAY;
+            let mut first_day_of_week: sdl::SDL_DateTime = std::mem::zeroed();
+            if !sdl::SDL_TimeToDateTime(
+                now + offset_ns,
+                &mut first_day_of_week as *mut _,
+                local_time,
+            ) {
+                return Err(TimeError::FailConvertingNowToDate);
+            }
+
+            Ok((
+                first_day_of_week.year as u16,
+                first_day_of_week.month as u8,
+                first_day_of_week.day as u8,
+            ))
+        }
+    }
+}
+
 fn unsafe_main() {
     let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
     unsafe {
@@ -96,7 +110,7 @@ fn unsafe_main() {
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
-                let grid_offset = sdl::SDL_FPoint { x: 100., y: 50. };
+                let grid_offset = sdl::SDL_FPoint { x: 100., y: 70. };
                 sdl_ttf_init(renderer, move |engine: *mut sdl_ttf::TTF_TextEngine| {
                     let font: RefCell<Font> = Font::open(font_path, 22.0)
                         .map_err(Error::from)
@@ -110,16 +124,23 @@ fn unsafe_main() {
                         res?
                     };
 
-                    let texts: Vec<sdlext::Text> = {
+                    let dates_texts: Vec<sdlext::Text> = {
+                        let today: calendar::Date = date::get_today()?;
+                        let stream = calendar::DateStream::new(today).take(7);
+                        calendar::render::create_date_texts(&text_factory, stream)
+                            .collect::<Result<Vec<_>, _>>()?
+                    };
+
+                    let days_texts: Vec<sdlext::Text> = {
                         let texts: [Result<sdlext::Text, _>; 7] =
                             calendar::render::create_weekday_texts(&text_factory);
                         let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
                         res?
                     };
 
-                    let rectangle_render = RectangleRender { renderer };
+                    let event_render = RectangleRender { renderer };
 
-                    let from: String = get_week_start()
+                    let from: String = get_current_week_start()
                         .map(format_date)
                         .map_err(Error::TimeError)?;
                     let mut arguments = calendar::obtain::khal::week_arguments(&from);
@@ -138,6 +159,11 @@ fn unsafe_main() {
                     let agenda = match res {
                         Ok(agenda) => agenda,
                         Err(err) => panic!("can't get the agenda: {:?}", err),
+                    };
+                    let event_titles: Vec<sdlext::Text> = {
+                        let titles = agenda.iter().map(|x| x.title.as_str());
+                        calendar::render::create_event_title_texts(&text_factory, titles)
+                            .collect::<Result<Vec<sdlext::Text>, sdlext::TtfError>>()?
                     };
 
                     let mut event: sdl::SDL_Event = std::mem::zeroed();
@@ -179,10 +205,22 @@ fn unsafe_main() {
                             calendar::render::event_rectangles(&agenda, &arguments);
                         match render_res {
                             Ok(rectangles) => {
+                                let items = rectangles.iter().zip(event_titles.iter()).map(
+                                    |(rectangle, title)| calendar::render::EventText {
+                                        text: title,
+                                        at: calendar::render::Point {
+                                            x: rectangle.at.x + 2.0,
+                                            y: rectangle.at.y + 2.0,
+                                        },
+                                    },
+                                );
+
                                 calendar::render::render_rectangles(
                                     rectangles.iter(),
-                                    &rectangle_render,
+                                    &event_render,
                                 )?;
+                                calendar::render::event_texts(&SdlTextRender, items)
+                                    .collect::<Result<Vec<_>, _>>()?;
                             }
                             Err(err) => {
                                 panic!("fail to turn the events into the rectangles {:?}", err)
@@ -203,12 +241,19 @@ fn unsafe_main() {
                                 offset_x: grid_offset.x,
                                 offset_y: 10.0,
                             },
+                            dates_arguments: calendar::render::Arguments {
+                                column_width: col_ratio,
+                                column_height: 0.,
+                                offset_x: grid_offset.x,
+                                offset_y: 35.0,
+                            },
                         };
 
                         calendar::render::render_week_captions(
                             &SdlTextRender,
-                            texts.iter(),
+                            days_texts.iter(),
                             hours_texts.iter(),
+                            dates_texts.iter(),
                             &render_week_captions_args,
                         )
                         .collect::<Result<(), sdlext::TtfError>>()?;
@@ -311,10 +356,34 @@ impl calendar::render::RenderRectangles for RectangleRender {
 fn main() {
     unsafe_main();
 }
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
-    fn div() {
-        assert_eq!(0, 6 / 7);
+    fn test_get_start_week() {
+        // 2025-10-10 is Friday
+        let now_date = sdl::SDL_DateTime {
+            year: 2025,
+            month: 10,
+            day: 10,
+            hour: 0,
+            minute: 40,
+            second: 00,
+            nanosecond: 00,
+            day_of_week: 5,
+            utc_offset: 1,
+        };
+
+        unsafe {
+            let mut now_time: sdl::SDL_Time = std::mem::zeroed();
+            assert!(sdl::SDL_DateTimeToTime(&now_date, &mut now_time));
+            let res =
+                get_week_start(now_time).expect("getting the start of the week must not fail");
+            let (year, month, day) = res;
+            assert_eq!(2025, year);
+            assert_eq!(10, month);
+            assert_eq!(6, day);
+        }
     }
 }

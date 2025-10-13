@@ -51,6 +51,44 @@ where
     ret
 }
 
+pub fn create_date_texts<TF, R, I, D>(text_factory: &TF, dates: I) -> impl Iterator<Item = R>
+where
+    TF: TextCreate<Result = R>,
+    I: Iterator<Item = D>,
+    D: std::borrow::Borrow<super::Date>,
+{
+    dates.map(|date| {
+        let date: &super::Date = date.borrow();
+        let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
+        text_factory.text_create(&text)
+    })
+}
+
+pub fn create_event_title_texts<'text, 'tf, TF, R, I>(
+    text_factory: &'tf TF,
+    items: I,
+) -> impl Iterator<Item = R>
+where
+    TF: TextCreate<Result = R> + 'tf,
+    I: Iterator<Item = &'text str>,
+{
+    items.map(|text| text_factory.text_create(text))
+}
+
+pub struct EventText<'text, T> {
+    pub text: &'text T,
+    pub at: Point,
+}
+
+pub fn event_texts<'text, I, TR, R, T>(tr: &TR, texts: I) -> impl Iterator<Item = R>
+where
+    TR: TextRender<Result = R, Text = T>,
+    T: 'text,
+    I: Iterator<Item = EventText<'text, T>>,
+{
+    texts.map(|t| tr.text_render(t.text, t.at.x, t.at.y))
+}
+
 pub trait TextRender {
     type Text;
     type Result;
@@ -106,12 +144,14 @@ where
 pub struct RenderWeekCaptionsArgs {
     pub hours_arguments: RenderHoursArgs,
     pub days_arguments: Arguments,
+    pub dates_arguments: Arguments,
 }
 
 pub fn render_week_captions<'text, TR, TI, R, T: 'text>(
     tr: &TR,
     days: TI,
     hours: TI,
+    dates: TI,
     args: &RenderWeekCaptionsArgs,
 ) -> impl Iterator<Item = R>
 where
@@ -121,8 +161,11 @@ where
     let RenderWeekCaptionsArgs {
         hours_arguments,
         days_arguments,
+        dates_arguments,
     } = args;
-    render_weekdays(tr, days, days_arguments).chain(render_hours(tr, hours, hours_arguments))
+    render_weekdays(tr, days, days_arguments)
+        .chain(render_hours(tr, hours, hours_arguments))
+        .chain(render_weekdays(tr, dates, dates_arguments))
 }
 
 pub type Size = Point;
