@@ -14,6 +14,7 @@ pub enum Error {
     TtfError(TtfError),
 }
 
+#[derive(Debug)]
 pub enum TimeError {
     FailGettingNow,
     FailConvertingNowToDate,
@@ -22,6 +23,12 @@ pub enum TimeError {
 impl From<TtfError> for Error {
     fn from(value: TtfError) -> Self {
         Error::TtfError(value)
+    }
+}
+
+impl From<TimeError> for Error {
+    fn from(value: TimeError) -> Self {
+        Error::TimeError(value)
     }
 }
 
@@ -190,5 +197,28 @@ impl Drop for Text {
         unsafe {
             sdl_ttf::TTF_DestroyText(self.ptr.get());
         }
+    }
+}
+
+pub fn get_current_time() -> Result<sdl::SDL_Time, TimeError> {
+    unsafe {
+        let mut now: sdl::SDL_Time = 0;
+        if !sdl::SDL_GetCurrentTime(&mut now as *mut _) {
+            Err(TimeError::FailGettingNow)
+        } else {
+            Ok(now)
+        }
+    }
+}
+
+pub fn time_to_date_time(ticks: sdl::SDL_Time, local_time: bool) -> Result<sdl::SDL_DateTime, TimeError> {
+    unsafe {
+        let mut ret: sdl::SDL_DateTime = std::mem::zeroed();
+        if !sdl::SDL_TimeToDateTime(ticks, &mut ret as *mut _, local_time) {
+            Err(TimeError::FailConvertingNowToDate)
+        } else {
+            Ok(ret)
+        }
+
     }
 }
