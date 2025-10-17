@@ -1,5 +1,6 @@
 pub mod obtain;
 pub mod render;
+pub mod ui;
 
 use core::str::FromStr;
 use std::num::ParseIntError;
@@ -16,6 +17,8 @@ pub struct Item {
     pub end_date: String,
     #[nserde(rename = "end-time")]
     pub end_time: String,
+    #[nserde(rename = "all-day")]
+    pub all_day: String,
 }
 
 fn increment_date(date: &Date) -> Date {
@@ -68,6 +71,12 @@ pub struct Date {
 pub enum ParseDateError {
     InvalidInput(InvalidInput),
     ParseIntError(ParseIntError),
+    InputIsShort,
+}
+
+pub trait TextCreate {
+    type Result;
+    fn text_create(&self, s: &str) -> Self::Result;
 }
 
 pub struct InvalidInput;
@@ -76,9 +85,14 @@ impl FromStr for Date {
     type Err = ParseDateError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let year = u16::from_str(&s[0..4]).map_err(ParseDateError::ParseIntError)?;
-        let month = u8::from_str(&s[5..7]).map_err(ParseDateError::ParseIntError)?;
-        let day = u8::from_str(&s[8..10]).map_err(ParseDateError::ParseIntError)?;
+        if s.len() < 10 {
+            return Err(ParseDateError::InputIsShort);
+        }
+
+        let date_str = &s[0..10];
+        let year = u16::from_str(&date_str[0..4]).map_err(ParseDateError::ParseIntError)?;
+        let month = u8::from_str(&date_str[5..7]).map_err(ParseDateError::ParseIntError)?;
+        let day = u8::from_str(&date_str[8..10]).map_err(ParseDateError::ParseIntError)?;
         Date::try_new(year, month, day).map_err(ParseDateError::InvalidInput)
     }
 }
@@ -162,6 +176,7 @@ const MINUTES_PER_DAY: u16 = MINUTES_PER_HOUR as u16 * 24;
 pub enum ParseTimeError {
     InvalidInput(InvalidInput),
     ParseIntError(ParseIntError),
+    InputIsShort,
 }
 
 impl FromStr for Time {
@@ -169,6 +184,10 @@ impl FromStr for Time {
 
     // format 23:59
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() < 5 {
+            return Err(ParseTimeError::InputIsShort);
+        }
+
         let hour = u8::from_str(&s[0..2]).map_err(ParseTimeError::ParseIntError)?;
         let minute = u8::from_str(&s[3..5]).map_err(ParseTimeError::ParseIntError)?;
         Time::try_new(hour, minute).map_err(ParseTimeError::InvalidInput)

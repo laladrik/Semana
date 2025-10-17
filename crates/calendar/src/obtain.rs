@@ -205,6 +205,8 @@ where
         "end-date",
         "--json",
         "end-time",
+        "--json",
+        "all-day",
         arguments.from,
         &format!("{}d", arguments.duration_days),
     ];

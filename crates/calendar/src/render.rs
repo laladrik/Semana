@@ -3,6 +3,7 @@ use core::str::FromStr;
 use super::Date;
 use super::Item as AgendaItem;
 use super::MINUTES_PER_DAY;
+use super::TextCreate;
 use super::Time;
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
@@ -11,68 +12,11 @@ pub struct Point {
     pub y: f32,
 }
 
-pub trait TextCreate {
-    type Result;
-    fn text_create(&self, s: &str) -> Self::Result;
-}
-
 pub struct Arguments {
     pub column_width: f32,
     pub column_height: f32,
     pub offset_x: f32,
     pub offset_y: f32,
-}
-
-pub fn create_hours_texts<TF, R>(text_factory: &TF) -> [R; 24]
-where
-    TF: TextCreate<Result = R>,
-{
-    let hours: [R; 24] = core::array::from_fn(|i| {
-        let s = format!("{:02}:00", i);
-        text_factory.text_create(s.as_str())
-    });
-    hours
-}
-
-pub fn create_weekday_texts<TF, R>(text_factory: &TF) -> [R; 7]
-where
-    TF: TextCreate<Result = R>,
-{
-    let weekdays = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ];
-    let ret: [R; 7] = core::array::from_fn(|i| text_factory.text_create(weekdays[i]));
-    ret
-}
-
-pub fn create_date_texts<TF, R, I, D>(text_factory: &TF, dates: I) -> impl Iterator<Item = R>
-where
-    TF: TextCreate<Result = R>,
-    I: Iterator<Item = D>,
-    D: std::borrow::Borrow<super::Date>,
-{
-    dates.map(|date| {
-        let date: &super::Date = date.borrow();
-        let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
-        text_factory.text_create(&text)
-    })
-}
-
-pub fn create_event_title_texts<'text, 'tf, TF, R, I>(
-    text_factory: &'tf TF,
-    items: I,
-) -> impl Iterator<Item = R>
-where
-    TF: TextCreate<Result = R> + 'tf,
-    I: Iterator<Item = &'text str>,
-{
-    items.map(|text| text_factory.text_create(text))
 }
 
 pub struct EventText<'text, T> {
@@ -214,6 +158,14 @@ pub enum Error<'s> {
 
 pub type Rectangles<'ev> = Vec<Rectange<'ev>>;
 
+fn is_all_day(event: &AgendaItem) -> bool {
+    event.all_day == "True"
+}
+
+fn not_all_day(event: &AgendaItem) -> bool {
+    event.all_day == "False"
+}
+
 pub fn event_rectangles<'ev>(
     events: &'ev [AgendaItem],
     arguments: &Arguments,
@@ -232,7 +184,7 @@ pub fn event_rectangles<'ev>(
         None => return Ok(ret),
     };
 
-    for event in events {
+    for event in events.iter().filter(|x| not_all_day(x)) {
         let start_point: Point =
             create_point(&first_date, &event.start_date, &event.start_time, arguments)?;
         let size: Size = {

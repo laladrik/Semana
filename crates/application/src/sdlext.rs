@@ -2,6 +2,7 @@ use std::cell::Cell;
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
+#[derive(Debug)]
 pub enum Error {
     InitError,
     WindowIsNotCreated,
@@ -32,6 +33,7 @@ impl From<TimeError> for Error {
     }
 }
 
+#[derive(Debug)]
 pub enum TtfError {
     FontIsNotOpened,
     TextIsNotCreated,

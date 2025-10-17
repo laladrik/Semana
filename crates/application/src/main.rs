@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, mem::MaybeUninit};
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
@@ -20,7 +20,7 @@ struct SdlTextCreate {
     font: RefCell<sdlext::Font>,
 }
 
-impl calendar::render::TextCreate for SdlTextCreate {
+impl calendar::TextCreate for SdlTextCreate {
     type Result = Result<sdlext::Text, sdlext::TtfError>;
 
     fn text_create(&self, s: &str) -> Self::Result {
@@ -102,6 +102,35 @@ mod date {
     }
 }
 
+type MaybeText = Result<sdlext::Text, sdlext::TtfError>;
+fn validate_array<const N: usize>(
+    array: [MaybeText; N],
+) -> Result<[sdlext::Text; N], sdlext::TtfError> {
+    unsafe {
+        let mut out: MaybeUninit<[sdlext::Text; N]> = MaybeUninit::uninit();
+        let ptr: *mut sdlext::Text = out.as_mut_ptr() as *mut _;
+        for (i, elem) in array.into_iter().enumerate() {
+            // SAFETY: the index can't go beyond the array boundaries, because `array` has the same
+            // size as `out`.
+            ptr.add(i).write(elem?);
+        }
+
+        Ok(out.assume_init())
+    }
+}
+
+type Week = calendar::ui::Week<sdlext::Text>;
+
+fn validate_week(
+    dirty: calendar::ui::Week<Result<sdlext::Text, sdlext::TtfError>>,
+) -> Result<Week, sdlext::Error> {
+    Ok(Week {
+        days: validate_array(dirty.days)?,
+        hours: validate_array(dirty.hours)?,
+        dates: validate_array(dirty.dates)?,
+    })
+}
+
 fn unsafe_main() {
     let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
     unsafe {
@@ -117,27 +146,11 @@ fn unsafe_main() {
                         .map(RefCell::new)?;
 
                     let text_factory = SdlTextCreate { engine, font };
-                    let hours_texts: Vec<sdlext::Text> = {
-                        let texts: [Result<sdlext::Text, _>; 24] =
-                            calendar::render::create_hours_texts(&text_factory);
-                        let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
-                        res?
-                    };
-
-                    let dates_texts: Vec<sdlext::Text> = {
-                        let today: calendar::Date = date::get_today()?;
-                        let stream = calendar::DateStream::new(today).take(7);
-                        calendar::render::create_date_texts(&text_factory, stream)
-                            .collect::<Result<Vec<_>, _>>()?
-                    };
-
-                    let days_texts: Vec<sdlext::Text> = {
-                        let texts: [Result<sdlext::Text, _>; 7] =
-                            calendar::render::create_weekday_texts(&text_factory);
-                        let res: Result<Vec<sdlext::Text>, _> = texts.into_iter().collect();
-                        res?
-                    };
-
+                    let today: calendar::Date = date::get_today()?;
+                    let stream = calendar::DateStream::new(today).take(7);
+                    let week: calendar::ui::Week<Result<sdlext::Text, _>> =
+                        calendar::ui::create_texts(&text_factory, stream);
+                    let week: Week = validate_week(week)?;
                     let event_render = RectangleRender { renderer };
 
                     let from: String = get_current_week_start()
@@ -162,7 +175,7 @@ fn unsafe_main() {
                     };
                     let event_titles: Vec<sdlext::Text> = {
                         let titles = agenda.iter().map(|x| x.title.as_str());
-                        calendar::render::create_event_title_texts(&text_factory, titles)
+                        calendar::ui::create_event_title_texts(&text_factory, titles)
                             .collect::<Result<Vec<sdlext::Text>, sdlext::TtfError>>()?
                     };
 
@@ -201,7 +214,7 @@ fn unsafe_main() {
                             offset_y: grid_offset.y,
                         };
 
-                        let render_res: Result<_, _> =
+                        let render_res: Result<calendar::render::Rectangles, _> =
                             calendar::render::event_rectangles(&agenda, &arguments);
                         match render_res {
                             Ok(rectangles) => {
@@ -251,9 +264,9 @@ fn unsafe_main() {
 
                         calendar::render::render_week_captions(
                             &SdlTextRender,
-                            days_texts.iter(),
-                            hours_texts.iter(),
-                            dates_texts.iter(),
+                            week.days.iter(),
+                            week.hours.iter(),
+                            week.dates.iter(),
                             &render_week_captions_args,
                         )
                         .collect::<Result<(), sdlext::TtfError>>()?;
@@ -270,32 +283,7 @@ fn unsafe_main() {
         );
 
         if let Err(err) = ret {
-            let err_text = std::ffi::CStr::from_ptr(sdl::SDL_GetError());
-            match err {
-                Error::RenderClearFailed => {
-                    println!("RenderClearFailed: {:?}", err_text);
-                }
-                Error::RenderIsNotPresent => {
-                    println!("RenderIsNotPresent: {:?}", err_text);
-                }
-                Error::RenderDrawColorIsNotSet => {
-                    println!("RenderDrawColorIsNotSet: {:?}", err_text);
-                }
-                Error::WindowIsNotCreated => {
-                    println!("WindowIsNotCreated: {:?}", err_text);
-                }
-                Error::CannotSetVsync => {
-                    println!("CannotSetVsync");
-                }
-                Error::InitError => {
-                    println!("failed to initialize")
-                }
-                Error::TimeError(_) => {
-                    println!("failed to process date and time");
-                }
-                Error::RectangleIsNotDrawn => todo!("handle rectangle render errors"),
-                Error::TtfError(_) => todo!("handle SDL TTF error"),
-            }
+            println!("The application failed with the error {:?}", err);
         }
     }
 }
