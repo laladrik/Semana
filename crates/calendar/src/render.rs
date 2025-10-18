@@ -3,7 +3,6 @@ use core::str::FromStr;
 use super::Date;
 use super::Item as AgendaItem;
 use super::MINUTES_PER_DAY;
-use super::TextCreate;
 use super::Time;
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
@@ -22,6 +21,31 @@ pub struct Arguments {
 pub struct EventText<'text, T> {
     pub text: &'text T,
     pub at: Point,
+}
+
+impl<'rect, 'ev, 'text, T> From<(&'rect Rectangle<'ev>, &'text T)> for EventText<'text, T> {
+    fn from((rectangle, title): (&'rect Rectangle, &'text T)) -> Self {
+        Self {
+            text: title,
+            at: Point {
+                x: rectangle.at.x + 2.0,
+                y: rectangle.at.y + 2.0,
+            },
+        }
+    }
+}
+
+pub fn place_event_texts<'text, 'rect, 'ev, Text>(
+    rectangles: &'rect [Rectangle<'ev>],
+    event_titles: &'text [Text],
+) -> impl Iterator<Item = EventText<'text, Text>>
+where
+    EventText<'text, Text>: From<(&'rect Rectangle<'ev>, &'text Text)>,
+{
+    rectangles
+        .iter()
+        .zip(event_titles.iter())
+        .map(EventText::from)
 }
 
 pub fn event_texts<'text, I, TR, R, T>(tr: &TR, texts: I) -> impl Iterator<Item = R>
@@ -115,10 +139,25 @@ where
 pub type Size = Point;
 
 #[cfg_attr(test, derive(PartialEq))]
-pub struct Rectange<'s> {
+pub struct Rectangle<'s> {
     pub at: Point,
     pub size: Size,
     pub text: &'s str,
+}
+
+fn calculate_event_point_x(
+    first_date: &Date,
+    event_date: &Date,
+    column_width: f32,
+    offset_x: f32,
+) -> f32 {
+    let days = event_date.subtract(first_date);
+    assert!(
+        days >= 0,
+        "the first date in the calendar must be earlier than the date of the event",
+    );
+
+    days as f32 * column_width + offset_x
 }
 
 fn create_point<'ev>(
@@ -138,13 +177,7 @@ fn create_point<'ev>(
     let start_time: Time =
         Time::from_str(event_time).map_err(|_| Error::InvalidTime(event_time))?;
 
-    let days = start_date.subtract(first_date);
-    assert!(
-        days >= 0,
-        "the first date in the calendar must be earlier than the date of the event",
-    );
-
-    let x = days as f32 * column_width + offset_x;
+    let x = calculate_event_point_x(first_date, &start_date, *column_width, *offset_x);
     let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height
         + offset_y;
     Ok(Point { x, y })
@@ -156,7 +189,7 @@ pub enum Error<'s> {
     InvalidTime(&'s str),
 }
 
-pub type Rectangles<'ev> = Vec<Rectange<'ev>>;
+pub type Rectangles<'ev> = Vec<Rectangle<'ev>>;
 
 fn is_all_day(event: &AgendaItem) -> bool {
     event.all_day == "True"
@@ -166,42 +199,93 @@ fn not_all_day(event: &AgendaItem) -> bool {
     event.all_day == "False"
 }
 
-pub fn event_rectangles<'ev>(
+pub struct RectangleSet<'ev> {
+    pub pinned: Rectangles<'ev>,
+    pub scrolled: Rectangles<'ev>,
+}
+
+fn create_whole_day_rectangle<'ev>(
+    event: &'ev AgendaItem,
+    first_date: &'_ Date,
+    arguments: &Arguments,
+) -> Result<Rectangle<'ev>, Error<'ev>> {
+    let Arguments {
+        column_width,
+        column_height,
+        offset_x,
+        offset_y,
+    } = arguments;
+    let start_date: Date =
+        Date::from_str(&event.start_date).map_err(|_| Error::InvalidDate(&event.start_date))?;
+    let x = calculate_event_point_x(first_date, &start_date, *column_width, *offset_x);
+    let start_point = Point { x, y: *offset_y };
+
+    let size: Size = {
+        let x = calculate_event_point_x(first_date, &start_date, *column_width, *offset_x);
+        let end_point = Point {
+            x,
+            y: offset_y + column_height,
+        };
+
+        calculate_size(&start_point, &end_point, arguments.column_width)
+    };
+
+    Ok(Rectangle {
+        at: start_point,
+        size,
+        text: &event.title,
+    })
+}
+
+fn create_day_rectangle<'ev>(
+    event: &'ev AgendaItem,
+    first_date: &'_ Date,
+    arguments: &Arguments,
+) -> Result<Rectangle<'ev>, Error<'ev>> {
+    let start_point: Point =
+        create_point(first_date, &event.start_date, &event.start_time, arguments)?;
+    let size: Size = {
+        let end_point: Point =
+            create_point(first_date, &event.end_date, &event.end_time, arguments)?;
+        calculate_size(&start_point, &end_point, arguments.column_width)
+    };
+
+    Ok(Rectangle {
+        at: start_point,
+        size,
+        text: &event.title,
+    })
+}
+
+fn calculate_size(start_point: &Point, end_point: &Point, column_width: f32) -> Size {
+    Size {
+        x: end_point.x - start_point.x + column_width,
+        y: end_point.y - start_point.y,
+    }
+}
+
+pub fn whole_day_rectangles<'ev>(
     events: &'ev [AgendaItem],
+    first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Result<Rectangles<'ev>, Error<'ev>> {
     let mut ret = Vec::new();
+    for whole_day_event in events.iter().filter(|x| is_all_day(x)) {
+        let rect = create_whole_day_rectangle(whole_day_event, first_date, arguments)?;
+        ret.push(rect);
+    }
+    Ok(ret)
+}
 
-    let first_date: Date = match events.first() {
-        Some(x) => {
-            let start_date: &str = x.start_date.as_str();
-            let date: Date = match Date::from_str(start_date) {
-                Ok(x) => x,
-                Err(_) => return Err(Error::InvalidDate(start_date)),
-            };
-            date
-        }
-        None => return Ok(ret),
-    };
-
+pub fn event_rectangles<'ev>(
+    events: &'ev [AgendaItem],
+    first_date: &'_ Date,
+    arguments: &Arguments,
+) -> Result<Rectangles<'ev>, Error<'ev>> {
+    let mut ret = Vec::new();
     for event in events.iter().filter(|x| not_all_day(x)) {
-        let start_point: Point =
-            create_point(&first_date, &event.start_date, &event.start_time, arguments)?;
-        let size: Size = {
-            let end_point: Point =
-                create_point(&first_date, &event.end_date, &event.end_time, arguments)?;
-
-            Size {
-                x: end_point.x - start_point.x + arguments.column_width,
-                y: end_point.y - start_point.y,
-            }
-        };
-
-        ret.push(Rectange {
-            at: start_point,
-            size,
-            text: &event.title,
-        });
+        let rect = create_day_rectangle(event, first_date, arguments)?;
+        ret.push(rect);
     }
     Ok(ret)
 }
@@ -210,13 +294,13 @@ pub trait RenderRectangles {
     type Result;
     fn render_rectangles<'r, 's: 'r, I>(&self, data: I) -> Self::Result
     where
-        I: Iterator<Item = &'r Rectange<'s>>;
+        I: Iterator<Item = &'r Rectangle<'s>>;
 }
 
 pub fn render_rectangles<'r, 's: 'r, I, DR, R>(rectangles: I, dr: &DR) -> R
 where
     DR: RenderRectangles<Result = R>,
-    I: Iterator<Item = &'r Rectange<'s>>,
+    I: Iterator<Item = &'r Rectangle<'s>>,
 {
     dr.render_rectangles(rectangles)
 }
@@ -249,7 +333,7 @@ mod tests {
             Ok(x) => assert!(
                 matches!(
                     x[0],
-                    Rectange {
+                    Rectangle {
                         at: Point { x: 0.0, y: 0.0 },
                         size: Point {
                             x: 125.0,
