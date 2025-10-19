@@ -13,6 +13,9 @@ pub enum Error {
     TimeError(TimeError),
     RectangleIsNotDrawn,
     TtfError(TtfError),
+    SurfaceIsNotCreated,
+    TextureIsNotCreated,
+    TextureIsNotRendered,
 }
 
 #[derive(Debug)]
@@ -184,7 +187,9 @@ impl Text {
             if ptr.is_null() {
                 Err(TtfError::TextIsNotCreated)
             } else {
-                Ok(Self { ptr: Cell::new(ptr) })
+                Ok(Self {
+                    ptr: Cell::new(ptr),
+                })
             }
         }
     }
@@ -213,7 +218,10 @@ pub fn get_current_time() -> Result<sdl::SDL_Time, TimeError> {
     }
 }
 
-pub fn time_to_date_time(ticks: sdl::SDL_Time, local_time: bool) -> Result<sdl::SDL_DateTime, TimeError> {
+pub fn time_to_date_time(
+    ticks: sdl::SDL_Time,
+    local_time: bool,
+) -> Result<sdl::SDL_DateTime, TimeError> {
     unsafe {
         let mut ret: sdl::SDL_DateTime = std::mem::zeroed();
         if !sdl::SDL_TimeToDateTime(ticks, &mut ret as *mut _, local_time) {
@@ -221,6 +229,5 @@ pub fn time_to_date_time(ticks: sdl::SDL_Time, local_time: bool) -> Result<sdl::
         } else {
             Ok(ret)
         }
-
     }
 }

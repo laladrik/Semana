@@ -15,12 +15,12 @@ fn get_current_week_start() -> Result<calendar::Date, TimeError> {
     sdlext::get_current_time().and_then(date::get_week_start)
 }
 
-struct SdlTextCreate {
+struct SdlTextCreate<'a> {
     engine: *mut sdl_ttf::TTF_TextEngine,
-    font: RefCell<sdlext::Font>,
+    font: &'a RefCell<sdlext::Font>,
 }
 
-impl calendar::TextCreate for SdlTextCreate {
+impl calendar::TextCreate for SdlTextCreate<'_> {
     type Result = Result<sdlext::Text, sdlext::TtfError>;
 
     fn text_create(&self, s: &str) -> Self::Result {
@@ -78,11 +78,112 @@ fn validate_week(
     })
 }
 
+struct TextRegistry {
+    surfaces: Vec<*mut sdl::SDL_Surface>,
+    textures: Vec<*mut sdl::SDL_Texture>,
+    text_positions: Vec<sdl::SDL_FRect>,
+    renderer: *mut sdl::SDL_Renderer,
+}
+
+impl TextRegistry {
+    fn new(renderer: *mut sdl::SDL_Renderer) -> Self {
+        Self {
+            surfaces: Vec::new(),
+            textures: Vec::new(),
+            text_positions: Vec::new(),
+            renderer,
+        }
+    }
+
+    fn create(
+        &mut self,
+        text: &std::ffi::CStr,
+        font: &RefCell<Font>,
+        position: sdl::SDL_FRect,
+    ) -> Result<(), sdlext::Error> {
+        unsafe {
+            let surf: *mut sdl_ttf::SDL_Surface = sdl_ttf::TTF_RenderText_Blended_Wrapped(
+                font.borrow_mut().as_mut_ptr(),
+                text.as_ptr(),
+                text.count_bytes(),
+                Color::from_rgb(0xffffff).into(),
+                // conversion from f32 to i32
+                position.w as _,
+            );
+
+            if surf.is_null() {
+                return Err(sdlext::Error::SurfaceIsNotCreated);
+            }
+
+            let texture = sdl::SDL_CreateTextureFromSurface(self.renderer, surf.cast());
+            if texture.is_null() {
+                sdl::SDL_DestroySurface(surf.cast());
+                return Err(sdlext::Error::TextureIsNotCreated);
+            }
+
+            self.surfaces.push(surf.cast());
+            self.textures.push(texture);
+            let pos = {
+                let mut texture_width = 0f32;
+                let mut texture_height = 0f32;
+                let _ = sdl::SDL_GetTextureSize(texture, &mut texture_width, &mut texture_height);
+                sdl::SDL_FRect {
+                    x: position.x,
+                    y: position.y,
+                    w: texture_width.min(position.w as _),
+                    h: texture_height.min(position.h as _),
+                }
+            };
+
+            self.text_positions.push(pos);
+        }
+        Ok(())
+    }
+
+    fn render(&self) -> Result<(), sdlext::Error> {
+        for (texture, position) in self.textures.iter().zip(self.text_positions.iter()) {
+            unsafe {
+                let src = sdl::SDL_FRect {
+                    x: 0f32,
+                    y: 0f32,
+                    w: position.w,
+                    h: position.h,
+                };
+
+                if !sdl::SDL_RenderTexture(self.renderer, *texture, &src, position) {
+                    return Err(sdlext::Error::TextureIsNotRendered);
+                }
+            }
+        }
+        Ok(())
+    }
+    fn clear(&mut self) {
+        unsafe {
+            while let Some(ptr) = self.surfaces.pop() {
+                sdl::SDL_DestroySurface(ptr);
+            }
+
+            while let Some(ptr) = self.textures.pop() {
+                sdl::SDL_DestroyTexture(ptr);
+            }
+
+            self.text_positions.clear();
+        }
+    }
+}
+
+impl Drop for TextRegistry {
+    fn drop(&mut self) {
+        self.clear()
+    }
+}
+
 fn unsafe_main() {
     let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
+                let mut text_registry = TextRegistry::new(renderer);
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
@@ -110,11 +211,11 @@ fn unsafe_main() {
 
                     let ui_text_factory = SdlTextCreate {
                         engine,
-                        font: ui_font,
+                        font: &ui_font,
                     };
                     let title_text_factory = SdlTextCreate {
                         engine,
-                        font: title_font,
+                        font: &title_font,
                     };
                     let today: calendar::Date = date::get_today()?;
                     let stream = calendar::DateStream::new(today).take(7);
@@ -143,15 +244,11 @@ fn unsafe_main() {
                         Err(err) => panic!("can't get the agenda: {:?}", err),
                     };
 
-                    let event_titles: Vec<sdlext::Text> = {
-                        let titles = agenda
-                            .iter()
-                            .filter(|x| x.all_day == "False")
-                            .map(|x| x.title.as_str());
-                        calendar::ui::create_event_title_texts(&title_text_factory, titles)
-                            .collect::<Result<Vec<sdlext::Text>, sdlext::TtfError>>()?
-                    };
-
+                    let titles: Vec<&str> = agenda
+                        .iter()
+                        .filter(|x| x.all_day == "False")
+                        .map(|x| x.title.as_str())
+                        .collect();
                     let pinned_event_titles: Vec<sdlext::Text> = {
                         let titles = agenda
                             .iter()
@@ -162,6 +259,7 @@ fn unsafe_main() {
                     };
                     let mut event: sdl::SDL_Event = std::mem::zeroed();
                     let mut rectangles: Option<calendar::render::Rectangles> = None;
+
                     'outer_loop: loop {
                         let mut recalculate_events_rectangles = false;
                         while sdl::SDL_PollEvent(&mut event as _) {
@@ -244,13 +342,27 @@ fn unsafe_main() {
                         };
 
                         if recalculate_events_rectangles || rectangles.is_none() {
-                            rectangles.replace(create_rectangles());
+                            let new_rectangles = create_rectangles();
+
+                            text_registry.clear();
+                            for (title, rectangle) in titles.iter().zip(new_rectangles.iter()) {
+                                let c_title = std::ffi::CString::new(*title)
+                                    .expect("can't create c string for an event");
+                                let dstrect = sdl::SDL_FRect {
+                                    x: rectangle.at.x,
+                                    y: rectangle.at.y,
+                                    w: rectangle.size.x,
+                                    h: rectangle.size.y,
+                                };
+
+                                text_registry.create(c_title.as_c_str(), &title_font, dstrect)?;
+                            }
+
+                            rectangles.replace(new_rectangles);
                         }
 
                         let rectangles = rectangles.as_ref().unwrap();
 
-                        let event_texts =
-                            calendar::render::place_event_texts(rectangles, &event_titles);
                         let pinned_event_texts = calendar::render::place_event_texts(
                             &pinned_rectangles,
                             &pinned_event_titles,
@@ -261,12 +373,11 @@ fn unsafe_main() {
                             &event_render,
                         )?;
                         calendar::render::render_rectangles(rectangles.iter(), &event_render)?;
-                        calendar::render::event_texts(&SdlTextRender, event_texts)
-                            .collect::<Result<Vec<_>, _>>()?;
+                        render_grid(renderer, &grid_rectangle)?;
+                        text_registry.render()?;
                         calendar::render::event_texts(&SdlTextRender, pinned_event_texts)
                             .collect::<Result<Vec<_>, _>>()?;
 
-                        render_grid(renderer, &grid_rectangle)?;
                         set_color(renderer, Color::from_rgb(0x111111))?;
                         let render_week_captions_args = calendar::render::RenderWeekCaptionsArgs {
                             hours_arguments: calendar::render::RenderHoursArgs {
@@ -370,16 +481,11 @@ impl calendar::render::RenderRectangles for RectangleRender {
         set_color(self.renderer, Color::from_rgb(0x9999ff))?;
         let data = Vec::from_iter(rectangles.map(create_sdl_frect));
         unsafe {
-            // if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
-            //     return Err(Error::RectangleIsNotDrawn);
-            // }
+            if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
+                return Err(Error::RectangleIsNotDrawn);
+            }
 
             for rect in data.iter() {
-                set_color(self.renderer, Color::from_rgb(0x9999ff))?;
-                if !sdl::SDL_RenderFillRect(self.renderer, rect) {
-                    return Err(Error::RectangleIsNotDrawn);
-                }
-
                 let border = sdl::SDL_FRect {
                     x: rect.x,
                     y: rect.y,
