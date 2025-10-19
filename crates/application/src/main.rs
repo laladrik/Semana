@@ -47,60 +47,7 @@ impl calendar::render::TextRender for SdlTextRender {
     }
 }
 
-mod date {
-    use super::{TimeError, sdl, sdlext};
-
-    pub fn get_today() -> Result<calendar::Date, TimeError> {
-        let now = sdlext::get_current_time()?;
-        let today = sdlext::time_to_date_time(now, true)?;
-        Ok(calendar::Date {
-            day: today.day as u8,
-            month: today.month as u8,
-            year: today.year as u16,
-        })
-    }
-
-    pub fn get_week_start(now: sdl::SDL_Time) -> Result<calendar::Date, TimeError> {
-        let local_time = true;
-        unsafe {
-            let today = sdlext::time_to_date_time(now, local_time)?;
-            //let sunday: std::ffi::c_int = 0;
-            // from 0 to 6
-            let current_weekday: std::ffi::c_int =
-                sdl::SDL_GetDayOfWeek(today.year, today.month, today.day);
-            //let mut week_offset: std::ffi::c_int = current_weekday - sunday;
-
-            let natural_weekday: i32 = match current_weekday {
-                0 => 7,
-                d @ 1..7 => d,
-                _ => panic!("SDL has returned an invalid week day"),
-            };
-            // from 1 to 7
-            //let natural_weekday: i32 = current_weekday + 7 * ((7 - current_weekday) / 7);
-            // TODO: implement for the case Sunday is the first day.
-            // monday => 0
-            // ...
-            // sunday => -6
-            let week_offset_days: i32 = -(natural_weekday - 1);
-            const NANOSECONDS_PER_DAY: i64 = (sdl::SDL_NS_PER_SECOND as i64) * 60 * 60 * 24;
-            let offset_ns: i64 = (week_offset_days as i64) * NANOSECONDS_PER_DAY;
-            let mut first_day_of_week: sdl::SDL_DateTime = std::mem::zeroed();
-            if !sdl::SDL_TimeToDateTime(
-                now + offset_ns,
-                &mut first_day_of_week as *mut _,
-                local_time,
-            ) {
-                return Err(TimeError::FailConvertingNowToDate);
-            }
-
-            Ok(calendar::Date {
-                year: first_day_of_week.year as u16,
-                month: first_day_of_week.month as u8,
-                day: first_day_of_week.day as u8,
-            })
-        }
-    }
-}
+mod date;
 
 type MaybeText = Result<sdlext::Text, sdlext::TtfError>;
 fn validate_array<const N: usize>(
@@ -161,8 +108,14 @@ fn unsafe_main() {
                         .map_err(Error::from)
                         .map(RefCell::new)?;
 
-                    let ui_text_factory = SdlTextCreate { engine, font: ui_font };
-                    let title_text_factory = SdlTextCreate { engine, font: title_font };
+                    let ui_text_factory = SdlTextCreate {
+                        engine,
+                        font: ui_font,
+                    };
+                    let title_text_factory = SdlTextCreate {
+                        engine,
+                        font: title_font,
+                    };
                     let today: calendar::Date = date::get_today()?;
                     let stream = calendar::DateStream::new(today).take(7);
                     let week: calendar::ui::Week<Result<sdlext::Text, _>> =
@@ -189,6 +142,7 @@ fn unsafe_main() {
                         Ok(agenda) => agenda,
                         Err(err) => panic!("can't get the agenda: {:?}", err),
                     };
+
                     let event_titles: Vec<sdlext::Text> = {
                         let titles = agenda
                             .iter()
@@ -207,13 +161,16 @@ fn unsafe_main() {
                             .collect::<Result<Vec<sdlext::Text>, sdlext::TtfError>>()?
                     };
                     let mut event: sdl::SDL_Event = std::mem::zeroed();
+                    let mut rectangles: Option<calendar::render::Rectangles> = None;
                     'outer_loop: loop {
+                        let mut recalculate_events_rectangles = false;
                         while sdl::SDL_PollEvent(&mut event as _) {
                             if event.type_ == sdl::SDL_EVENT_QUIT {
                                 break 'outer_loop;
                             }
 
                             if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
+                                recalculate_events_rectangles = true;
                                 _ = sdl::SDL_GetWindowSize(
                                     root_window,
                                     &mut window_size.x,
@@ -265,21 +222,39 @@ fn unsafe_main() {
                             return Err(Error::RenderClearFailed);
                         }
 
-                        let arguments = calendar::render::Arguments {
-                            column_width: grid_rectangle.w / 7.,
-                            column_height: grid_rectangle.h,
-                            offset_x: grid_rectangle.x,
-                            offset_y: grid_rectangle.y,
+                        let create_rectangles = || {
+                            let rectangles: calendar::render::Rectangles = {
+                                let arguments = calendar::render::Arguments {
+                                    column_width: grid_rectangle.w / 7.,
+                                    column_height: grid_rectangle.h,
+                                    offset_x: grid_rectangle.x,
+                                    offset_y: grid_rectangle.y,
+                                };
+
+                                let scroll_rectangles_res: Result<calendar::render::Rectangles, _> =
+                                    calendar::render::event_rectangles(
+                                        &agenda,
+                                        &week_start,
+                                        &arguments,
+                                    );
+                                scroll_rectangles_res
+                                    .expect("fail to turn the events into the rectangles")
+                            };
+                            rectangles
                         };
 
-                        let scroll_rectangles_res: Result<calendar::render::Rectangles, _> =
-                            calendar::render::event_rectangles(&agenda, &week_start, &arguments);
-                        let rectangles = scroll_rectangles_res
-                            .expect("fail to turn the events into the rectangles");
+                        if recalculate_events_rectangles || rectangles.is_none() {
+                            rectangles.replace(create_rectangles());
+                        }
+
+                        let rectangles = rectangles.as_ref().unwrap();
+
                         let event_texts =
-                            calendar::render::place_event_texts(&rectangles, &event_titles);
-                        let pinned_event_texts =
-                            calendar::render::place_event_texts(&pinned_rectangles, &pinned_event_titles);
+                            calendar::render::place_event_texts(rectangles, &event_titles);
+                        let pinned_event_texts = calendar::render::place_event_texts(
+                            &pinned_rectangles,
+                            &pinned_event_titles,
+                        );
 
                         calendar::render::render_rectangles(
                             pinned_rectangles.iter(),
@@ -395,8 +370,27 @@ impl calendar::render::RenderRectangles for RectangleRender {
         set_color(self.renderer, Color::from_rgb(0x9999ff))?;
         let data = Vec::from_iter(rectangles.map(create_sdl_frect));
         unsafe {
-            if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
-                return Err(Error::RectangleIsNotDrawn);
+            // if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
+            //     return Err(Error::RectangleIsNotDrawn);
+            // }
+
+            for rect in data.iter() {
+                set_color(self.renderer, Color::from_rgb(0x9999ff))?;
+                if !sdl::SDL_RenderFillRect(self.renderer, rect) {
+                    return Err(Error::RectangleIsNotDrawn);
+                }
+
+                let border = sdl::SDL_FRect {
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h: 5.0,
+                };
+
+                set_color(self.renderer, Color::from_rgb(0xff0000))?;
+                if !sdl::SDL_RenderFillRect(self.renderer, &border) {
+                    return Err(Error::RectangleIsNotDrawn);
+                }
             }
         }
         Ok(())
