@@ -4,6 +4,7 @@ use super::Date;
 use super::Item as AgendaItem;
 use super::MINUTES_PER_DAY;
 use super::Time;
+use super::Error;
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct Point {
@@ -181,12 +182,6 @@ fn create_point<'ev>(
     let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height
         + offset_y;
     Ok(Point { x, y })
-}
-
-#[derive(Debug)]
-pub enum Error<'s> {
-    InvalidDate(&'s str),
-    InvalidTime(&'s str),
 }
 
 pub type Rectangles<'ev> = Vec<Rectangle<'ev>>;

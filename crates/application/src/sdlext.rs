@@ -73,10 +73,13 @@ impl Drop for Font {
     }
 }
 
-pub unsafe fn sdl_ttf_init<R>(
+pub unsafe fn sdl_ttf_init<R, E>(
     renderer: *mut sdl::SDL_Renderer,
-    body: impl FnOnce(*mut sdl_ttf::TTF_TextEngine) -> SdlResult<R>,
-) -> SdlResult<R> {
+    body: impl FnOnce(*mut sdl_ttf::TTF_TextEngine) -> Result<R, E>,
+) -> Result<R, E>
+where
+    E: From<Error>,
+{
     unsafe {
         if !sdl_ttf::TTF_Init() {
             panic!("ttf is not initialized");
@@ -85,7 +88,7 @@ pub unsafe fn sdl_ttf_init<R>(
         let engine: *mut sdl_ttf::TTF_TextEngine =
             sdl_ttf::TTF_CreateRendererTextEngine(renderer.cast());
         if engine.is_null() {
-            return Err(Error::from(TtfError::EngineIsNotCreated));
+            return Err(Error::from(TtfError::EngineIsNotCreated))?;
         }
 
         let r = body(engine);
@@ -94,12 +97,15 @@ pub unsafe fn sdl_ttf_init<R>(
     }
 }
 
-pub unsafe fn sdl_init<R>(
-    body: impl FnOnce(*mut sdl::SDL_Window, *mut sdl::SDL_Renderer) -> SdlResult<R>,
-) -> SdlResult<R> {
+pub unsafe fn sdl_init<R, E>(
+    body: impl FnOnce(*mut sdl::SDL_Window, *mut sdl::SDL_Renderer) -> Result<R, E>,
+) -> Result<R, E>
+where
+    E: From<Error>,
+{
     unsafe {
         if !sdl::SDL_Init(sdl::SDL_INIT_VIDEO) {
-            return Err(Error::InitError);
+            return Err(Error::InitError)?;
         }
 
         let window_title = std::ffi::CString::from(c"semana");
@@ -115,11 +121,11 @@ pub unsafe fn sdl_init<R>(
             &mut root_window as *mut *mut _,
             &mut renderer as *mut *mut _,
         ) {
-            return Err(Error::WindowIsNotCreated);
+            return Err(Error::WindowIsNotCreated)?;
         }
 
         if !sdl::SDL_SetRenderVSync(renderer, 1) {
-            return Err(Error::CannotSetVsync);
+            return Err(Error::CannotSetVsync)?;
         }
 
         let r = body(root_window, renderer);

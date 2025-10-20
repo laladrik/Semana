@@ -6,6 +6,12 @@ use core::str::FromStr;
 use std::num::ParseIntError;
 
 use nanoserde::DeJson;
+#[derive(Debug)]
+pub enum Error<'s> {
+    InvalidDate(&'s str),
+    InvalidTime(&'s str),
+}
+
 #[derive(DeJson, Debug)]
 pub struct Item {
     pub title: String,
