@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::{cell::Cell, ptr::NonNull};
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
@@ -47,28 +47,30 @@ pub enum TtfError {
 pub type SdlResult<R> = Result<R, Error>;
 
 pub struct Font {
-    ptr: *mut sdl_ttf::TTF_Font,
+    ptr: NonNull<sdl_ttf::TTF_Font>,
 }
 
 impl Font {
+    pub fn new(ptr: NonNull<sdl_ttf::TTF_Font>) -> Self {
+        Self { ptr }
+    }
+
     pub fn open(path: &std::ffi::CStr, size: f32) -> Result<Self, TtfError> {
         let ptr = unsafe { sdl_ttf::TTF_OpenFont(path.as_ptr(), size) };
-
-        if ptr.is_null() {
-            Err(TtfError::FontIsNotOpened)
-        } else {
-            Ok(Self { ptr })
-        }
+        NonNull::new(ptr)
+            .ok_or(TtfError::FontIsNotOpened)
+            .map(Self::new)
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut sdl_ttf::TTF_Font {
-        self.ptr
+    pub fn ptr(&mut self) -> *mut sdl_ttf::TTF_Font {
+        self.ptr.as_ptr()
     }
 }
+
 impl Drop for Font {
     fn drop(&mut self) {
         unsafe {
-            sdl_ttf::TTF_CloseFont(self.ptr);
+            sdl_ttf::TTF_CloseFont(self.ptr.as_ptr());
         }
     }
 }
@@ -186,7 +188,7 @@ impl Text {
         unsafe {
             let ptr = sdl_ttf::TTF_CreateText(
                 engine,
-                font.as_mut_ptr(),
+                font.ptr(),
                 text.as_ptr(),
                 text.count_bytes(),
             );
@@ -200,7 +202,10 @@ impl Text {
         }
     }
 
-    pub fn ptr(&self) -> Cell<*mut sdl_ttf::TTF_Text> {
+    // # Safety:
+    //
+    // It's safe to call the method unsell the value of the pointer is not changed.
+    pub unsafe fn ptr(&self) -> Cell<*mut sdl_ttf::TTF_Text> {
         self.ptr.clone()
     }
 }
@@ -235,5 +240,89 @@ pub fn time_to_date_time(
         } else {
             Ok(ret)
         }
+    }
+}
+
+pub struct Surface {
+    ptr: NonNull<sdl::SDL_Surface>,
+}
+
+impl Surface {
+    pub fn new(ptr: NonNull<sdl::SDL_Surface>) -> Self {
+        Self { ptr }
+    }
+
+    // # Safety:
+    //
+    // It's safe to call the method unsell the value of the pointer is not changed.
+    pub unsafe fn ptr(&self) -> *mut sdl::SDL_Surface {
+        self.ptr.as_ptr()
+    }
+}
+
+impl Drop for Surface {
+    fn drop(&mut self) {
+        // SAFETY the code is safe as long as the safety of [`Surface::as_ptr`] is considered.
+        unsafe {
+            sdl::SDL_DestroySurface(self.ptr.as_ptr());
+        }
+    }
+}
+
+pub fn ttf_render_text_blended_wrapped(
+    font: &mut Font,
+    text: &std::ffi::CStr,
+    color: sdl_ttf::SDL_Color,
+    wrap_length: i32,
+) -> Result<Surface, Error> {
+    unsafe {
+        let ptr: *mut sdl_ttf::SDL_Surface = sdl_ttf::TTF_RenderText_Blended_Wrapped(
+            font.ptr(),
+            text.as_ptr(),
+            text.count_bytes(),
+            color,
+            wrap_length,
+        );
+
+        let p: *mut sdl::SDL_Surface = ptr.cast();
+        NonNull::new(p)
+            .ok_or(Error::SurfaceIsNotCreated)
+            .map(Surface::new)
+    }
+}
+
+pub struct Texture {
+    ptr: NonNull<sdl::SDL_Texture>,
+}
+
+impl Texture {
+    pub fn new(ptr: NonNull<sdl::SDL_Texture>) -> Self {
+        Self { ptr }
+    }
+
+    /// # Safety
+    ///
+    /// The method is safe unless the value of the pointer is changed.
+    pub unsafe fn ptr(&self) -> *mut sdl::SDL_Texture {
+        self.ptr.as_ptr()
+    }
+}
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        // SAFETY the code is safe as long as the safety of [`Texture::as_ptr`] is considered.
+        unsafe { sdl::SDL_DestroyTexture(self.ptr.as_ptr()) }
+    }
+}
+
+pub fn create_texture_from_surface(
+    renderer: *mut sdl::SDL_Renderer,
+    surface: &Surface,
+) -> Result<Texture, Error> {
+    unsafe {
+        let texture = sdl::SDL_CreateTextureFromSurface(renderer, surface.ptr());
+        NonNull::new(texture)
+            .ok_or(Error::TextureIsNotCreated)
+            .map(Texture::new)
     }
 }

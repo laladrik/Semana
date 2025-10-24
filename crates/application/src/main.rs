@@ -79,8 +79,8 @@ fn validate_week(
 }
 
 struct TextRegistry {
-    surfaces: Vec<*mut sdl::SDL_Surface>,
-    textures: Vec<*mut sdl::SDL_Texture>,
+    surfaces: Vec<sdlext::Surface>,
+    textures: Vec<sdlext::Texture>,
     text_positions: Vec<sdl::SDL_FRect>,
     renderer: *mut sdl::SDL_Renderer,
 }
@@ -108,30 +108,20 @@ impl TextRegistry {
                 p as i32
             };
 
-            let surf: *mut sdl_ttf::SDL_Surface = sdl_ttf::TTF_RenderText_Blended_Wrapped(
-                font.borrow_mut().as_mut_ptr(),
-                text.as_ptr(),
-                text.count_bytes(),
+            let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
+                &mut font.borrow_mut(),
+                text,
                 Color::from_rgb(0xffffff).into(),
                 wrap_length,
-            );
+            )?;
 
-            if surf.is_null() {
-                return Err(sdlext::Error::SurfaceIsNotCreated);
-            }
+            let texture: sdlext::Texture =
+                sdlext::create_texture_from_surface(self.renderer, &surf)?;
 
-            let texture = sdl::SDL_CreateTextureFromSurface(self.renderer, surf.cast());
-            if texture.is_null() {
-                sdl::SDL_DestroySurface(surf.cast());
-                return Err(sdlext::Error::TextureIsNotCreated);
-            }
-
-            self.surfaces.push(surf.cast());
-            self.textures.push(texture);
             let pos = {
                 let mut texture_width = 0f32;
                 let mut texture_height = 0f32;
-                let _ = sdl::SDL_GetTextureSize(texture, &mut texture_width, &mut texture_height);
+                let _ = sdl::SDL_GetTextureSize(texture.ptr(), &mut texture_width, &mut texture_height);
                 sdl::SDL_FRect {
                     x: position.x,
                     y: position.y,
@@ -140,6 +130,8 @@ impl TextRegistry {
                 }
             };
 
+            self.surfaces.push(surf);
+            self.textures.push(texture);
             self.text_positions.push(pos);
         }
         Ok(())
@@ -155,25 +147,20 @@ impl TextRegistry {
                     h: position.h,
                 };
 
-                if !sdl::SDL_RenderTexture(self.renderer, *texture, &src, position) {
+                if !sdl::SDL_RenderTexture(self.renderer, texture.ptr(), &src, position) {
                     return Err(sdlext::Error::TextureIsNotRendered);
                 }
             }
         }
         Ok(())
     }
+
     fn clear(&mut self) {
-        unsafe {
-            while let Some(ptr) = self.surfaces.pop() {
-                sdl::SDL_DestroySurface(ptr);
-            }
-
-            while let Some(ptr) = self.textures.pop() {
-                sdl::SDL_DestroyTexture(ptr);
-            }
-
-            self.text_positions.clear();
-        }
+        // sdl::SDL_DestroySurface(...);
+        self.surfaces.clear();
+        // sdl::SDL_DestroyTexture(ptr);
+        self.textures.clear();
+        self.text_positions.clear();
     }
 }
 
