@@ -91,6 +91,7 @@ impl FromStr for Date {
     type Err = ParseDateError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // the date has to be like: 2025-10-31
         if s.len() < 10 {
             return Err(ParseDateError::InputIsShort);
         }
@@ -124,7 +125,7 @@ impl Date {
         }
 
         let day_max = Date::month_day_count(year, month);
-        if !(day > 0 && day < day_max) {
+        if !(day > 0 && day <= day_max) {
             return Err(InvalidInput);
         }
 
