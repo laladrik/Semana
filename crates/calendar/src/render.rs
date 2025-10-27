@@ -1,10 +1,10 @@
 use core::str::FromStr;
 
 use super::Date;
+use super::Error;
 use super::Item as AgendaItem;
 use super::MINUTES_PER_DAY;
 use super::Time;
-use super::Error;
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct Point {
@@ -272,16 +272,149 @@ pub fn whole_day_rectangles<'ev>(
     Ok(ret)
 }
 
+/// Atasco means a traffic jam.  The structure represents a set of overlapping events.
+#[derive(Default)]
+struct Atasco<'ev> {
+    rectangles: Rectangles<'ev>,
+    //lane_count: Lane,
+    lanes: Vec<Lane>,
+    //absciss: f32,
+    end: f32,
+}
+
+impl<'ev> Atasco<'ev> {
+    fn flush(&mut self, into: &mut Rectangles<'ev>, cell_width: f32, lane_count: Lane) {
+        let lane_width = cell_width / lane_count as f32;
+        let iter = self
+            .rectangles
+            .drain(..)
+            .zip(self.lanes.drain(..))
+            .map(|(rect, lane)| Rectangle {
+                at: Point {
+                    x: rect.at.x + lane_width * lane as f32,
+                    y: rect.at.y,
+                },
+                size: Point {
+                    x: lane_width,
+                    y: rect.size.y,
+                },
+                text: rect.text,
+            });
+        into.extend(iter);
+        self.end = f32::default();
+    }
+
+    fn push(&mut self, rect: Rectangle<'ev>, lane: Lane) {
+        self.end = f32::max(rect.at.y + rect.size.y, self.end);
+        self.rectangles.push(rect);
+        self.lanes.push(lane);
+    }
+}
+
+type Lane = u8;
+
+fn find_free_lane(new_event_begin: f32, atasco: &Atasco) -> (Lane, f32) {
+    assert!(
+        new_event_begin >= 0.,
+        "the beginning of the new event must not be nagetive"
+    );
+    let (index, end) = atasco
+        .rectangles
+        .iter()
+        .map(|rect| rect.at.y + rect.size.y)
+        .enumerate()
+        .filter(|(_, end)| *end <= new_event_begin)
+        .fold((0usize, f32::INFINITY), |acc, item| {
+            let (acc_index, acc_end) = acc;
+            let (index, end): (usize, f32) = item;
+            if end - new_event_begin <= acc_end - new_event_begin {
+                (index, end)
+            } else {
+                (acc_index, acc_end)
+            }
+        });
+
+    if end.is_infinite() {
+        (0, end)
+    } else {
+        let lane = unsafe { atasco.lanes.get_unchecked(index) };
+        (*lane, end)
+    }
+}
+
+/// Creates rectangles which visualize the position of the `events`.
+///
+/// # Assumptions
+/// The `events` are sorted by [`AgendaItem::start_time`]
 pub fn event_rectangles<'ev>(
     events: &'ev [AgendaItem],
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Result<Rectangles<'ev>, Error<'ev>> {
     let mut ret = Vec::new();
+    let mut last_atasco = Atasco::default();
+    let mut lane_count = 0;
+    let mut absciss = 0.;
     for event in events.iter().filter(|x| not_all_day(x)) {
         let rect = create_day_rectangle(event, first_date, arguments)?;
-        ret.push(rect);
+        // As we might overlapping events, the time of the `event` is compared to the time of the
+        // previous event if any.  The implementation does not work with the time, instead it uses
+        // the coordinates of the rectangles of the events.
+        //
+        // The colliding rectangles are put into `last_atasco`.  `last_atasco` maintains the
+        // position of the end of the rectangle biggest ordinate (y).  The position is `end` of
+        // `last_atasco`.  Also, `last_atasco` maintains stores the absciss (x) of the first event
+        // in it.
+        //
+        // `rect` collides with other rectangles if the following two conditions are met. The
+        // first, its ordinate (`aty`) is smaller than `end` of `last_atasco`.  The second, its
+        // absciss (`atx`) is equal to absciss of `last_atasco`.
+        //
+        // NOTE: It's assumed that the events are sort by the time of their beginning.
+        //
+        // If `rect` does not collide, then `last_atasco` is flushed, `rect` becomes the first
+        // piece in `last_atasco`.
+        //
+        // If `rect` collides, the following process starts. `last_atasco` is represented as a road
+        // with multiple lanes.  Given that there are two cases:
+        // 1. There is a lane which `rect` can take.
+        // 2. A new lane is created for `rect`.
+        //
+        // A lane is available for `rect` if its ordinate does match any of the rectangles in
+        // `last_atasco`.
+        let atx = rect.at.x;
+        let aty = rect.at.y;
+        let (rect_lane, new_lane_count, does_replace): (Lane, Lane, bool) = {
+            let atasco: &Atasco = &last_atasco;
+            let is_new_absciss = atx != absciss;
+            if is_new_absciss {
+                absciss = atx;
+            }
+
+            let has_collision = aty < atasco.end && !is_new_absciss;
+            if has_collision {
+                let (lane, distance) = find_free_lane(aty, atasco);
+                // All lanes are busy, creating new one.
+                if distance.is_infinite() {
+                    (lane_count, lane_count + 1, !has_collision)
+                } else {
+                    (lane, lane_count, !has_collision)
+                }
+            } else {
+                (0, 1, !has_collision)
+            }
+        };
+
+        if does_replace {
+            last_atasco.flush(&mut ret, arguments.column_width, lane_count);
+        }
+
+        lane_count = new_lane_count;
+        last_atasco.push(rect, rect_lane);
     }
+
+    // don't forget to flush :)
+    last_atasco.flush(&mut ret, arguments.column_width, lane_count);
     Ok(ret)
 }
 
@@ -305,9 +438,179 @@ mod tests {
     use super::*;
     use crate::render::event_rectangles;
 
+    mod atasco {
+        use super::*;
+        #[test]
+        fn test_different_days() {
+            let events = [
+                AgendaItem {
+                    all_day: "False".to_owned(),
+                    title: "Left".to_owned(),
+                    start_date: "2025-09-29".to_owned(),
+                    start_time: "00:00".to_owned(),
+                    end_date: "2025-09-29".to_owned(),
+                    end_time: "01:00".to_owned(),
+                },
+                AgendaItem {
+                    all_day: "False".to_owned(),
+                    title: "Right".to_owned(),
+                    start_date: "2025-09-30".to_owned(),
+                    start_time: "00:00".to_owned(),
+                    end_date: "2025-09-30".to_owned(),
+                    end_time: "01:00".to_owned(),
+                },
+            ];
+
+            const COLUMN: f32 = 125.0;
+            let arguments = Arguments {
+                column_width: COLUMN,
+                column_height: 600.0,
+                offset_x: 0.,
+                offset_y: 0.,
+            };
+
+            let start_date = Date {
+                year: 2025,
+                month: 9,
+                day: 29,
+            };
+
+            let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+            const ONE_HOUR: f32 = 600.0 / 24.0;
+            match ret {
+                Ok(ref rectangles) => {
+                    assert_eq!(rectangles.len(), 2, "there are must two rectangles");
+                    let (left, right) = (&rectangles[0], &rectangles[1]);
+                    assert!(
+                        matches!(
+                            left,
+                            Rectangle {
+                                at: Point { x: 0.0, y: 0.0 },
+                                size: Point {
+                                    x: COLUMN,
+                                    y: ONE_HOUR
+                                },
+                                text: "Left",
+                            },
+                        ),
+                        "the position and the size of the left event are unexpected. Actual at {:?}, the actual size {:?}",
+                        left.at,
+                        left.size,
+                    );
+                    assert!(
+                        matches!(
+                            right,
+                            Rectangle {
+                                at: Point { x: COLUMN, y: 0.0 },
+                                size: Point {
+                                    x: COLUMN,
+                                    y: ONE_HOUR
+                                },
+                                text: "Right"
+                            },
+                        ),
+                        "the position and the size of the right event are unexpected. Actual at {:?}, the actual size {:?}",
+                        right.at,
+                        right.size,
+                    );
+                }
+                Err(e) => panic!(
+                    "the rectangles must be built.  However, the error occurred: {:?}",
+                    e
+                ),
+            }
+        }
+
+        #[test]
+        fn test_side_by_side() {
+            let events = [
+                AgendaItem {
+                    all_day: "False".to_owned(),
+                    title: "Left".to_owned(),
+                    start_date: "2025-09-29".to_owned(),
+                    start_time: "00:00".to_owned(),
+                    end_date: "2025-09-29".to_owned(),
+                    end_time: "01:00".to_owned(),
+                },
+                AgendaItem {
+                    all_day: "False".to_owned(),
+                    title: "Right".to_owned(),
+                    start_date: "2025-09-29".to_owned(),
+                    start_time: "00:00".to_owned(),
+                    end_date: "2025-09-29".to_owned(),
+                    end_time: "01:00".to_owned(),
+                },
+            ];
+
+            const COLUMN: f32 = 125.0;
+            const HALF_COLUMN: f32 = 125.0 / 2.;
+            let arguments = Arguments {
+                column_width: COLUMN,
+                column_height: 600.0,
+                offset_x: 0.,
+                offset_y: 0.,
+            };
+
+            let start_date = Date {
+                year: 2025,
+                month: 9,
+                day: 29,
+            };
+
+            let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+            const ONE_HOUR: f32 = 600.0 / 24.0;
+            match ret {
+                Ok(ref rectangles) => {
+                    assert_eq!(rectangles.len(), 2, "there are must two rectangles");
+                    let (left, right) = (&rectangles[0], &rectangles[1]);
+                    assert!(
+                        matches!(
+                            left,
+                            Rectangle {
+                                at: Point { x: 0.0, y: 0.0 },
+                                size: Point {
+                                    x: HALF_COLUMN,
+                                    y: ONE_HOUR
+                                },
+                                text: "Left",
+                            },
+                        ),
+                        "the position and the size of the left event are unexpected. Actual at {:?}, the actual size {:?}",
+                        left.at,
+                        left.size,
+                    );
+                    assert!(
+                        matches!(
+                            right,
+                            Rectangle {
+                                at: Point {
+                                    x: HALF_COLUMN,
+                                    y: 0.0
+                                },
+                                size: Point {
+                                    x: HALF_COLUMN,
+                                    y: ONE_HOUR
+                                },
+                                text: "Right"
+                            },
+                        ),
+                        "the position and the size of the right event are unexpected. Actual at {:?}, the actual size {:?}",
+                        right.at,
+                        right.size,
+                    );
+                }
+                Err(e) => panic!(
+                    "the rectangles must be built.  However, the error occurred: {:?}",
+                    e
+                ),
+            }
+        }
+    }
+
     #[test]
-    fn top_left_event() {
+    fn test_top_left_event() {
         let events = [AgendaItem {
+            all_day: "False".to_owned(),
             title: "arst".to_owned(),
             start_date: "2025-09-29".to_owned(),
             start_time: "00:00".to_owned(),
@@ -322,7 +625,13 @@ mod tests {
             offset_y: 0.,
         };
 
-        let ret: Result<Rectangles, Error> = event_rectangles(&events, &arguments);
+        let start_date = Date {
+            year: 2025,
+            month: 9,
+            day: 29,
+        };
+
+        let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
         const ONE_HOUR: f32 = 600.0 / 24.0;
         match ret {
             Ok(x) => assert!(
