@@ -12,6 +12,12 @@ pub struct Point {
     pub y: f32,
 }
 
+impl Point {
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
 pub struct Arguments {
     pub column_width: f32,
     pub column_height: f32,
@@ -324,10 +330,12 @@ fn find_free_lane(new_event_begin: f32, atasco: &Atasco) -> (Lane, f32) {
         .map(|rect| rect.at.y + rect.size.y)
         .enumerate()
         .filter(|(_, end)| *end <= new_event_begin)
-        .fold((0usize, f32::INFINITY), |acc, item| {
+        .fold((0usize, f32::NEG_INFINITY), |acc, item| {
             let (acc_index, acc_end) = acc;
             let (index, end): (usize, f32) = item;
-            if end - new_event_begin <= acc_end - new_event_begin {
+            let diff = new_event_begin - end;
+            let acc_diff = new_event_begin - acc_end;
+            if diff <= acc_diff && diff >= 0. {
                 (index, end)
             } else {
                 (acc_index, acc_end)
@@ -605,6 +613,119 @@ mod tests {
                 ),
             }
         }
+
+        #[test]
+        fn test_collision() {
+            let create_item = |name: &str, from: &str, to: &str| AgendaItem {
+                all_day: "False".to_owned(),
+                title: name.to_owned(),
+                start_date: "2025-10-27".to_owned(),
+                start_time: from.to_owned(),
+                end_date: "2025-10-27".to_owned(),
+                end_time: to.to_owned(),
+            };
+
+            let events = [
+                create_item("Café", "10:00", "10:40"),
+                create_item("one", "10:00", "11:00"),
+                create_item("two", "10:30", "11:30"),
+                create_item("three", "10:45", "13:00"),
+                create_item("four", "11:00", "12:00"),
+            ];
+
+            const COLUMN: f32 = 125.0;
+            const ONE_THIRD_COLUMN: f32 = 125.0 / 3.; // 41.66
+            let arguments = Arguments {
+                column_width: COLUMN,
+                column_height: 600.0,
+                offset_x: 0.,
+                offset_y: 0.,
+            };
+
+            let start_date = Date {
+                year: 2025,
+                month: 10,
+                day: 27,
+            };
+
+            let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+            const ONE_HOUR: f32 = 600.0 / 24.0; // 25
+            const TEN_HOURS: f32 = ONE_HOUR * 10.; // 250
+            const HALF_HOUR: f32 = ONE_HOUR / 2.; // 12.5
+            const FORTY_MINS: f32 = ONE_HOUR * 2. / 3.; // 16.66
+            const FORTY_FIVE_MINS: f32 = ONE_HOUR * 3. / 4.; // 18.75
+            #[track_caller]
+            fn assert_agenda_item(actual: &Rectangle, expected: Rectangle) {
+                assert_eq!(actual.at.x, expected.at.x);
+                assert_eq!(actual.at.y, expected.at.y);
+                assert_approx_f32(actual.size.x, expected.size.x, 0.001);
+                assert_approx_f32(actual.size.y, expected.size.y, 0.001);
+                assert_eq!(actual.text, expected.text);
+            }
+
+            match ret {
+                Ok(ref rectangles) => {
+                    assert_eq!(rectangles.len(), 5,);
+                    let [cafe, one, two, three, four] = rectangles.as_slice() else {
+                        panic!("there are must five rectangles")
+                    };
+                    assert_agenda_item(
+                        cafe,
+                        Rectangle {
+                            at: Point::new(0., TEN_HOURS),
+                            size: Point::new(ONE_THIRD_COLUMN, FORTY_MINS),
+                            text: "Café",
+                        },
+                    );
+
+                    assert_agenda_item(
+                        one,
+                        Rectangle {
+                            at: Point::new(ONE_THIRD_COLUMN, TEN_HOURS),
+                            size: Point::new(ONE_THIRD_COLUMN, ONE_HOUR),
+                            text: "one",
+                        },
+                    );
+
+                    assert_agenda_item(
+                        two,
+                        Rectangle {
+                            at: Point::new(ONE_THIRD_COLUMN * 2., TEN_HOURS + HALF_HOUR),
+                            size: Point::new(ONE_THIRD_COLUMN, ONE_HOUR),
+                            text: "two",
+                        },
+                    );
+
+                    assert_agenda_item(
+                        three,
+                        Rectangle {
+                            at: Point::new(0., TEN_HOURS + FORTY_FIVE_MINS),
+                            size: Point::new(ONE_THIRD_COLUMN, ONE_HOUR * 2. + HALF_HOUR / 2.),
+                            text: "three",
+                        },
+                    );
+
+                    assert_agenda_item(
+                        four,
+                        Rectangle {
+                            at: Point::new(ONE_THIRD_COLUMN, TEN_HOURS + ONE_HOUR),
+                            size: Point::new(ONE_THIRD_COLUMN, ONE_HOUR),
+                            text: "four",
+                        },
+                    );
+                }
+                Err(e) => panic!(
+                    "the rectangles must be built.  However, the error occurred: {:?}",
+                    e
+                ),
+            }
+        }
+    }
+
+    #[track_caller]
+    fn assert_approx_f32(left: f32, right: f32, tolerance: f32) {
+        let diff = left - right;
+        assert!(diff.abs() < tolerance, "{} must be similar to {}", left, right);
     }
 
     #[test]
