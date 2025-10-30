@@ -85,6 +85,12 @@ struct TextRegistry {
     renderer: *mut sdl::SDL_Renderer,
 }
 
+mod config {
+    pub const EVENT_TITLE_COLOR: u32 = 0x000000;
+    pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
+    pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
+}
+
 impl TextRegistry {
     fn new(renderer: *mut sdl::SDL_Renderer) -> Self {
         Self {
@@ -111,7 +117,7 @@ impl TextRegistry {
             let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
                 &mut font.borrow_mut(),
                 text,
-                Color::from_rgb(0xffffff).into(),
+                Color::from_rgb(config::EVENT_TITLE_COLOR).into(),
                 wrap_length,
             )?;
 
@@ -236,8 +242,8 @@ where
         let (title, rectangle): (&Str, &calendar::render::Rectangle) = item;
         let c_title =
             std::ffi::CString::new(title.as_ref()).expect("can't create c string for an event");
-        let offset_x = 2f32;
-        let offset_y = 4f32;
+        let offset_x = config::EVENT_TITLE_OFFSET_X;
+        let offset_y = config::EVENT_TITLE_OFFSET_Y;
         let dstrect = sdl::SDL_FRect {
             x: rectangle.at.x + offset_x,
             y: rectangle.at.y + offset_y,
