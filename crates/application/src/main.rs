@@ -287,16 +287,17 @@ fn unsafe_main() {
                             font: &fonts.ui,
                         };
 
-                        let today: calendar::Date =
-                            date::get_today().map_err(sdlext::Error::from)?;
-                        let stream = calendar::DateStream::new(today).take(7);
-                        let week: calendar::ui::Week<Result<sdlext::Text, _>> =
-                            calendar::ui::create_texts(&ui_text_factory, stream);
-                        let week: Week = validate_week(week)?;
-                        let event_render = RectangleRender { renderer };
-
                         let week_start: calendar::Date =
                             get_current_week_start().map_err(sdlext::Error::from)?;
+                        let week: Week = {
+                            let stream = calendar::DateStream::new(week_start.clone()).take(7);
+                            let week: calendar::ui::Week<Result<sdlext::Text, _>> =
+                                calendar::ui::create_texts(&ui_text_factory, stream);
+                            validate_week(week)?
+                        };
+
+                        let event_render = RectangleRender { renderer };
+
                         let week_start_string: String = format_date(&week_start);
                         let mut arguments =
                             calendar::obtain::khal::week_arguments(&week_start_string);

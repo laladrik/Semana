@@ -67,7 +67,7 @@ impl Iterator for DateStream {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Date {
     pub year: u16,
     pub month: u8,
