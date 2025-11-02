@@ -74,6 +74,26 @@ pub struct Date {
     pub day: u8,
 }
 
+impl nanoserde::DeJson for Date {
+    fn de_json(
+        state: &mut nanoserde::DeJsonState,
+        input: &mut std::str::Chars,
+    ) -> Result<Self, nanoserde::DeJsonErr> {
+        if let nanoserde::DeJsonTok::Str = &mut state.tok {
+            match Date::from_str(state.strbuf.as_str()) {
+                Err(_) => Err(state.err_parse("date")),
+                Ok(x) => {
+                    state.next_tok(input)?;
+                    core::mem::take(&mut state.strbuf);
+                    Ok(x)
+                }
+            }
+        } else {
+            Err(state.err_token("date"))
+        }
+    }
+}
+
 pub enum ParseDateError {
     InvalidInput(InvalidInput),
     ParseIntError(ParseIntError),
@@ -105,7 +125,7 @@ impl FromStr for Date {
 }
 
 impl Date {
-    fn month_day_count(year: u16, month: u8) -> u8 {
+    const fn month_day_count(year: u16, month: u8) -> u8 {
         match month {
             2 => {
                 if Self::is_leap_year(year) {
@@ -133,7 +153,7 @@ impl Date {
     }
 
     #[inline(always)]
-    fn is_leap_year(year: u16) -> bool {
+    const fn is_leap_year(year: u16) -> bool {
         year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
     }
 
@@ -177,6 +197,26 @@ struct Time {
     minute: u8,
 }
 
+impl nanoserde::DeJson for Time {
+    fn de_json(
+        state: &mut nanoserde::DeJsonState,
+        input: &mut std::str::Chars,
+    ) -> Result<Self, nanoserde::DeJsonErr> {
+        if let nanoserde::DeJsonTok::Str = &mut state.tok {
+            match Time::from_str(state.strbuf.as_str()) {
+                Ok(x) => {
+                    state.next_tok(input)?;
+                    core::mem::take(&mut state.strbuf);
+                    Ok(x)
+                }
+                Err(_) => Err(state.err_parse("time")),
+            }
+        } else {
+            Err(state.err_token("time"))
+        }
+    }
+}
+
 const MINUTES_PER_HOUR: u8 = 60;
 const MINUTES_PER_DAY: u16 = MINUTES_PER_HOUR as u16 * 24;
 
@@ -212,5 +252,28 @@ impl Time {
 
     fn minutes_from_midnight(&self) -> u16 {
         (self.hour as u16 * MINUTES_PER_HOUR as u16) + self.minute as u16
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_data_dejson() {
+        #[derive(nanoserde::DeJson)]
+        struct Item {
+            date: Date,
+            time: Time,
+        }
+
+        let input = "{\"date\": \"2025-10-27\", \"time\": \"23:58\" }";
+        let output: Result<Item, _> = nanoserde::DeJson::deserialize_json(input);
+        let ret = output.unwrap();
+        let date = ret.date;
+        let time = ret.time;
+        assert_eq!(date.year, 2025);
+        assert_eq!(date.month, 10);
+        assert_eq!(time.hour, 23);
+        assert_eq!(time.minute, 58);
     }
 }
