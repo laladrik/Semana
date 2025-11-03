@@ -313,25 +313,26 @@ fn unsafe_main() {
                             Err(_) => "khal",
                         };
 
-                        let res: Result<calendar::obtain::Agenda, _> = calendar::obtain::obtain(
-                            &calendar::obtain::AgendaSourceStd,
-                            &calendar::obtain::NanoSerde,
-                            &arguments,
-                        );
+                        let res: Result<calendar::obtain::WeekSchedule, _> =
+                            calendar::obtain::obtain(
+                                &calendar::obtain::AgendaSourceStd,
+                                &calendar::obtain::NanoSerde,
+                                &arguments,
+                            );
 
-                        let agenda = match res {
+                        let agenda: calendar::obtain::WeekSchedule = match res {
                             Ok(agenda) => agenda,
                             Err(err) => panic!("can't get the agenda: {:?}", err),
                         };
 
-                        let event_titles: Vec<&str> = agenda
+                        let inside_day_event_titles: Vec<&str> = agenda
+                            .short_events
                             .iter()
-                            .filter(|x| x.all_day == "False")
                             .map(|x| x.title.as_str())
                             .collect();
-                        let all_day_event_titles: Vec<&str> = agenda
+                        let cross_day_event_titles: Vec<&str> = agenda
+                            .long_events
                             .iter()
-                            .filter(|x| x.all_day == "True")
                             .map(|x| x.title.as_str())
                             .collect();
 
@@ -359,7 +360,7 @@ fn unsafe_main() {
                             let top_panel_height = event_surface_rectangle.h / 25.;
                             let cell_width: f32 = event_surface_rectangle.w / 7.;
 
-                            let pinned_rectangles: &calendar::render::Rectangles = {
+                            let cross_day_event_rectangles: &calendar::render::Rectangles = {
                                 let create = || {
                                     let arguments = calendar::render::Arguments {
                                         column_width: cell_width,
@@ -370,8 +371,8 @@ fn unsafe_main() {
                                     let pinned_rectangles_res: Result<
                                         calendar::render::Rectangles,
                                         calendar::Error,
-                                    > = calendar::render::whole_day_rectangles(
-                                        &agenda,
+                                    > = calendar::render::cross_day_rectangles(
+                                        &agenda.long_events,
                                         &week_start,
                                         &arguments,
                                     );
@@ -393,7 +394,7 @@ fn unsafe_main() {
                                             register_event_titles(
                                                 &mut text_registry,
                                                 &fonts.title,
-                                                &all_day_event_titles,
+                                                &cross_day_event_titles,
                                                 &replacement,
                                             )?;
                                             Ok(pinned_rectangles_opt.get_or_insert(replacement))
@@ -403,7 +404,7 @@ fn unsafe_main() {
                                 ret?
                             };
 
-                            let grid_vertical_offset = if pinned_rectangles.is_empty() {
+                            let grid_vertical_offset = if cross_day_event_rectangles.is_empty() {
                                 0f32
                             } else {
                                 top_panel_height
@@ -416,7 +417,7 @@ fn unsafe_main() {
                                 h: event_surface_rectangle.h - grid_vertical_offset,
                             };
 
-                            let cell_height = if pinned_rectangles.is_empty() {
+                            let cell_height = if cross_day_event_rectangles.is_empty() {
                                 grid_rectangle.h / 24.
                             } else {
                                 top_panel_height
@@ -435,7 +436,7 @@ fn unsafe_main() {
                                         calendar::render::Rectangles,
                                         _,
                                     > = calendar::render::event_rectangles(
-                                        &agenda,
+                                        &agenda.short_events,
                                         &week_start,
                                         &arguments,
                                     );
@@ -450,7 +451,7 @@ fn unsafe_main() {
                                 register_event_titles(
                                     &mut text_registry,
                                     &fonts.title,
-                                    &event_titles,
+                                    &inside_day_event_titles,
                                     &new_rectangles,
                                 )?;
                                 scrollable_rectangles.replace(new_rectangles);
@@ -465,7 +466,7 @@ fn unsafe_main() {
                             }
 
                             calendar::render::render_rectangles(
-                                pinned_rectangles.iter(),
+                                cross_day_event_rectangles.iter(),
                                 &event_render,
                             )?;
 

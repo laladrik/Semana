@@ -1,10 +1,7 @@
-use core::str::FromStr;
-
-use super::Date;
 use super::Error;
-use super::Item as AgendaItem;
+use super::Event as AgendaItem;
 use super::MINUTES_PER_DAY;
-use super::Time;
+use super::{Date, Event, Time};
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct Point {
@@ -169,35 +166,30 @@ fn calculate_event_point_x(
 
 fn create_point<'ev>(
     first_date: &'_ Date,
-    event_date: &'ev str,
-    event_time: &'ev str,
+    start_date: &'ev Date,
+    start_time: &'ev Time,
     arguments: &Arguments,
-) -> Result<Point, Error<'ev>> {
+) -> Point {
     let Arguments {
         column_width,
         column_height,
         offset_x,
         offset_y,
     } = arguments;
-    let start_date: Date =
-        Date::from_str(event_date).map_err(|_| Error::InvalidDate(event_date))?;
-    let start_time: Time =
-        Time::from_str(event_time).map_err(|_| Error::InvalidTime(event_time))?;
-
-    let x = calculate_event_point_x(first_date, &start_date, *column_width, *offset_x);
+    let x = calculate_event_point_x(first_date, start_date, *column_width, *offset_x);
     let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height
         + offset_y;
-    Ok(Point { x, y })
+    Point { x, y }
 }
 
 pub type Rectangles<'ev> = Vec<Rectangle<'ev>>;
 
-fn is_all_day(event: &AgendaItem) -> bool {
-    event.all_day == "True"
+pub fn cross_day(event: &AgendaItem) -> bool {
+    !inside_a_day(event)
 }
 
-fn not_all_day(event: &AgendaItem) -> bool {
-    event.all_day == "False"
+pub fn inside_a_day(event: &AgendaItem) -> bool {
+    event.all_day == "False" && event.start_date == event.end_date
 }
 
 pub struct RectangleSet<'ev> {
@@ -206,7 +198,7 @@ pub struct RectangleSet<'ev> {
 }
 
 fn create_whole_day_rectangle<'ev>(
-    event: &'ev AgendaItem,
+    long_event: &'ev Event,
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Result<Rectangle<'ev>, Error<'ev>> {
@@ -216,13 +208,12 @@ fn create_whole_day_rectangle<'ev>(
         offset_x,
         offset_y,
     } = arguments;
-    let start_date: Date =
-        Date::from_str(&event.start_date).map_err(|_| Error::InvalidDate(&event.start_date))?;
-    let x = calculate_event_point_x(first_date, &start_date, *column_width, *offset_x);
+    let x = calculate_event_point_x(first_date, &long_event.start_date, *column_width, *offset_x);
     let start_point = Point { x, y: *offset_y };
 
     let size: Size = {
-        let x = calculate_event_point_x(first_date, &start_date, *column_width, *offset_x);
+        let x =
+            calculate_event_point_x(first_date, &long_event.start_date, *column_width, *offset_x);
         let end_point = Point {
             x,
             y: offset_y + column_height,
@@ -234,7 +225,7 @@ fn create_whole_day_rectangle<'ev>(
     Ok(Rectangle {
         at: start_point,
         size,
-        text: &event.title,
+        text: &long_event.title,
     })
 }
 
@@ -242,20 +233,20 @@ fn create_day_rectangle<'ev>(
     event: &'ev AgendaItem,
     first_date: &'_ Date,
     arguments: &Arguments,
-) -> Result<Rectangle<'ev>, Error<'ev>> {
+) -> Rectangle<'ev> {
     let start_point: Point =
-        create_point(first_date, &event.start_date, &event.start_time, arguments)?;
+        create_point(first_date, &event.start_date, &event.start_time, arguments);
     let size: Size = {
         let end_point: Point =
-            create_point(first_date, &event.end_date, &event.end_time, arguments)?;
+            create_point(first_date, &event.end_date, &event.end_time, arguments);
         calculate_size(&start_point, &end_point, arguments.column_width)
     };
 
-    Ok(Rectangle {
+    Rectangle {
         at: start_point,
         size,
         text: &event.title,
-    })
+    }
 }
 
 fn calculate_size(start_point: &Point, end_point: &Point, column_width: f32) -> Size {
@@ -265,13 +256,13 @@ fn calculate_size(start_point: &Point, end_point: &Point, column_width: f32) -> 
     }
 }
 
-pub fn whole_day_rectangles<'ev>(
-    events: &'ev [AgendaItem],
+pub fn cross_day_rectangles<'ev>(
+    events: &'ev [Event],
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Result<Rectangles<'ev>, Error<'ev>> {
     let mut ret = Vec::new();
-    for whole_day_event in events.iter().filter(|x| is_all_day(x)) {
+    for whole_day_event in events.iter().filter(|x| cross_day(x)) {
         let rect = create_whole_day_rectangle(whole_day_event, first_date, arguments)?;
         ret.push(rect);
     }
@@ -282,9 +273,7 @@ pub fn whole_day_rectangles<'ev>(
 #[derive(Default)]
 struct Atasco<'ev> {
     rectangles: Rectangles<'ev>,
-    //lane_count: Lane,
     lanes: Vec<Lane>,
-    //absciss: f32,
     end: f32,
 }
 
@@ -355,16 +344,21 @@ fn find_free_lane(new_event_begin: f32, atasco: &Atasco) -> (Lane, f32) {
 /// # Assumptions
 /// The `events` are sorted by [`AgendaItem::start_time`]
 pub fn event_rectangles<'ev>(
-    events: &'ev [AgendaItem],
+    short_events: &'ev [Event],
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Result<Rectangles<'ev>, Error<'ev>> {
+    for event in short_events {
+        assert_eq!(event.start_date, event.end_date);
+    }
+
     let mut ret = Vec::new();
     let mut last_atasco = Atasco::default();
     let mut lane_count = 0;
     let mut absciss = 0.;
-    for event in events.iter().filter(|x| not_all_day(x)) {
-        let rect = create_day_rectangle(event, first_date, arguments)?;
+
+    for event in short_events {
+        let rect = create_day_rectangle(event, first_date, arguments);
         // As we might overlapping events, the time of the `event` is compared to the time of the
         // previous event if any.  The implementation does not work with the time, instead it uses
         // the coordinates of the rectangles of the events.
@@ -443,6 +437,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::render::event_rectangles;
 
@@ -454,18 +450,18 @@ mod tests {
                 AgendaItem {
                     all_day: "False".to_owned(),
                     title: "Left".to_owned(),
-                    start_date: "2025-09-29".to_owned(),
-                    start_time: "00:00".to_owned(),
-                    end_date: "2025-09-29".to_owned(),
-                    end_time: "01:00".to_owned(),
+                    start_date: create_date("2025-09-29"),
+                    start_time: create_time("00:00"),
+                    end_date: create_date("2025-09-29"),
+                    end_time: create_time("01:00"),
                 },
                 AgendaItem {
                     all_day: "False".to_owned(),
                     title: "Right".to_owned(),
-                    start_date: "2025-09-30".to_owned(),
-                    start_time: "00:00".to_owned(),
-                    end_date: "2025-09-30".to_owned(),
-                    end_time: "01:00".to_owned(),
+                    start_date: create_date("2025-09-30"),
+                    start_time: create_time("00:00"),
+                    end_date: create_date("2025-09-30"),
+                    end_time: create_time("01:00"),
                 },
             ];
 
@@ -535,18 +531,18 @@ mod tests {
                 AgendaItem {
                     all_day: "False".to_owned(),
                     title: "Left".to_owned(),
-                    start_date: "2025-09-29".to_owned(),
-                    start_time: "00:00".to_owned(),
-                    end_date: "2025-09-29".to_owned(),
-                    end_time: "01:00".to_owned(),
+                    start_date: create_date("2025-09-29"),
+                    start_time: create_time("00:00"),
+                    end_date: create_date("2025-09-29"),
+                    end_time: create_time("01:00"),
                 },
                 AgendaItem {
                     all_day: "False".to_owned(),
                     title: "Right".to_owned(),
-                    start_date: "2025-09-29".to_owned(),
-                    start_time: "00:00".to_owned(),
-                    end_date: "2025-09-29".to_owned(),
-                    end_time: "01:00".to_owned(),
+                    start_date: create_date("2025-09-29"),
+                    start_time: create_time("00:00"),
+                    end_date: create_date("2025-09-29"),
+                    end_time: create_time("01:00"),
                 },
             ];
 
@@ -619,10 +615,10 @@ mod tests {
             let create_item = |name: &str, from: &str, to: &str| AgendaItem {
                 all_day: "False".to_owned(),
                 title: name.to_owned(),
-                start_date: "2025-10-27".to_owned(),
-                start_time: from.to_owned(),
-                end_date: "2025-10-27".to_owned(),
-                end_time: to.to_owned(),
+                start_date: create_date("2025-10-27"),
+                start_time: create_time(from),
+                end_date: create_date("2025-10-27"),
+                end_time: create_time(to),
             };
 
             let events = [
@@ -725,7 +721,28 @@ mod tests {
     #[track_caller]
     fn assert_approx_f32(left: f32, right: f32, tolerance: f32) {
         let diff = left - right;
-        assert!(diff.abs() < tolerance, "{} must be similar to {}", left, right);
+        assert!(
+            diff.abs() < tolerance,
+            "{} must be similar to {}",
+            left,
+            right
+        );
+    }
+
+    #[track_caller]
+    fn create_date(s: &str) -> Date {
+        match Date::from_str(s) {
+            Ok(x) => x,
+            Err(_) => panic!("can't create Date from {}", s),
+        }
+    }
+
+    #[track_caller]
+    fn create_time(s: &str) -> Time {
+        match Time::from_str(s) {
+            Ok(x) => x,
+            Err(_) => panic!("can't create Time from {}", s),
+        }
     }
 
     #[test]
@@ -733,10 +750,10 @@ mod tests {
         let events = [AgendaItem {
             all_day: "False".to_owned(),
             title: "arst".to_owned(),
-            start_date: "2025-09-29".to_owned(),
-            start_time: "00:00".to_owned(),
-            end_date: "2025-09-29".to_owned(),
-            end_time: "01:00".to_owned(),
+            start_date: create_date("2025-09-29"),
+            start_time: create_time("00:00"),
+            end_date: create_date("2025-09-29"),
+            end_time: create_time("01:00"),
         }];
 
         let arguments = Arguments {

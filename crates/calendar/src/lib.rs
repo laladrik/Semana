@@ -13,16 +13,16 @@ pub enum Error<'s> {
 }
 
 #[derive(DeJson, Debug)]
-pub struct Item {
+pub struct Event {
     pub title: String,
     #[nserde(rename = "start-date")]
-    pub start_date: String,
+    pub start_date: Date,
     #[nserde(rename = "start-time")]
-    pub start_time: String,
+    pub start_time: Time,
     #[nserde(rename = "end-date")]
-    pub end_date: String,
+    pub end_date: Date,
     #[nserde(rename = "end-time")]
-    pub end_time: String,
+    pub end_time: Time,
     #[nserde(rename = "all-day")]
     pub all_day: String,
 }
