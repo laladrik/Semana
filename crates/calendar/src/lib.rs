@@ -67,7 +67,7 @@ impl Iterator for DateStream {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Date {
     pub year: u16,
     pub month: u8,
@@ -80,11 +80,11 @@ impl nanoserde::DeJson for Date {
         input: &mut std::str::Chars,
     ) -> Result<Self, nanoserde::DeJsonErr> {
         if let nanoserde::DeJsonTok::Str = &mut state.tok {
-            match Date::from_str(state.strbuf.as_str()) {
+            let s = core::mem::take(&mut state.strbuf);
+            match Date::from_str(&s) {
                 Err(_) => Err(state.err_parse("date")),
                 Ok(x) => {
                     state.next_tok(input)?;
-                    core::mem::take(&mut state.strbuf);
                     Ok(x)
                 }
             }
@@ -94,6 +94,7 @@ impl nanoserde::DeJson for Date {
     }
 }
 
+#[derive(Debug)]
 pub enum ParseDateError {
     InvalidInput(InvalidInput),
     ParseIntError(ParseIntError),
@@ -105,6 +106,7 @@ pub trait TextCreate {
     fn text_create(&self, s: &str) -> Self::Result;
 }
 
+#[derive(Debug)]
 pub struct InvalidInput;
 
 impl FromStr for Date {
@@ -192,9 +194,10 @@ impl Date {
     }
 }
 
-struct Time {
-    hour: u8,
-    minute: u8,
+#[derive(Debug, Clone)]
+pub struct Time {
+    pub hour: u8,
+    pub minute: u8,
 }
 
 impl nanoserde::DeJson for Time {
@@ -203,10 +206,10 @@ impl nanoserde::DeJson for Time {
         input: &mut std::str::Chars,
     ) -> Result<Self, nanoserde::DeJsonErr> {
         if let nanoserde::DeJsonTok::Str = &mut state.tok {
-            match Time::from_str(state.strbuf.as_str()) {
+            let s = core::mem::take(&mut state.strbuf);
+            match Time::from_str(&s) {
                 Ok(x) => {
                     state.next_tok(input)?;
-                    core::mem::take(&mut state.strbuf);
                     Ok(x)
                 }
                 Err(_) => Err(state.err_parse("time")),
@@ -248,6 +251,14 @@ impl Time {
         } else {
             Ok(Time { hour, minute })
         }
+    }
+
+    const fn midnight() -> Self {
+        Self { hour: 0, minute: 0 }
+    }
+
+    const fn last_minute() -> Self {
+        Self { hour: 23, minute: 59 }
     }
 
     fn minutes_from_midnight(&self) -> u16 {
