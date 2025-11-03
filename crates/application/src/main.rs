@@ -125,9 +125,15 @@ impl TextRegistry {
                 sdlext::create_texture_from_surface(self.renderer, &surf)?;
 
             let pos = {
-                let mut texture_width = 0f32;
-                let mut texture_height = 0f32;
-                let _ = sdl::SDL_GetTextureSize(texture.ptr(), &mut texture_width, &mut texture_height);
+                let (texture_width, texture_height): (f32, f32) = {
+                    let mut width = 0f32;
+                    let mut height = 0f32;
+                    if !sdl::SDL_GetTextureSize(texture.ptr(), &mut width, &mut height) {
+                        panic!("the texture size failed to be obtained");
+                    }
+                    (width, height)
+                };
+
                 sdl::SDL_FRect {
                     x: position.x,
                     y: position.y,
@@ -257,7 +263,7 @@ where
 }
 
 fn unsafe_main() {
-    let font_path = c"/home/antlord/.local/share/fonts/DejaVuSansMonoBook.ttf";
+    let font_path = c"assets/DejaVuSansMonoBook.ttf";
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
@@ -416,11 +422,6 @@ fn unsafe_main() {
                                 top_panel_height
                             };
 
-                            set_color(renderer, Color::from_rgb(0x000000))?;
-                            if !sdl::SDL_RenderClear(renderer) {
-                                return Err(sdlext::Error::RenderClearFailed)?;
-                            }
-
                             let create_rectangles = || {
                                 let rectangles: calendar::render::Rectangles = {
                                     let arguments = calendar::render::Arguments {
@@ -456,6 +457,13 @@ fn unsafe_main() {
                             }
 
                             let rectangles = scrollable_rectangles.as_ref().unwrap();
+
+                            // stage: render
+                            set_color(renderer, Color::from_rgb(0x000000))?;
+                            if !sdl::SDL_RenderClear(renderer) {
+                                return Err(sdlext::Error::RenderClearFailed)?;
+                            }
+
                             calendar::render::render_rectangles(
                                 pinned_rectangles.iter(),
                                 &event_render,
@@ -465,6 +473,7 @@ fn unsafe_main() {
                             render_grid(renderer, &grid_rectangle)?;
                             text_registry.render()?;
                             set_color(renderer, Color::from_rgb(0x111111))?;
+                            // render the day names and the dates, render hours
                             let render_week_captions_args =
                                 calendar::render::RenderWeekCaptionsArgs {
                                     hours_arguments: calendar::render::RenderHoursArgs {
