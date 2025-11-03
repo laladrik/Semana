@@ -1,6 +1,7 @@
-use super::Item;
-use nanoserde::DeJson;
-use std::ffi::OsStr;
+use crate::DateStream;
+
+use super::{Date, Item, Time};
+use std::{ffi::OsStr, str::FromStr};
 pub trait AgendaSource {
     type Data;
     type Error;
@@ -39,111 +40,6 @@ impl JsonParser for NanoSerde {
 
     fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<Agenda, Self::Error> {
         nanoserde::DeJson::deserialize_json(bytes)
-    }
-}
-
-pub struct Date {
-    pub year: u16,
-    pub month: u8,
-    pub day: u8,
-}
-
-impl DeJson for Date {
-    fn de_json(
-        state: &mut nanoserde::DeJsonState,
-        input: &mut core::str::Chars,
-    ) -> Result<Self, nanoserde::DeJsonErr> {
-        let year: u16 = parse_digits::<4, u16>(state, input)?;
-        let month: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 12 {
-                return Err(state.err_parse("invalid month"));
-            }
-            two_digit_number
-        };
-
-        skip_delimeter(state, input, ':')?;
-        let day: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 31 {
-                return Err(state.err_parse("invalid day"));
-            }
-            two_digit_number
-        };
-
-        Ok(Date { year, month, day })
-    }
-}
-
-pub struct Time {
-    pub hour: u8,
-    pub minute: u8,
-}
-
-fn parse_digits<const N: usize, Out: core::str::FromStr>(
-    state: &mut nanoserde::DeJsonState,
-    input: &mut core::str::Chars,
-) -> Result<Out, nanoserde::DeJsonErr> {
-    let mut ret: [char; N] = [' '; N];
-    for i in 0..N {
-        state.next(input);
-        let maybe_digit = state.cur;
-        ret[i] = maybe_digit;
-    }
-
-    let s = String::from_iter(ret.iter());
-    Out::from_str(&s).map_err(|_| state.err_parse("the hour of the time is invalid"))
-}
-
-fn parse_two_digits(
-    state: &mut nanoserde::DeJsonState,
-    input: &mut core::str::Chars,
-) -> Result<u8, nanoserde::DeJsonErr> {
-    parse_digits::<2, u8>(state, input)
-}
-
-fn skip_delimeter(
-    state: &mut nanoserde::DeJsonState,
-    input: &mut core::str::Chars,
-    expected_delimeter: char,
-) -> Result<(), nanoserde::DeJsonErr> {
-    state.next(input);
-    let actual_delimeter = state.cur;
-    if actual_delimeter != expected_delimeter {
-        Err(nanoserde::DeJsonErr {
-            msg: nanoserde::DeJsonErrReason::CannotParse("colon after the hour in Time".to_owned()),
-            line: state.line,
-            col: state.col,
-        })
-    } else {
-        Ok(())
-    }
-}
-
-// parses  a string like 12:34, 09:23
-impl DeJson for Time {
-    fn de_json(
-        state: &mut nanoserde::DeJsonState,
-        input: &mut core::str::Chars,
-    ) -> Result<Self, nanoserde::DeJsonErr> {
-        let hour: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 23 {
-                return Err(state.err_parse("the hour is too big"));
-            }
-            two_digit_number
-        };
-
-        skip_delimeter(state, input, ':')?;
-        let minute: u8 = {
-            let two_digit_number = parse_two_digits(state, input)?;
-            if two_digit_number > 59 {
-                return Err(state.err_parse("the minute is too big"));
-            }
-            two_digit_number
-        };
-
-        Ok(Time { hour, minute })
     }
 }
 
