@@ -169,6 +169,24 @@ enum EventType {
     CrossNight,
 }
 
+/// An event which finishes on the following day is split into two events. The event occurs for
+/// every day it lasts for.  In every occurence it has the same value in [`Event::start_date`] and
+/// [`Event::end_date`].  Given that, there are two occurences of the same event with the same
+/// properties.  One for the day where it starts, one for the day where it finishes.  The goal:
+/// split the event into two events to alleviate the render of the event.  Given that and that
+/// there are two occurrences, the problem converts from splitting to cropping each occurrence of
+/// the event.
+///
+/// The first occurence is turned into the event which lasts until the last minute of its day, the
+/// second occurence of the event lasts until the end, and it starts from the midnight of the
+/// following day.
+///
+/// The function crops the event and return its cropped version.  If `date` matches
+/// [`Event::start_date`], it crops the second "half" of the event. If `date` matches
+/// [`Event::end_date`], it crops the first "half".
+///
+/// It assumes that it's called only for the events which start on one day and finishes on the
+/// following day.
 fn crop_event(date: &Date, event: Event) -> Event {
     if date == &event.start_date {
         Event {
@@ -189,7 +207,7 @@ fn crop_event(date: &Date, event: Event) -> Event {
             all_day: event.all_day,
         }
     } else {
-        panic!("only an event which shorted than 24 hours can be cropped")
+        panic!("only an event which shorter than 24 hours can be cropped")
     }
 }
 
