@@ -1,7 +1,7 @@
 use super::Error;
 use super::Event as AgendaItem;
-use super::MINUTES_PER_DAY;
 use super::{Date, Event, Time};
+use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
 pub struct Point {
@@ -184,49 +184,47 @@ fn create_point<'ev>(
 
 pub type Rectangles<'ev> = Vec<Rectangle<'ev>>;
 
-pub fn cross_day(event: &AgendaItem) -> bool {
-    !inside_a_day(event)
-}
-
-pub fn inside_a_day(event: &AgendaItem) -> bool {
-    event.all_day == "False" && event.start_date == event.end_date
-}
-
 pub struct RectangleSet<'ev> {
     pub pinned: Rectangles<'ev>,
     pub scrolled: Rectangles<'ev>,
 }
 
-fn create_whole_day_rectangle<'ev>(
+fn create_long_day_rectangle<'ev>(
     long_event: &'ev Event,
     first_date: &'_ Date,
     arguments: &Arguments,
-) -> Result<Rectangle<'ev>, Error<'ev>> {
+) -> Rectangle<'ev> {
     let Arguments {
         column_width,
         column_height,
         offset_x,
         offset_y,
     } = arguments;
-    let x = calculate_event_point_x(first_date, &long_event.start_date, *column_width, *offset_x);
-    let start_point = Point { x, y: *offset_y };
-
-    let size: Size = {
-        let x =
-            calculate_event_point_x(first_date, &long_event.start_date, *column_width, *offset_x);
-        let end_point = Point {
-            x,
-            y: offset_y + column_height,
-        };
-
-        calculate_size(&start_point, &end_point, arguments.column_width)
+    let calc_x = |date: &Date, time: &Time| -> f32 {
+        let days = date.subtract(first_date);
+        let day_tail = (time.hour as u16 * MINUTES_PER_HOUR as u16 + time.minute as u16) as f32;
+        (day_tail / (MINUTES_PER_DAY as f32) + days as f32) * column_width + offset_x
     };
 
-    Ok(Rectangle {
+    let start_x = calc_x(&long_event.start_date, &long_event.start_time);
+    let start_point = Point {
+        x: start_x,
+        y: *offset_y,
+    };
+
+    let size: Size = {
+        let end_x = calc_x(&long_event.end_date, &long_event.end_time);
+        Size {
+            x: end_x - start_x,
+            y: *column_height,
+        }
+    };
+
+    Rectangle {
         at: start_point,
         size,
         text: &long_event.title,
-    })
+    }
 }
 
 fn create_day_rectangle<'ev>(
@@ -234,12 +232,17 @@ fn create_day_rectangle<'ev>(
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Rectangle<'ev> {
+    assert_eq!(event.start_date, event.end_date);
+
     let start_point: Point =
         create_point(first_date, &event.start_date, &event.start_time, arguments);
     let size: Size = {
         let end_point: Point =
             create_point(first_date, &event.end_date, &event.end_time, arguments);
-        calculate_size(&start_point, &end_point, arguments.column_width)
+        Size {
+            x: arguments.column_width,
+            y: end_point.y - start_point.y,
+        }
     };
 
     Rectangle {
@@ -249,24 +252,14 @@ fn create_day_rectangle<'ev>(
     }
 }
 
-fn calculate_size(start_point: &Point, end_point: &Point, column_width: f32) -> Size {
-    Size {
-        x: end_point.x - start_point.x + column_width,
-        y: end_point.y - start_point.y,
-    }
-}
-
-pub fn cross_day_rectangles<'ev>(
-    events: &'ev [Event],
+pub fn long_day_rectangles<'ev>(
+    long_events: &'ev [Event],
     first_date: &'_ Date,
     arguments: &Arguments,
-) -> Result<Rectangles<'ev>, Error<'ev>> {
-    let mut ret = Vec::new();
-    for whole_day_event in events.iter().filter(|x| cross_day(x)) {
-        let rect = create_whole_day_rectangle(whole_day_event, first_date, arguments)?;
-        ret.push(rect);
-    }
-    Ok(ret)
+) -> impl Iterator<Item = Rectangle<'ev>> {
+    long_events
+        .iter()
+        .map(|e| create_long_day_rectangle(e, first_date, arguments))
 }
 
 /// Atasco means a traffic jam.  The structure represents a set of overlapping events.
@@ -727,6 +720,34 @@ mod tests {
             left,
             right
         );
+    }
+
+    #[test]
+    fn test_create_long_day_rectangle() {
+        let event = Event {
+            title: "all day event".to_owned(),
+            start_date: create_date("2025-11-04"),
+            start_time: create_time("00:00"),
+            end_date: create_date("2025-11-06"),
+            end_time: create_time("00:00"),
+            all_day: "False".to_owned(),
+        };
+
+        let first_date: Date = create_date("2025-11-03");
+        let arguments = Arguments {
+            column_width: 100.,
+            column_height: 50.,
+            offset_x: 125.,
+            offset_y: 70.,
+        };
+
+        let rectangle: Rectangle<'_> = create_long_day_rectangle(&event, &first_date, &arguments);
+
+        let expected_x: f32 = arguments.offset_x + arguments.column_width * 1.;
+        assert_eq!(rectangle.at.x, expected_x);
+        let end: f32 = arguments.offset_x + arguments.column_width * 3.;
+        let expected_width: f32 = end - expected_x;
+        assert_eq!(rectangle.size.x, expected_width);
     }
 
     #[track_caller]

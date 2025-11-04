@@ -89,6 +89,7 @@ mod config {
     pub const EVENT_TITLE_COLOR: u32 = 0x000000;
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
+    pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
 }
 
 impl TextRegistry {
@@ -263,7 +264,6 @@ where
 }
 
 fn unsafe_main() {
-    let font_path = c"assets/DejaVuSansMonoBook.ttf";
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
@@ -287,7 +287,7 @@ fn unsafe_main() {
                 sdl_ttf_init(
                     renderer,
                     move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<_, Error> {
-                        let fonts = Fonts::new(font_path, font_path)?;
+                        let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
                         let ui_text_factory = SdlTextCreate {
                             engine,
                             font: &fonts.ui,
@@ -341,6 +341,7 @@ fn unsafe_main() {
                         let mut pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
 
                         'outer_loop: loop {
+                            // stage: event handle
                             while sdl::SDL_PollEvent(&mut event as _) {
                                 if event.type_ == sdl::SDL_EVENT_QUIT {
                                     break 'outer_loop;
@@ -361,31 +362,28 @@ fn unsafe_main() {
                             let cell_width: f32 = event_surface_rectangle.w / 7.;
 
                             let cross_day_event_rectangles: &calendar::render::Rectangles = {
-                                let create = || {
+                                let create = || -> calendar::render::Rectangles {
                                     let arguments = calendar::render::Arguments {
                                         column_width: cell_width,
                                         column_height: top_panel_height,
                                         offset_x: event_surface_rectangle.x,
                                         offset_y: event_surface_rectangle.y,
                                     };
-                                    let pinned_rectangles_res: Result<
-                                        calendar::render::Rectangles,
-                                        calendar::Error,
-                                    > = calendar::render::cross_day_rectangles(
-                                        &agenda.long_events,
-                                        &week_start,
-                                        &arguments,
-                                    );
+                                    let pinned_rectangles_res =
+                                        calendar::render::long_day_rectangles(
+                                            &agenda.long_events,
+                                            &week_start,
+                                            &arguments,
+                                        );
 
-                                    pinned_rectangles_res
+                                    pinned_rectangles_res.collect()
                                 };
 
                                 let ret: Result<&calendar::render::Rectangles, CalendarError> =
                                     match pinned_rectangles_opt {
                                         Some(ref x) => Ok(x),
                                         None => {
-                                            let replacement =
-                                                create().map_err(CalendarError::from)?;
+                                            let replacement = create();
                                             // TODO: implement a facility which creates the titles
                                             // of the events at once for the "All day" events and
                                             // regular events.  This would allow to prevent
