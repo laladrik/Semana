@@ -1,5 +1,4 @@
 use super::Error;
-use super::Event as AgendaItem;
 use super::{Date, Event, Time};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
@@ -189,7 +188,7 @@ pub struct RectangleSet<'ev> {
     pub scrolled: Rectangles<'ev>,
 }
 
-fn create_long_day_rectangle<'ev>(
+fn create_long_event_rectangle<'ev>(
     long_event: &'ev Event,
     first_date: &'_ Date,
     arguments: &Arguments,
@@ -227,8 +226,8 @@ fn create_long_day_rectangle<'ev>(
     }
 }
 
-fn create_day_rectangle<'ev>(
-    event: &'ev AgendaItem,
+fn create_short_event_rectangle<'ev>(
+    event: &'ev Event,
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> Rectangle<'ev> {
@@ -252,14 +251,14 @@ fn create_day_rectangle<'ev>(
     }
 }
 
-pub fn long_day_rectangles<'ev>(
+pub fn long_event_rectangles<'ev>(
     long_events: &'ev [Event],
-    first_date: &'_ Date,
+    first_date: &Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle<'ev>> {
     long_events
         .iter()
-        .map(|e| create_long_day_rectangle(e, first_date, arguments))
+        .map(|e| create_long_event_rectangle(e, first_date, arguments))
 }
 
 /// Atasco means a traffic jam.  The structure represents a set of overlapping events.
@@ -335,8 +334,8 @@ fn find_free_lane(new_event_begin: f32, atasco: &Atasco) -> (Lane, f32) {
 /// Creates rectangles which visualize the position of the `events`.
 ///
 /// # Assumptions
-/// The `events` are sorted by [`AgendaItem::start_time`]
-pub fn event_rectangles<'ev>(
+/// The `events` are sorted by [`Event::start_time`]
+pub fn short_event_rectangles<'ev>(
     short_events: &'ev [Event],
     first_date: &'_ Date,
     arguments: &Arguments,
@@ -351,7 +350,7 @@ pub fn event_rectangles<'ev>(
     let mut absciss = 0.;
 
     for event in short_events {
-        let rect = create_day_rectangle(event, first_date, arguments);
+        let rect = create_short_event_rectangle(event, first_date, arguments);
         // As we might overlapping events, the time of the `event` is compared to the time of the
         // previous event if any.  The implementation does not work with the time, instead it uses
         // the coordinates of the rectangles of the events.
@@ -433,14 +432,14 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::render::event_rectangles;
+    use crate::render::short_event_rectangles;
 
     mod atasco {
         use super::*;
         #[test]
         fn test_different_days() {
             let events = [
-                AgendaItem {
+                Event {
                     all_day: "False".to_owned(),
                     title: "Left".to_owned(),
                     start_date: create_date("2025-09-29"),
@@ -448,7 +447,7 @@ mod tests {
                     end_date: create_date("2025-09-29"),
                     end_time: create_time("01:00"),
                 },
-                AgendaItem {
+                Event {
                     all_day: "False".to_owned(),
                     title: "Right".to_owned(),
                     start_date: create_date("2025-09-30"),
@@ -472,7 +471,8 @@ mod tests {
                 day: 29,
             };
 
-            let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+            let ret: Result<Rectangles, Error> =
+                short_event_rectangles(&events, &start_date, &arguments);
             const ONE_HOUR: f32 = 600.0 / 24.0;
             match ret {
                 Ok(ref rectangles) => {
@@ -521,7 +521,7 @@ mod tests {
         #[test]
         fn test_side_by_side() {
             let events = [
-                AgendaItem {
+                Event {
                     all_day: "False".to_owned(),
                     title: "Left".to_owned(),
                     start_date: create_date("2025-09-29"),
@@ -529,7 +529,7 @@ mod tests {
                     end_date: create_date("2025-09-29"),
                     end_time: create_time("01:00"),
                 },
-                AgendaItem {
+                Event {
                     all_day: "False".to_owned(),
                     title: "Right".to_owned(),
                     start_date: create_date("2025-09-29"),
@@ -554,7 +554,8 @@ mod tests {
                 day: 29,
             };
 
-            let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+            let ret: Result<Rectangles, Error> =
+                short_event_rectangles(&events, &start_date, &arguments);
             const ONE_HOUR: f32 = 600.0 / 24.0;
             match ret {
                 Ok(ref rectangles) => {
@@ -605,7 +606,7 @@ mod tests {
 
         #[test]
         fn test_collision() {
-            let create_item = |name: &str, from: &str, to: &str| AgendaItem {
+            let create_item = |name: &str, from: &str, to: &str| Event {
                 all_day: "False".to_owned(),
                 title: name.to_owned(),
                 start_date: create_date("2025-10-27"),
@@ -637,7 +638,8 @@ mod tests {
                 day: 27,
             };
 
-            let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+            let ret: Result<Rectangles, Error> =
+                short_event_rectangles(&events, &start_date, &arguments);
             const ONE_HOUR: f32 = 600.0 / 24.0; // 25
             const TEN_HOURS: f32 = ONE_HOUR * 10.; // 250
             const HALF_HOUR: f32 = ONE_HOUR / 2.; // 12.5
@@ -723,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_long_day_rectangle() {
+    fn test_create_long_event_rectangle() {
         let event = Event {
             title: "all day event".to_owned(),
             start_date: create_date("2025-11-04"),
@@ -741,7 +743,7 @@ mod tests {
             offset_y: 70.,
         };
 
-        let rectangle: Rectangle<'_> = create_long_day_rectangle(&event, &first_date, &arguments);
+        let rectangle: Rectangle<'_> = create_long_event_rectangle(&event, &first_date, &arguments);
 
         let expected_x: f32 = arguments.offset_x + arguments.column_width * 1.;
         assert_eq!(rectangle.at.x, expected_x);
@@ -768,7 +770,7 @@ mod tests {
 
     #[test]
     fn test_top_left_event() {
-        let events = [AgendaItem {
+        let events = [Event {
             all_day: "False".to_owned(),
             title: "arst".to_owned(),
             start_date: create_date("2025-09-29"),
@@ -790,7 +792,8 @@ mod tests {
             day: 29,
         };
 
-        let ret: Result<Rectangles, Error> = event_rectangles(&events, &start_date, &arguments);
+        let ret: Result<Rectangles, Error> =
+            short_event_rectangles(&events, &start_date, &arguments);
         const ONE_HOUR: f32 = 600.0 / 24.0;
         match ret {
             Ok(x) => assert!(

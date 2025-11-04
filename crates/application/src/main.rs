@@ -358,10 +358,11 @@ fn unsafe_main() {
                                 }
                             }
 
-                            let top_panel_height = event_surface_rectangle.h / 25.;
+                            let title_font_height =
+                                sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
+                            let top_panel_height = (title_font_height + 15) as f32;
                             let cell_width: f32 = event_surface_rectangle.w / 7.;
-
-                            let cross_day_event_rectangles: &calendar::render::Rectangles = {
+                            let long_event_rectangles: &calendar::render::Rectangles = {
                                 let create = || -> calendar::render::Rectangles {
                                     let arguments = calendar::render::Arguments {
                                         column_width: cell_width,
@@ -370,7 +371,7 @@ fn unsafe_main() {
                                         offset_y: event_surface_rectangle.y,
                                     };
                                     let pinned_rectangles_res =
-                                        calendar::render::long_day_rectangles(
+                                        calendar::render::long_event_rectangles(
                                             &agenda.long_events,
                                             &week_start,
                                             &arguments,
@@ -402,7 +403,7 @@ fn unsafe_main() {
                                 ret?
                             };
 
-                            let grid_vertical_offset = if cross_day_event_rectangles.is_empty() {
+                            let grid_vertical_offset = if long_event_rectangles.is_empty() {
                                 0f32
                             } else {
                                 top_panel_height
@@ -415,13 +416,8 @@ fn unsafe_main() {
                                 h: event_surface_rectangle.h - grid_vertical_offset,
                             };
 
-                            let cell_height = if cross_day_event_rectangles.is_empty() {
-                                grid_rectangle.h / 24.
-                            } else {
-                                top_panel_height
-                            };
-
-                            let create_rectangles = || {
+                            let cell_height = grid_rectangle.h / 24.;
+                            let create_rectangles = || -> calendar::render::Rectangles {
                                 let rectangles: calendar::render::Rectangles = {
                                     let arguments = calendar::render::Arguments {
                                         column_width: grid_rectangle.w / 7.,
@@ -433,7 +429,7 @@ fn unsafe_main() {
                                     let scroll_rectangles_res: Result<
                                         calendar::render::Rectangles,
                                         _,
-                                    > = calendar::render::event_rectangles(
+                                    > = calendar::render::short_event_rectangles(
                                         &agenda.short_events,
                                         &week_start,
                                         &arguments,
@@ -464,7 +460,7 @@ fn unsafe_main() {
                             }
 
                             calendar::render::render_rectangles(
-                                cross_day_event_rectangles.iter(),
+                                long_event_rectangles.iter(),
                                 &event_render,
                             )?;
 
