@@ -320,17 +320,19 @@ fn unsafe_main() {
                                 &arguments,
                             );
 
-                        let agenda: calendar::obtain::WeekSchedule = match res {
-                            Ok(agenda) => agenda,
+                        let agenda: calendar::obtain::WeekScheduleWithLanes = match res {
+                            Ok(agenda) => calendar::obtain::get_lanes(agenda, &week_start),
                             Err(err) => panic!("can't get the agenda: {:?}", err),
                         };
 
                         let inside_day_event_titles: Vec<&str> = agenda
+                            .schedule
                             .short_events
                             .iter()
                             .map(|x| x.title.as_str())
                             .collect();
                         let cross_day_event_titles: Vec<&str> = agenda
+                            .schedule
                             .long_events
                             .iter()
                             .map(|x| x.title.as_str())
@@ -360,7 +362,16 @@ fn unsafe_main() {
 
                             let title_font_height =
                                 sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
-                            let top_panel_height = (title_font_height + 15) as f32;
+                            let long_lane_max_count: f32 = agenda
+                                .lanes
+                                .long
+                                .iter()
+                                .map(|(_, total_lane_count)| *total_lane_count)
+                                .max()
+                                .unwrap_or(0)
+                                as f32;
+                            let top_panel_height =
+                                (title_font_height + 15) as f32 * long_lane_max_count;
                             let cell_width: f32 = event_surface_rectangle.w / 7.;
                             let long_event_rectangles: &calendar::render::Rectangles = {
                                 let create = || -> calendar::render::Rectangles {
@@ -372,7 +383,8 @@ fn unsafe_main() {
                                     };
                                     let pinned_rectangles_res =
                                         calendar::render::long_event_rectangles(
-                                            &agenda.long_events,
+                                            &agenda.schedule.long_events,
+                                            &agenda.lanes.long,
                                             &week_start,
                                             &arguments,
                                         );
@@ -426,16 +438,13 @@ fn unsafe_main() {
                                         offset_y: grid_rectangle.y,
                                     };
 
-                                    let scroll_rectangles_res: Result<
-                                        calendar::render::Rectangles,
-                                        _,
-                                    > = calendar::render::short_event_rectangles(
-                                        &agenda.short_events,
+                                    calendar::render::short_event_rectangles(
+                                        &agenda.schedule.short_events,
+                                        &agenda.lanes.short,
                                         &week_start,
                                         &arguments,
-                                    );
-                                    scroll_rectangles_res
-                                        .expect("fail to turn the events into the rectangles")
+                                    )
+                                    .collect()
                                 };
                                 rectangles
                             };

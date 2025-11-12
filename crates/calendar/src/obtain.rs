@@ -1,4 +1,6 @@
-use super::{Date, DateStream, Event, Time};
+use crate::MINUTES_PER_DAY;
+
+use super::{Date, DateStream, Event, Minutes, Time};
 use std::{ffi::OsStr, str::FromStr};
 pub trait AgendaSource {
     type Data;
@@ -77,6 +79,62 @@ pub struct WeekSchedule {
     pub short_events: Agenda,
 }
 
+#[derive(Default)]
+struct Clash {
+    event_ends: Vec<Minutes>,
+    lanes: Vec<Lane>,
+    end: Minutes,
+}
+
+impl Clash {
+    fn flush(&mut self, into: &mut impl Extend<(Lane, Lane)>, lane_count: Lane) {
+        self.event_ends.clear();
+        let iter = self.lanes.drain(..).map(|lane| (lane, lane_count));
+        into.extend(iter);
+        self.end = Minutes::default();
+    }
+
+    fn push(&mut self, event_end: Minutes, lane: Lane) {
+        self.end = self.end.max(event_end);
+        self.event_ends.push(event_end);
+        self.lanes.push(lane);
+    }
+}
+
+type Lane = u8;
+
+// return (n, None) -> new lane has to be created
+// return (n, Some(x)) -> stays in the lane n
+fn find_free_lane(new_event_begin_minutes: Minutes, clash: &Clash) -> Option<Lane> {
+    let lane_index: Option<usize> = clash
+        .event_ends
+        .iter()
+        .enumerate()
+        .filter(|(_, end)| **end <= new_event_begin_minutes)
+        .fold(None, |acc, item| {
+            let (lane_index, end): (usize, &Minutes) = item;
+            match acc {
+                None => Some((lane_index, end)),
+                Some((acc_lane_index, acc_end)) => {
+                    // it's guaranteed that `acc_end` and `end` are not bigger than
+                    // new_event_begin_minutes. `acc_end` is obtainend from the `end` which is the
+                    // closest one to new_event_begin_minutes by this moment.  `end` can't be
+                    // bigger, because all the they are filtered out;
+                    let acc_diff = new_event_begin_minutes.subtract(*acc_end);
+                    let diff = new_event_begin_minutes.subtract(*end);
+                    if diff <= acc_diff {
+                        Some((lane_index, end))
+                    } else {
+                        Some((acc_lane_index, end))
+                    }
+                }
+            }
+        })
+        .map(|(lane_index, _acc_end)| lane_index);
+
+    lane_index.map(|i| unsafe { *clash.lanes.get_unchecked(i) })
+}
+
 pub fn obtain<AS, JP, O>(
     agenda_source: &AS,
     json_parser: &JP,
@@ -129,23 +187,9 @@ where
     for item in agendas {
         let (agenda_json, date): (&str, Date) = item;
         let agenda: Agenda = json_parser.parse(agenda_json).map_err(Error::Parse)?;
-        let event_items = agenda.into_iter().filter_map(|event: Event| {
-            let event_type: EventType = determine_event_type(&event);
-            match event_type {
-                EventType::Short => Some((true, event)),
-                EventType::Long => {
-                    if event.start_date == date {
-                        Some((false, event))
-                    } else {
-                        None
-                    }
-                }
-                EventType::CrossNight => {
-                    let cropped_event: Event = crop_event(&date, event);
-                    Some((true, cropped_event))
-                }
-            }
-        });
+        let event_items = agenda
+            .into_iter()
+            .filter_map(|event: Event| short_event_filter(event, &date));
 
         for item in event_items {
             let (is_short, event): (bool, Event) = item;
@@ -158,6 +202,125 @@ where
     }
 
     Ok(week_schedule)
+}
+
+pub struct WeekScheduleLanes {
+    pub long: Vec<(Lane, Lane)>,
+    pub short: Vec<(Lane, Lane)>,
+}
+
+pub struct WeekScheduleWithLanes {
+    pub schedule: WeekSchedule,
+    pub lanes: WeekScheduleLanes,
+}
+
+pub fn get_lanes(schedule: WeekSchedule, start_date: &Date) -> WeekScheduleWithLanes {
+    let long_lanes: Vec<(Lane, Lane)> = find_clashes(
+        &schedule.long_events,
+        start_date,
+        long_event_clash_condition,
+    );
+
+    let short_lanes: Vec<(Lane, Lane)> = find_clashes(
+        &schedule.short_events,
+        start_date,
+        short_event_clash_condition,
+    );
+    let lanes = WeekScheduleLanes {
+        long: long_lanes,
+        short: short_lanes,
+    };
+
+    WeekScheduleWithLanes { schedule, lanes }
+}
+
+type ClashCondition = fn(is_new_day: bool, event_end: Minutes, clash_end: Minutes) -> bool;
+
+fn short_event_clash_condition(is_new_day: bool, event_start: Minutes, clash_end: Minutes) -> bool {
+    event_start < clash_end && !is_new_day
+}
+
+fn long_event_clash_condition(_is_new_day: bool, event_start: Minutes, clash_end: Minutes) -> bool {
+    event_start < clash_end
+}
+
+fn find_clashes(
+    events: &[Event],
+    start_date: &Date,
+    condition: ClashCondition,
+) -> Vec<(Lane, Lane)> {
+    let mut last_clash = Clash::default();
+    let mut current_date: &Date = start_date;
+    let mut lane_count = 0;
+    let mut ret: Vec<(Lane, Lane)> = Vec::new();
+    for event in events {
+        let start_day_diff: i32 = event.start_date.subtract(start_date);
+        let end_day_diff: i32 = event.end_date.subtract(start_date);
+        assert!((0..7).contains(&start_day_diff));
+        assert!((0..7).contains(&end_day_diff));
+        let start_date_days: Minutes = Minutes(start_day_diff as u16 * MINUTES_PER_DAY);
+        let total_event_start: Minutes = event.start_time.total_minutes().add(start_date_days);
+        //let event_start: Minutes = event.start_time.total_minutes().add(days);
+        let (rect_lane, new_lane_count, does_replace): (Lane, Lane, bool) = {
+            let clash: &Clash = &last_clash;
+            let is_new_day = &event.start_date != current_date;
+            if is_new_day {
+                current_date = &event.start_date;
+            }
+
+            let has_collision = condition(is_new_day, total_event_start, clash.end);
+            if has_collision {
+                let free_lane = find_free_lane(total_event_start, clash);
+                match free_lane {
+                    // All lanes are busy, creating new one.
+                    None => (lane_count, lane_count + 1, !has_collision),
+                    Some(lane) => (lane, lane_count, !has_collision),
+                }
+            } else {
+                (0, 1, !has_collision)
+            }
+        };
+
+        if does_replace {
+            last_clash.flush(&mut ret, lane_count);
+        }
+
+        lane_count = new_lane_count;
+        let end_date_days: Minutes = Minutes(end_day_diff as u16 * MINUTES_PER_DAY);
+        last_clash.push(event.end_time.total_minutes().add(end_date_days), rect_lane);
+    }
+
+    last_clash.flush(&mut ret, lane_count);
+    ret
+}
+
+fn short_event_filter(mut event: Event, date: &Date) -> Option<(bool, Event)> {
+    let is_all_day: bool = match event.all_day.as_str() {
+        "True" => true,
+        "False" => false,
+        x => panic!("unexpected string in the field \"all-day\": {:?}", x),
+    };
+
+    if is_all_day {
+        event.start_time = Time::midnight();
+        event.end_time = Time::last_minute();
+    }
+
+    let event_type: EventType = determine_event_type(&event, is_all_day);
+    match event_type {
+        EventType::Short => Some((true, event)),
+        EventType::Long => {
+            if event.start_date == *date {
+                Some((false, event))
+            } else {
+                None
+            }
+        }
+        EventType::CrossNight => {
+            let cropped_event: Event = crop_event(date, event);
+            Some((true, cropped_event))
+        }
+    }
 }
 
 enum EventType {
@@ -211,7 +374,7 @@ fn crop_event(date: &Date, event: Event) -> Event {
     }
 }
 
-fn determine_event_type(event: &Event) -> EventType {
+fn determine_event_type(event: &Event, is_all_day: bool) -> EventType {
     let sd: &Date = &event.start_date;
     let ed: &Date = &event.end_date;
     let st: &Time = &event.start_time;
@@ -219,6 +382,7 @@ fn determine_event_type(event: &Event) -> EventType {
     let event_duration_days: i32 = ed.subtract(sd);
     assert!(event_duration_days >= 0);
     match event_duration_days {
+        0 if is_all_day => EventType::Long,
         0 => EventType::Short,
         1 => {
             const FULL_DAY: u16 = 24 * 60;
@@ -232,5 +396,97 @@ fn determine_event_type(event: &Event) -> EventType {
             }
         }
         _ => EventType::Long,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[track_caller]
+    fn create_date(s: &str) -> Date {
+        match Date::from_str(s) {
+            Ok(x) => x,
+            Err(_) => panic!("can't create Date from {}", s),
+        }
+    }
+
+    #[track_caller]
+    fn create_time(s: &str) -> Time {
+        match Time::from_str(s) {
+            Ok(x) => x,
+            Err(_) => panic!("can't create Time from {}", s),
+        }
+    }
+
+    #[test]
+    fn test_short_event_clash() {
+        let create_event = |title: &str, start_time: &str, end_time: &str| Event {
+            title: title.to_owned(),
+            start_date: create_date("2025-11-03"),
+            start_time: create_time(start_time),
+            end_date: create_date("2025-11-03"),
+            end_time: create_time(end_time),
+            all_day: "False".to_owned(),
+        };
+
+        let events: Vec<Event> = Vec::from_iter([
+            create_event("first", "10:00", "11:00"),
+            create_event("second", "10:30", "11:30"),
+            create_event("third", "11:00", "12:00"),
+            create_event("separated", "12:00", "13:00"),
+        ]);
+
+        let start = create_date("2025-11-03");
+        let lanes = find_clashes(&events, &start, short_event_clash_condition);
+        let [
+            first_event_lane,
+            second_event_lane,
+            third_event_lane,
+            separated_event_lane,
+        ] = lanes.as_slice()
+        else {
+            panic!("find_clashes must return a vector of 3 elements");
+        };
+
+        assert!(matches!(first_event_lane, (0, 2)));
+        assert!(matches!(second_event_lane, (1, 2)));
+        assert!(matches!(third_event_lane, (0, 2)));
+        assert!(matches!(separated_event_lane, (0, 1)));
+    }
+
+    #[test]
+    fn test_long_event_clash() {
+        let create_event = |title: &str, start_date: &str, end_date: &str| Event {
+            title: title.to_owned(),
+            start_date: create_date(start_date),
+            start_time: create_time("10:00"),
+            end_date: create_date(end_date),
+            end_time: create_time("10:00"),
+            all_day: "False".to_owned(),
+        };
+
+        let events: Vec<Event> = Vec::from_iter([
+            create_event("first", "2025-11-03", "2025-11-05"),
+            create_event("second", "2025-11-04", "2025-11-06"),
+            create_event("third", "2025-11-05", "2025-11-07"),
+            create_event("separated", "2025-11-07", "2025-11-08"),
+        ]);
+
+        let start = create_date("2025-11-03");
+        let lanes = find_clashes(&events, &start, long_event_clash_condition);
+        let [
+            first_event_lane,
+            second_event_lane,
+            third_event_lane,
+            separated_event_lane,
+        ] = lanes.as_slice()
+        else {
+            panic!("find_clashes must return a vector of 3 elements");
+        };
+
+        assert!(matches!(first_event_lane, (0, 2)), "{:?}", first_event_lane);
+        assert!(matches!(second_event_lane, (1, 2)));
+        assert!(matches!(third_event_lane, (0, 2)));
+        assert!(matches!(separated_event_lane, (0, 1)));
     }
 }

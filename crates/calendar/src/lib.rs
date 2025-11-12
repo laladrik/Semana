@@ -207,12 +207,20 @@ impl nanoserde::DeJson for Time {
     ) -> Result<Self, nanoserde::DeJsonErr> {
         if let nanoserde::DeJsonTok::Str = &mut state.tok {
             let s = core::mem::take(&mut state.strbuf);
-            match Time::from_str(&s) {
-                Ok(x) => {
+            match s.as_str() {
+                // the empty string in the time occurs when the event takes the entire; therefore
+                // it's assumed the field `all-day` will be "True".
+                "" => {
                     state.next_tok(input)?;
-                    Ok(x)
+                    Ok(Time::midnight())
                 }
-                Err(_) => Err(state.err_parse("time")),
+                non_empty_string => match Time::from_str(non_empty_string) {
+                    Ok(x) => {
+                        state.next_tok(input)?;
+                        Ok(x)
+                    }
+                    Err(_) => Err(state.err_parse("time")),
+                },
             }
         } else {
             Err(state.err_token("time"))
@@ -244,7 +252,27 @@ impl FromStr for Time {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default, Clone, Copy)]
+pub struct Minutes(u16);
+
+impl Minutes {
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        Minutes(self.0 + other.0)
+    }
+
+    #[inline]
+    fn subtract(self, other: Self) -> Self {
+        Minutes(self.0 - other.0)
+    }
+}
+
 impl Time {
+    #[inline]
+    fn total_minutes(&self) -> Minutes {
+        Minutes(self.hour as u16 * MINUTES_PER_HOUR as u16 + self.minute as u16)
+    }
+
     fn try_new(hour: u8, minute: u8) -> Result<Time, InvalidInput> {
         if hour > 23 || minute > 59 {
             Err(InvalidInput)
@@ -258,7 +286,10 @@ impl Time {
     }
 
     const fn last_minute() -> Self {
-        Self { hour: 23, minute: 59 }
+        Self {
+            hour: 23,
+            minute: 59,
+        }
     }
 
     fn minutes_from_midnight(&self) -> u16 {
