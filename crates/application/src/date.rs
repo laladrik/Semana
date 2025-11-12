@@ -50,4 +50,3 @@ pub fn get_week_start(now: sdl::SDL_Time) -> Result<calendar::Date, TimeError> {
         })
     }
 }
-

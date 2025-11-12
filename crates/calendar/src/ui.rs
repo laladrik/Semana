@@ -82,4 +82,3 @@ where
 {
     items.map(|text| text_factory.text_create(text))
 }
-

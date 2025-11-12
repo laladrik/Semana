@@ -186,12 +186,8 @@ impl Text {
         text: &std::ffi::CStr,
     ) -> Result<Self, TtfError> {
         unsafe {
-            let ptr = sdl_ttf::TTF_CreateText(
-                engine,
-                font.ptr(),
-                text.as_ptr(),
-                text.count_bytes(),
-            );
+            let ptr =
+                sdl_ttf::TTF_CreateText(engine, font.ptr(), text.as_ptr(), text.count_bytes());
             if ptr.is_null() {
                 Err(TtfError::TextIsNotCreated)
             } else {
