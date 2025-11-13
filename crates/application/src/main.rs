@@ -294,19 +294,6 @@ fn unsafe_main() {
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
-                // Event surface contains the grid with the events and the top panel with the
-                // "All Day" events.
-                let event_surface_rectangle: sdl::SDL_FRect = {
-                    let x = 100.;
-                    let y = 70.;
-                    sdl::SDL_FRect {
-                        x,
-                        y,
-                        h: window_size.y as f32 - y,
-                        w: window_size.x as f32 - x,
-                    }
-                };
-
                 sdl_ttf_init(
                     renderer,
                     move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<_, Error> {
@@ -359,6 +346,19 @@ fn unsafe_main() {
                                     );
                                 }
                             }
+
+                            // Event surface contains the grid with the events and the top panel with the
+                            // "All Day" events.
+                            let event_surface_rectangle: sdl::SDL_FRect = {
+                                let x = 100.;
+                                let y = 70.;
+                                sdl::SDL_FRect {
+                                    x,
+                                    y,
+                                    h: window_size.y as f32 - y,
+                                    w: window_size.x as f32 - x,
+                                }
+                            };
 
                             let top_panel_height =
                                 (title_font_height + 15) as f32 * long_lane_max_count;
