@@ -209,9 +209,29 @@ pub struct WeekScheduleLanes {
     pub short: Vec<(Lane, Lane)>,
 }
 
+impl WeekScheduleLanes {
+    pub fn calculate_biggest_long_clash(&self) -> Lane {
+        self.long
+            .iter()
+            .map(|(_, total_lane_count)| *total_lane_count)
+            .max()
+            .unwrap_or(0)
+    }
+}
+
 pub struct WeekScheduleWithLanes {
     pub schedule: WeekSchedule,
     pub lanes: WeekScheduleLanes,
+}
+
+impl WeekScheduleWithLanes {
+    pub fn long_events_titles(&self) -> impl Iterator<Item = &str> {
+        self.schedule.long_events.iter().map(|x| x.title.as_str())
+    }
+
+    pub fn short_events_titles(&self) -> impl Iterator<Item = &str> {
+        self.schedule.short_events.iter().map(|x| x.title.as_str())
+    }
 }
 
 pub fn get_lanes(schedule: WeekSchedule, start_date: &Date) -> WeekScheduleWithLanes {
@@ -226,6 +246,7 @@ pub fn get_lanes(schedule: WeekSchedule, start_date: &Date) -> WeekScheduleWithL
         start_date,
         short_event_clash_condition,
     );
+
     let lanes = WeekScheduleLanes {
         long: long_lanes,
         short: short_lanes,

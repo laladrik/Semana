@@ -217,10 +217,14 @@ impl<'event> From<calendar::Error<'event>> for CalendarError {
     }
 }
 
+type JsonParseError = <calendar::obtain::NanoSerde as calendar::obtain::JsonParser>::Error;
+type AgendaObtainError = calendar::obtain::Error<JsonParseError>;
+
 #[derive(Debug)]
 enum Error {
     Sdl(sdlext::Error),
     Calendar(CalendarError),
+    DataIsNotAvailable(AgendaObtainError),
 }
 
 impl From<sdlext::Error> for Error {
@@ -263,6 +267,25 @@ where
     Ok(())
 }
 
+fn obtain_agenda(
+    week_start: &calendar::Date,
+) -> Result<calendar::obtain::WeekScheduleWithLanes, AgendaObtainError> {
+    let week_start_string: String = format_date(week_start);
+    let mut arguments = calendar::obtain::khal::week_arguments(&week_start_string);
+    let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
+    if let Ok(ref v) = bin {
+        arguments.backend_bin_path = v.as_ref();
+    }
+
+    let res: Result<calendar::obtain::WeekSchedule, _> = calendar::obtain::obtain(
+        &calendar::obtain::AgendaSourceStd,
+        &calendar::obtain::NanoSerde,
+        &arguments,
+    );
+
+    res.map(|agenda| calendar::obtain::get_lanes(agenda, week_start))
+}
+
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -303,44 +326,21 @@ fn unsafe_main() {
                         };
 
                         let event_render = RectangleRender { renderer };
-
-                        let week_start_string: String = format_date(&week_start);
-                        let mut arguments =
-                            calendar::obtain::khal::week_arguments(&week_start_string);
-                        let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
-                        arguments.backend_bin_path = match bin {
-                            Ok(ref v) => v.as_ref(),
-                            Err(_) => "khal",
-                        };
-
-                        let res: Result<calendar::obtain::WeekSchedule, _> =
-                            calendar::obtain::obtain(
-                                &calendar::obtain::AgendaSourceStd,
-                                &calendar::obtain::NanoSerde,
-                                &arguments,
-                            );
-
-                        let agenda: calendar::obtain::WeekScheduleWithLanes = match res {
-                            Ok(agenda) => calendar::obtain::get_lanes(agenda, &week_start),
-                            Err(err) => panic!("can't get the agenda: {:?}", err),
-                        };
-
-                        let inside_day_event_titles: Vec<&str> = agenda
-                            .schedule
-                            .short_events
-                            .iter()
-                            .map(|x| x.title.as_str())
-                            .collect();
-                        let cross_day_event_titles: Vec<&str> = agenda
-                            .schedule
-                            .long_events
-                            .iter()
-                            .map(|x| x.title.as_str())
-                            .collect();
-
+                        let agenda: calendar::obtain::WeekScheduleWithLanes =
+                            obtain_agenda(&week_start).map_err(Error::DataIsNotAvailable)?;
+                        let inside_day_event_titles: Vec<&str> =
+                            agenda.short_events_titles().collect();
+                        let cross_day_event_titles: Vec<&str> =
+                            agenda.long_events_titles().collect();
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
-                        let mut scrollable_rectangles: Option<calendar::render::Rectangles> = None;
+                        let mut scrollable_rectangles_opt: Option<calendar::render::Rectangles> =
+                            None;
                         let mut pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
+
+                        let title_font_height =
+                            sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
+                        let long_lane_max_count: f32 =
+                            agenda.lanes.calculate_biggest_long_clash() as f32;
 
                         'outer_loop: loop {
                             // stage: event handle
@@ -351,7 +351,7 @@ fn unsafe_main() {
 
                                 if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
                                     pinned_rectangles_opt.take();
-                                    scrollable_rectangles.take();
+                                    scrollable_rectangles_opt.take();
                                     _ = sdl::SDL_GetWindowSize(
                                         root_window,
                                         &mut window_size.x,
@@ -360,16 +360,6 @@ fn unsafe_main() {
                                 }
                             }
 
-                            let title_font_height =
-                                sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
-                            let long_lane_max_count: f32 = agenda
-                                .lanes
-                                .long
-                                .iter()
-                                .map(|(_, total_lane_count)| *total_lane_count)
-                                .max()
-                                .unwrap_or(0)
-                                as f32;
                             let top_panel_height =
                                 (title_font_height + 15) as f32 * long_lane_max_count;
                             let cell_width: f32 = event_surface_rectangle.w / 7.;
@@ -449,7 +439,7 @@ fn unsafe_main() {
                                 rectangles
                             };
 
-                            if scrollable_rectangles.is_none() {
+                            if scrollable_rectangles_opt.is_none() {
                                 let new_rectangles = create_rectangles();
                                 register_event_titles(
                                     &mut text_registry,
@@ -457,10 +447,10 @@ fn unsafe_main() {
                                     &inside_day_event_titles,
                                     &new_rectangles,
                                 )?;
-                                scrollable_rectangles.replace(new_rectangles);
+                                scrollable_rectangles_opt.replace(new_rectangles);
                             }
 
-                            let rectangles = scrollable_rectangles.as_ref().unwrap();
+                            let rectangles = scrollable_rectangles_opt.as_ref().unwrap();
 
                             // stage: render
                             set_color(renderer, Color::from_rgb(0x000000))?;
