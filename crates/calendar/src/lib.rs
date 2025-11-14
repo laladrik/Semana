@@ -297,6 +297,8 @@ impl Time {
     }
 }
 
+pub type Lane = u8;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,3 +321,4 @@ mod tests {
         assert_eq!(time.minute, 58);
     }
 }
+

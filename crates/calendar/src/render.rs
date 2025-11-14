@@ -119,25 +119,28 @@ pub struct RenderWeekCaptionsArgs {
     pub dates_arguments: Arguments,
 }
 
-pub fn render_week_captions<'text, TR, TI, R, T: 'text>(
-    tr: &TR,
-    days: TI,
-    hours: TI,
-    dates: TI,
-    args: &RenderWeekCaptionsArgs,
-) -> impl Iterator<Item = R>
-where
-    TR: TextRender<Result = R, Text = T>,
-    TI: Iterator<Item = &'text T>,
-{
-    let RenderWeekCaptionsArgs {
-        hours_arguments,
-        days_arguments,
-        dates_arguments,
-    } = args;
-    render_weekdays(tr, days, days_arguments)
-        .chain(render_hours(tr, hours, hours_arguments))
-        .chain(render_weekdays(tr, dates, dates_arguments))
+impl RenderWeekCaptionsArgs {
+    pub fn create_for_week(cell_width: f32, cell_height: f32, offset_y: f32, offset_x: f32) -> Self {
+        RenderWeekCaptionsArgs {
+            hours_arguments: RenderHoursArgs {
+                row_height: cell_height,
+                offset_x: 10.,
+                offset_y,
+            },
+            days_arguments: Arguments {
+                column_width: cell_width,
+                column_height: 0.,
+                offset_x,
+                offset_y: 10.0,
+            },
+            dates_arguments: Arguments {
+                column_width: cell_width,
+                column_height: 0.,
+                offset_x,
+                offset_y: 35.0,
+            },
+        }
+    }
 }
 
 pub type Size = Point;

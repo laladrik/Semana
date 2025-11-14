@@ -90,6 +90,7 @@ mod config {
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
+    pub const COLOR_BACKGROUND: u32 = 0x000000;
 }
 
 impl TextRegistry {
@@ -286,6 +287,23 @@ fn obtain_agenda(
     res.map(|agenda| calendar::obtain::get_lanes(agenda, week_start))
 }
 
+fn create_short_event_rectangles<'ev>(
+    grid_rectangle: &sdl::SDL_FRect,
+    short_events: &'ev [calendar::Event],
+    short_lanes: &[(calendar::Lane, calendar::Lane)],
+    week_start: &calendar::Date,
+) -> calendar::render::Rectangles<'ev> {
+    let arguments = calendar::render::Arguments {
+        column_width: grid_rectangle.w / 7.,
+        column_height: grid_rectangle.h,
+        offset_x: grid_rectangle.x,
+        offset_y: grid_rectangle.y,
+    };
+
+    calendar::render::short_event_rectangles(short_events, short_lanes, week_start, &arguments)
+        .collect()
+}
+
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -315,12 +333,11 @@ fn unsafe_main() {
                         let event_render = RectangleRender { renderer };
                         let agenda: calendar::obtain::WeekScheduleWithLanes =
                             obtain_agenda(&week_start).map_err(Error::DataIsNotAvailable)?;
-                        let inside_day_event_titles: Vec<&str> =
-                            agenda.short_events_titles().collect();
+                        let short_event_titles: Vec<&str> = agenda.short_events_titles().collect();
                         let cross_day_event_titles: Vec<&str> =
                             agenda.long_events_titles().collect();
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
-                        let mut scrollable_rectangles_opt: Option<calendar::render::Rectangles> =
+                        let mut short_event_rectangles_opt: Option<calendar::render::Rectangles> =
                             None;
                         let mut pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
 
@@ -338,7 +355,7 @@ fn unsafe_main() {
 
                                 if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
                                     pinned_rectangles_opt.take();
-                                    scrollable_rectangles_opt.take();
+                                    short_event_rectangles_opt.take();
                                     _ = sdl::SDL_GetWindowSize(
                                         root_window,
                                         &mut window_size.x,
@@ -419,41 +436,28 @@ fn unsafe_main() {
                             };
 
                             let cell_height = grid_rectangle.h / 24.;
-                            let create_rectangles = || -> calendar::render::Rectangles {
-                                let rectangles: calendar::render::Rectangles = {
-                                    let arguments = calendar::render::Arguments {
-                                        column_width: grid_rectangle.w / 7.,
-                                        column_height: grid_rectangle.h,
-                                        offset_x: grid_rectangle.x,
-                                        offset_y: grid_rectangle.y,
-                                    };
-
-                                    calendar::render::short_event_rectangles(
-                                        &agenda.schedule.short_events,
-                                        &agenda.lanes.short,
-                                        &week_start,
-                                        &arguments,
-                                    )
-                                    .collect()
-                                };
-                                rectangles
-                            };
-
-                            if scrollable_rectangles_opt.is_none() {
-                                let new_rectangles = create_rectangles();
+                            if short_event_rectangles_opt.is_none() {
+                                let new_rectangles = create_short_event_rectangles(
+                                    &grid_rectangle,
+                                    &agenda.schedule.short_events,
+                                    &agenda.lanes.short,
+                                    &week_start,
+                                );
                                 register_event_titles(
                                     &mut text_registry,
                                     &fonts.title,
-                                    &inside_day_event_titles,
+                                    &short_event_titles,
                                     &new_rectangles,
                                 )?;
-                                scrollable_rectangles_opt.replace(new_rectangles);
+
+                                short_event_rectangles_opt.replace(new_rectangles);
                             }
 
-                            let rectangles = scrollable_rectangles_opt.as_ref().unwrap();
+                            let short_event_rectangles =
+                                short_event_rectangles_opt.as_ref().unwrap();
 
                             // stage: render
-                            set_color(renderer, Color::from_rgb(0x000000))?;
+                            set_color(renderer, Color::from_rgb(config::COLOR_BACKGROUND))?;
                             if !sdl::SDL_RenderClear(renderer) {
                                 return Err(sdlext::Error::RenderClearFailed)?;
                             }
@@ -463,41 +467,26 @@ fn unsafe_main() {
                                 &event_render,
                             )?;
 
-                            calendar::render::render_rectangles(rectangles.iter(), &event_render)?;
+                            calendar::render::render_rectangles(
+                                short_event_rectangles.iter(),
+                                &event_render,
+                            )?;
+
                             render_grid(renderer, &grid_rectangle)?;
                             text_registry.render()?;
                             set_color(renderer, Color::from_rgb(0x111111))?;
                             // render the day names and the dates, render hours
                             let render_week_captions_args =
-                                calendar::render::RenderWeekCaptionsArgs {
-                                    hours_arguments: calendar::render::RenderHoursArgs {
-                                        row_height: cell_height,
-                                        offset_x: 10.,
-                                        offset_y: grid_rectangle.y + 5.,
-                                    },
-                                    days_arguments: calendar::render::Arguments {
-                                        column_width: cell_width,
-                                        column_height: 0.,
-                                        offset_x: event_surface_rectangle.x,
-                                        offset_y: 10.0,
-                                    },
-                                    dates_arguments: calendar::render::Arguments {
-                                        column_width: cell_width,
-                                        column_height: 0.,
-                                        offset_x: event_surface_rectangle.x,
-                                        offset_y: 35.0,
-                                    },
-                                };
+                                calendar::render::RenderWeekCaptionsArgs::create_for_week(
+                                    cell_width,
+                                    cell_height,
+                                    grid_rectangle.y + 5.,
+                                    event_surface_rectangle.x,
+                                );
 
-                            calendar::render::render_week_captions(
-                                &SdlTextRender,
-                                week.days.iter(),
-                                week.hours.iter(),
-                                week.dates.iter(),
-                                &render_week_captions_args,
-                            )
-                            .collect::<Result<(), sdlext::TtfError>>()
-                            .map_err(sdlext::Error::from)?;
+                            week.render(&SdlTextRender, &render_week_captions_args)
+                                .collect::<Result<(), sdlext::TtfError>>()
+                                .map_err(sdlext::Error::from)?;
 
                             if !sdl::SDL_RenderPresent(renderer) {
                                 return Err(sdlext::Error::RenderIsNotPresent)?;

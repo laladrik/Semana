@@ -1,9 +1,33 @@
 use super::TextCreate;
+use super::render::RenderWeekCaptionsArgs;
+use super::render::TextRender;
+use super::render::{render_weekdays, render_hours};
 
 pub struct Week<Text> {
     pub days: [Text; 7],
     pub hours: [Text; 24],
     pub dates: [Text; 7],
+}
+
+impl<Text> Week<Text> {
+    pub fn render<TR, R>(
+        &self,
+        tr: &TR,
+        args: &RenderWeekCaptionsArgs,
+    ) -> impl Iterator<Item = R>
+    where
+        TR: TextRender<Result = R, Text = Text>,
+    {
+
+        let RenderWeekCaptionsArgs {
+        hours_arguments,
+        days_arguments,
+        dates_arguments,
+        } = args;
+        render_weekdays(tr, self.days.iter(), days_arguments)
+            .chain(render_hours(tr, self.hours.iter(), hours_arguments))
+            .chain(render_weekdays(tr, self.dates.iter(), dates_arguments))
+    }
 }
 
 /// create a structure with all of the texts for the week view.
