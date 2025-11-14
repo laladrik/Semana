@@ -1,4 +1,5 @@
-use super::Error;
+use crate::Lane;
+
 use super::{Date, Event, Time};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
@@ -267,76 +268,6 @@ pub fn long_event_rectangles<'ev>(
         }
         rect
     })
-}
-
-/// Atasco means a traffic jam.  The structure represents a set of overlapping events.
-#[derive(Default)]
-struct Atasco<'ev> {
-    rectangles: Rectangles<'ev>,
-    lanes: Vec<Lane>,
-    end: f32,
-}
-
-impl<'ev> Atasco<'ev> {
-    fn flush(&mut self, into: &mut Rectangles<'ev>, cell_width: f32, lane_count: Lane) {
-        let lane_width = cell_width / lane_count as f32;
-        let iter = self
-            .rectangles
-            .drain(..)
-            .zip(self.lanes.drain(..))
-            .map(|(rect, lane)| Rectangle {
-                at: Point {
-                    x: rect.at.x + lane_width * lane as f32,
-                    y: rect.at.y,
-                },
-                size: Point {
-                    x: lane_width,
-                    y: rect.size.y,
-                },
-                text: rect.text,
-            });
-        into.extend(iter);
-        self.end = f32::default();
-    }
-
-    fn push(&mut self, rect: Rectangle<'ev>, lane: Lane) {
-        self.end = f32::max(rect.at.y + rect.size.y, self.end);
-        self.rectangles.push(rect);
-        self.lanes.push(lane);
-    }
-}
-
-type Lane = u8;
-
-fn find_free_lane(new_event_begin: f32, atasco: &Atasco) -> (Lane, f32) {
-    assert!(
-        new_event_begin >= 0.,
-        "the beginning of the new event must not be nagetive"
-    );
-    let (index, end) = atasco
-        .rectangles
-        .iter()
-        .map(|rect| rect.at.y + rect.size.y)
-        .enumerate()
-        .filter(|(_, end)| *end <= new_event_begin)
-        .fold((0usize, f32::NEG_INFINITY), |acc, item| {
-            let (acc_index, acc_end) = acc;
-            let (index, end): (usize, f32) = item;
-            let diff = new_event_begin - end;
-            let acc_diff = new_event_begin - acc_end;
-            if diff <= acc_diff && diff >= 0. {
-                (index, end)
-            } else {
-                (acc_index, acc_end)
-            }
-        });
-
-    if end.is_infinite() {
-        (0, end)
-    } else {
-        let lane = unsafe { atasco.lanes.get_unchecked(index) };
-        (*lane, end)
-    }
 }
 
 /// Creates rectangles which visualize the position of the `events`.
