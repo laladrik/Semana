@@ -25,6 +25,46 @@ pub struct Event {
     pub end_time: Time,
     #[nserde(rename = "all-day")]
     pub all_day: String,
+    #[nserde(rename = "calendar-color")]
+    pub calendar_color: Color,
+}
+
+#[derive(Clone, Copy)]
+pub struct Color(u32);
+
+impl From<Color> for u32 {
+    fn from(val: Color) -> Self {
+        val.0
+    }
+}
+
+impl std::fmt::Debug for Color {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Color")
+            .field(&format_args!("#{:#x}", self.0))
+            .finish()
+    }
+}
+
+impl nanoserde::DeJson for Color {
+    fn de_json(
+        state: &mut nanoserde::DeJsonState,
+        input: &mut std::str::Chars,
+    ) -> Result<Self, nanoserde::DeJsonErr> {
+        if let nanoserde::DeJsonTok::Str = &mut state.tok {
+            let s = core::mem::take(&mut state.strbuf);
+            let s_without_sharp = &s[1..];
+            match u32::from_str_radix(s_without_sharp, 16) {
+                Err(_) => Err(state.err_parse("Color")),
+                Ok(x) => {
+                    state.next_tok(input)?;
+                    Ok(Color(x))
+                }
+            }
+        } else {
+            Err(state.err_token("Color"))
+        }
+    }
 }
 
 fn increment_date(date: &Date) -> Date {
@@ -321,4 +361,3 @@ mod tests {
         assert_eq!(time.minute, 58);
     }
 }
-

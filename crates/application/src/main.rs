@@ -86,11 +86,11 @@ struct TextRegistry {
 }
 
 mod config {
-    pub const EVENT_TITLE_COLOR: u32 = 0x000000;
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
     pub const COLOR_BACKGROUND: u32 = 0x000000;
+    pub const COLOR_EVENT_TITLE: u32 = 0x000000;
 }
 
 impl TextRegistry {
@@ -119,7 +119,7 @@ impl TextRegistry {
             let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
                 &mut font.borrow_mut(),
                 text,
-                Color::from_rgb(config::EVENT_TITLE_COLOR).into(),
+                Color::from_rgb(config::COLOR_EVENT_TITLE).into(),
                 wrap_length,
             )?;
 
@@ -550,18 +550,18 @@ impl calendar::render::RenderRectangles for RectangleRender {
     where
         I: Iterator<Item = &'r calendar::render::Rectangle<'s>>,
     {
-        set_color(self.renderer, Color::from_rgb(0x9999ff))?;
-        let data = Vec::from_iter(rectangles.map(create_sdl_frect));
         unsafe {
-            if !sdl::SDL_RenderFillRects(self.renderer, data.as_ptr(), data.len() as i32) {
-                return Err(sdlext::Error::RectangleIsNotDrawn);
-            }
+            for rect in rectangles {
+                set_color(self.renderer, Color::from(rect.color))?;
+                let sdl_rect = create_sdl_frect(rect);
+                if !sdl::SDL_RenderFillRect(self.renderer, &sdl_rect as _) {
+                    return Err(sdlext::Error::RectangleIsNotDrawn);
+                }
 
-            for rect in data.iter() {
                 let border = sdl::SDL_FRect {
-                    x: rect.x,
-                    y: rect.y,
-                    w: rect.w,
+                    x: sdl_rect.x,
+                    y: sdl_rect.y,
+                    w: sdl_rect.w,
                     h: 5.0,
                 };
 

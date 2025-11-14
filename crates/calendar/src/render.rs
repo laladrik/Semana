@@ -1,6 +1,4 @@
-use crate::Lane;
-
-use super::{Date, Event, Time};
+use super::{Color, Date, Event, Lane, Time};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
@@ -120,7 +118,12 @@ pub struct RenderWeekCaptionsArgs {
 }
 
 impl RenderWeekCaptionsArgs {
-    pub fn create_for_week(cell_width: f32, cell_height: f32, offset_y: f32, offset_x: f32) -> Self {
+    pub fn create_for_week(
+        cell_width: f32,
+        cell_height: f32,
+        offset_y: f32,
+        offset_x: f32,
+    ) -> Self {
         RenderWeekCaptionsArgs {
             hours_arguments: RenderHoursArgs {
                 row_height: cell_height,
@@ -150,6 +153,7 @@ pub struct Rectangle<'s> {
     pub at: Point,
     pub size: Size,
     pub text: &'s str,
+    pub color: Color,
 }
 
 fn calculate_event_point_x(
@@ -224,6 +228,7 @@ fn create_long_event_rectangle<'ev>(
     };
 
     Rectangle {
+        color: long_event.calendar_color,
         at: start_point,
         size,
         text: &long_event.title,
@@ -248,6 +253,7 @@ fn create_short_event_rectangle<'ev>(
     };
 
     Rectangle {
+        color: event.calendar_color,
         at: start_point,
         size,
         text: &event.title,

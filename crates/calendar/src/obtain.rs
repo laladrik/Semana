@@ -164,6 +164,8 @@ where
         "end-time",
         "--json",
         "all-day",
+        "--json",
+        "calendar-color",
         arguments.from,
         &format!("{}d", arguments.duration_days),
     ];
@@ -380,6 +382,7 @@ fn crop_event(date: &Date, event: Event) -> Event {
             end_time: Time::last_minute(),
             title: event.title,
             all_day: event.all_day,
+            calendar_color: event.calendar_color,
         }
     } else if date == &event.end_date {
         Event {
@@ -389,6 +392,7 @@ fn crop_event(date: &Date, event: Event) -> Event {
             end_time: event.end_time,
             title: event.title,
             all_day: event.all_day,
+            calendar_color: event.calendar_color,
         }
     } else {
         panic!("only an event which shorter than 24 hours can be cropped")

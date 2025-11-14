@@ -154,6 +154,18 @@ impl Color {
     }
 }
 
+impl From<calendar::Color> for Color {
+    fn from(value: calendar::Color) -> Self {
+        let value = u32::from(value);
+        Self {
+            r: (value >> 24) as u8,
+            g: (value >> 16) as u8,
+            b: (value >> 8) as u8,
+            a: 0xff,
+        }
+    }
+}
+
 impl From<Color> for sdl_ttf::SDL_Color {
     fn from(value: Color) -> Self {
         Self {
