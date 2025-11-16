@@ -1,4 +1,4 @@
-use super::{Color, Date, Event, Lane, Time};
+use super::{Color, Date, Event, Lane, Time, EventsWithLanes};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
@@ -261,12 +261,11 @@ fn create_short_event_rectangle<'ev>(
 }
 
 pub fn long_event_rectangles<'ev>(
-    long_events: &'ev [Event],
-    long_lanes: &'ev [(Lane, Lane)],
+    long_events: &'ev EventsWithLanes,
     first_date: &Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle<'ev>> {
-    long_events.iter().zip(long_lanes).map(|item| {
+    long_events.events.iter().zip(&long_events.lanes).map(|item| {
         let (event, lane_position): (&Event, &(Lane, Lane)) = item;
         let (event_lane, total_lanes) = *lane_position;
         let mut rect = create_long_event_rectangle(event, first_date, arguments);
@@ -284,16 +283,15 @@ pub fn long_event_rectangles<'ev>(
 /// # Assumptions
 /// The `events` are sorted by [`Event::start_time`]
 pub fn short_event_rectangles<'ev>(
-    short_events: &'ev [Event],
-    short_lanes: &[(Lane, Lane)],
+    short_events: &'ev EventsWithLanes,
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle<'ev>> {
-    for event in short_events {
+    for event in &short_events.events {
         assert_eq!(event.start_date, event.end_date);
     }
 
-    short_events.iter().zip(short_lanes).map(|item| {
+    short_events.events.iter().zip(&short_events.lanes).map(|item| {
         let (event, lane_position): (&Event, &(Lane, Lane)) = item;
         let (event_lane, total_lanes) = *lane_position;
         let mut rect = create_short_event_rectangle(event, first_date, arguments);

@@ -166,7 +166,31 @@ impl FromStr for Date {
     }
 }
 
+struct DateString([u8; 10]);
+
+impl DateString {
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.0).expect("DateString must be built from numbers only and dashes")
+    }
+}
+
 impl Date {
+    /// return the byte representation of the date.
+    const fn iso_8601(&self) -> DateString {
+        DateString([
+            (self.year / 1000) as u8 + 48,
+            (self.year % 1000 / 100) as u8 + 48,
+            (self.year % 100 / 10) as u8 + 48,
+            (self.year % 10) as u8 + 48,
+            b'-',
+            (self.month / 10) + 48,
+            (self.month % 10) + 48,
+            b'-',
+            (self.day / 10) + 48,
+            (self.day % 10) + 48,
+        ])
+    }
+
     const fn month_day_count(year: u16, month: u8) -> u8 {
         match month {
             2 => {
@@ -232,6 +256,11 @@ impl Date {
         let other_days = other.days_from_epoch();
         self_days - other_days
     }
+}
+
+pub struct EventsWithLanes {
+    pub events: obtain::EventVec,
+    pub lanes: Vec<(Lane, Lane)>,
 }
 
 #[derive(Debug, Clone)]

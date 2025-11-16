@@ -271,26 +271,22 @@ where
 fn obtain_agenda(
     week_start: &calendar::Date,
 ) -> Result<calendar::obtain::WeekScheduleWithLanes, AgendaObtainError> {
-    let week_start_string: String = format_date(week_start);
-    let mut arguments = calendar::obtain::khal::week_arguments(&week_start_string);
+    let mut arguments = calendar::obtain::khal::week_arguments(week_start);
     let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
     if let Ok(ref v) = bin {
         arguments.backend_bin_path = v.as_ref();
     }
 
-    let res: Result<calendar::obtain::WeekSchedule, _> = calendar::obtain::obtain(
-        &calendar::obtain::AgendaSourceStd,
+    calendar::obtain::events_with_lanes(
+        &calendar::obtain::EventSourceStd,
         &calendar::obtain::NanoSerde,
         &arguments,
-    );
-
-    res.map(|agenda| calendar::obtain::get_lanes(agenda, week_start))
+    )
 }
 
 fn create_short_event_rectangles<'ev>(
     grid_rectangle: &sdl::SDL_FRect,
-    short_events: &'ev [calendar::Event],
-    short_lanes: &[(calendar::Lane, calendar::Lane)],
+    short_events: &'ev calendar::EventsWithLanes,
     week_start: &calendar::Date,
 ) -> calendar::render::Rectangles<'ev> {
     let arguments = calendar::render::Arguments {
@@ -300,8 +296,28 @@ fn create_short_event_rectangles<'ev>(
         offset_y: grid_rectangle.y,
     };
 
-    calendar::render::short_event_rectangles(short_events, short_lanes, week_start, &arguments)
+    calendar::render::short_event_rectangles(short_events, week_start, &arguments)
         .collect()
+}
+
+fn create_long_event_rectangles<'ev>(
+    event_surface_rectangle: &sdl::SDL_FRect,
+    long_events: &'ev calendar::EventsWithLanes,
+    week_start: &calendar::Date,
+    cell_width: f32,
+    top_panel_height: f32,
+) -> calendar::render::Rectangles<'ev> {
+    let arguments = calendar::render::Arguments {
+        column_width: cell_width,
+        column_height: top_panel_height,
+        offset_x: event_surface_rectangle.x,
+        offset_y: event_surface_rectangle.y,
+    };
+
+    let pinned_rectangles_res =
+        calendar::render::long_event_rectangles(long_events, week_start, &arguments);
+
+    pinned_rectangles_res.collect()
 }
 
 fn unsafe_main() {
@@ -344,7 +360,7 @@ fn unsafe_main() {
                         let title_font_height =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
                         let long_lane_max_count: f32 =
-                            agenda.lanes.calculate_biggest_long_clash() as f32;
+                            agenda.long.calculate_biggest_clash() as f32;
 
                         'outer_loop: loop {
                             // stage: event handle
@@ -381,29 +397,17 @@ fn unsafe_main() {
                                 (title_font_height + 15) as f32 * long_lane_max_count;
                             let cell_width: f32 = event_surface_rectangle.w / 7.;
                             let long_event_rectangles: &calendar::render::Rectangles = {
-                                let create = || -> calendar::render::Rectangles {
-                                    let arguments = calendar::render::Arguments {
-                                        column_width: cell_width,
-                                        column_height: top_panel_height,
-                                        offset_x: event_surface_rectangle.x,
-                                        offset_y: event_surface_rectangle.y,
-                                    };
-                                    let pinned_rectangles_res =
-                                        calendar::render::long_event_rectangles(
-                                            &agenda.schedule.long_events,
-                                            &agenda.lanes.long,
-                                            &week_start,
-                                            &arguments,
-                                        );
-
-                                    pinned_rectangles_res.collect()
-                                };
-
                                 let ret: Result<&calendar::render::Rectangles, CalendarError> =
                                     match pinned_rectangles_opt {
                                         Some(ref x) => Ok(x),
                                         None => {
-                                            let replacement = create();
+                                            let replacement = create_long_event_rectangles(
+                                                &event_surface_rectangle,
+                                                &agenda.long,
+                                                &week_start,
+                                                cell_width,
+                                                top_panel_height,
+                                            );
                                             // TODO: implement a facility which creates the titles
                                             // of the events at once for the "All day" events and
                                             // regular events.  This would allow to prevent
@@ -422,25 +426,26 @@ fn unsafe_main() {
                                 ret?
                             };
 
-                            let grid_vertical_offset = if long_event_rectangles.is_empty() {
-                                0f32
-                            } else {
-                                top_panel_height
-                            };
+                            let grid_rectangle: sdl::SDL_FRect = {
+                                let grid_vertical_offset = if long_event_rectangles.is_empty() {
+                                    0f32
+                                } else {
+                                    top_panel_height
+                                };
 
-                            let grid_rectangle = sdl::SDL_FRect {
-                                x: event_surface_rectangle.x,
-                                y: event_surface_rectangle.y + grid_vertical_offset,
-                                w: event_surface_rectangle.w,
-                                h: event_surface_rectangle.h - grid_vertical_offset,
+                                sdl::SDL_FRect {
+                                    x: event_surface_rectangle.x,
+                                    y: event_surface_rectangle.y + grid_vertical_offset,
+                                    w: event_surface_rectangle.w,
+                                    h: event_surface_rectangle.h - grid_vertical_offset,
+                                }
                             };
 
                             let cell_height = grid_rectangle.h / 24.;
                             if short_event_rectangles_opt.is_none() {
                                 let new_rectangles = create_short_event_rectangles(
                                     &grid_rectangle,
-                                    &agenda.schedule.short_events,
-                                    &agenda.lanes.short,
+                                    &agenda.short,
                                     &week_start,
                                 );
                                 register_event_titles(

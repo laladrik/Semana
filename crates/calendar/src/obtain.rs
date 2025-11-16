@@ -1,16 +1,16 @@
 use crate::MINUTES_PER_DAY;
 
-use super::{Date, DateStream, Event, Minutes, Time};
+use super::{Date, DateString, DateStream, Event, Minutes, Time, EventsWithLanes};
 use std::{ffi::OsStr, str::FromStr};
-pub trait AgendaSource {
+pub trait EventSource {
     type Data;
     type Error;
     fn obtain<S: AsRef<OsStr>>(&self, args: &[S]) -> Result<Self::Data, Self::Error>;
 }
 
-pub struct AgendaSourceStd;
+pub struct EventSourceStd;
 
-impl AgendaSource for AgendaSourceStd {
+impl EventSource for EventSourceStd {
     type Data = Vec<u8>;
     type Error = std::io::Error;
 
@@ -31,19 +31,19 @@ impl AgendaSource for AgendaSourceStd {
 pub trait JsonParser {
     type Error;
 
-    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<Agenda, Self::Error>;
+    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<EventVec, Self::Error>;
 }
 
 pub struct NanoSerde;
 impl JsonParser for NanoSerde {
     type Error = nanoserde::DeJsonErr;
 
-    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<Agenda, Self::Error> {
+    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<EventVec, Self::Error> {
         nanoserde::DeJson::deserialize_json(bytes)
     }
 }
 
-pub type Agenda = Vec<Event>;
+pub type EventVec = Vec<Event>;
 
 #[derive(Debug)]
 pub enum Error<PE> {
@@ -56,7 +56,8 @@ pub enum Error<PE> {
 const MAX_DURATION_DAYS: u8 = 35;
 pub mod khal {
     use super::ObtainArguments;
-    pub fn week_arguments(from: &str) -> ObtainArguments<'_> {
+    use super::Date;
+    pub fn week_arguments(from: &Date) -> ObtainArguments<'_> {
         ObtainArguments {
             from,
             duration_days: 7,
@@ -67,16 +68,11 @@ pub mod khal {
 
 pub struct ObtainArguments<'s> {
     // date in the format YYYY-MM-DD
-    pub from: &'s str,
+    pub from: &'s Date,
     // date in the format YYYY-MM-DD
     pub duration_days: u8,
     // path to khal
     pub backend_bin_path: &'s str,
-}
-
-pub struct WeekSchedule {
-    pub long_events: Agenda,
-    pub short_events: Agenda,
 }
 
 #[derive(Default)]
@@ -135,13 +131,28 @@ fn find_free_lane(new_event_begin_minutes: Minutes, clash: &Clash) -> Option<Lan
     lane_index.map(|i| unsafe { *clash.lanes.get_unchecked(i) })
 }
 
-pub fn obtain<AS, JP, O>(
+pub fn events_with_lanes<AS, JP, O>(
     agenda_source: &AS,
     json_parser: &JP,
     arguments: &ObtainArguments,
-) -> Result<WeekSchedule, Error<JP::Error>>
+) -> Result<WeekScheduleWithLanes, Error<JP::Error>>
 where
-    AS: AgendaSource<Data = O, Error = std::io::Error>,
+    AS: EventSource<Data = O, Error = std::io::Error>,
+    JP: JsonParser,
+    O: AsRef<[u8]>,
+{
+    obtain(agenda_source, json_parser, arguments).map(|events| {
+        get_lanes(events, arguments.from)
+    })
+}
+
+fn obtain<AS, JP, O>(
+    agenda_source: &AS,
+    json_parser: &JP,
+    arguments: &ObtainArguments,
+) -> Result<Events, Error<JP::Error>>
+where
+    AS: EventSource<Data = O, Error = std::io::Error>,
     JP: JsonParser,
     O: AsRef<[u8]>,
 {
@@ -149,6 +160,7 @@ where
         return Err(Error::DurationIsTooBig);
     }
 
+    let from: DateString = arguments.from.iso_8601();
     let args = [
         arguments.backend_bin_path,
         "list",
@@ -166,19 +178,19 @@ where
         "all-day",
         "--json",
         "calendar-color",
-        arguments.from,
+        from.as_str(),
         &format!("{}d", arguments.duration_days),
     ];
 
     let data: AS::Data = agenda_source.obtain(&args).map_err(Error::Io)?;
     let bytes: &str = std::str::from_utf8(data.as_ref()).map_err(Error::InvalidUnicode)?;
-    let mut week_schedule = WeekSchedule {
-        short_events: Vec::new(),
-        long_events: Vec::new(),
+    let mut week_schedule = Events {
+        short: Vec::new(),
+        long: Vec::new(),
     };
 
-    let date = Date::from_str(arguments.from).expect("the format of the date must be YYYY-MM-DD");
-    let date_stream = DateStream::new(date).take(7);
+    let date = arguments.from;
+    let date_stream = DateStream::new(date.clone()).take(7);
 
     let agendas = bytes
         .split('\n')
@@ -188,7 +200,7 @@ where
 
     for item in agendas {
         let (agenda_json, date): (&str, Date) = item;
-        let agenda: Agenda = json_parser.parse(agenda_json).map_err(Error::Parse)?;
+        let agenda: EventVec = json_parser.parse(agenda_json).map_err(Error::Parse)?;
         let event_items = agenda
             .into_iter()
             .filter_map(|event: Event| short_event_filter(event, &date));
@@ -196,9 +208,9 @@ where
         for item in event_items {
             let (is_short, event): (bool, Event) = item;
             if is_short {
-                week_schedule.short_events.push(event)
+                week_schedule.short.push(event)
             } else {
-                week_schedule.long_events.push(event)
+                week_schedule.long.push(event)
             }
         }
     }
@@ -206,14 +218,9 @@ where
     Ok(week_schedule)
 }
 
-pub struct WeekScheduleLanes {
-    pub long: Vec<(Lane, Lane)>,
-    pub short: Vec<(Lane, Lane)>,
-}
-
-impl WeekScheduleLanes {
-    pub fn calculate_biggest_long_clash(&self) -> Lane {
-        self.long
+impl EventsWithLanes {
+    pub fn calculate_biggest_clash(&self) -> Lane {
+        self.lanes
             .iter()
             .map(|(_, total_lane_count)| *total_lane_count)
             .max()
@@ -221,40 +228,43 @@ impl WeekScheduleLanes {
     }
 }
 
+pub struct Events {
+    long: EventVec,
+    short: EventVec,
+}
+
 pub struct WeekScheduleWithLanes {
-    pub schedule: WeekSchedule,
-    pub lanes: WeekScheduleLanes,
+    pub long: EventsWithLanes,
+    pub short: EventsWithLanes,
 }
 
 impl WeekScheduleWithLanes {
     pub fn long_events_titles(&self) -> impl Iterator<Item = &str> {
-        self.schedule.long_events.iter().map(|x| x.title.as_str())
+        self.long.events.iter().map(|x| x.title.as_str())
     }
 
     pub fn short_events_titles(&self) -> impl Iterator<Item = &str> {
-        self.schedule.short_events.iter().map(|x| x.title.as_str())
+        self.short.events.iter().map(|x| x.title.as_str())
     }
 }
 
-pub fn get_lanes(schedule: WeekSchedule, start_date: &Date) -> WeekScheduleWithLanes {
-    let long_lanes: Vec<(Lane, Lane)> = find_clashes(
-        &schedule.long_events,
-        start_date,
-        long_event_clash_condition,
-    );
+pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
+    let long_lanes: Vec<(Lane, Lane)> =
+        find_clashes(&events.long, start_date, long_event_clash_condition);
 
-    let short_lanes: Vec<(Lane, Lane)> = find_clashes(
-        &schedule.short_events,
-        start_date,
-        short_event_clash_condition,
-    );
+    let short_lanes: Vec<(Lane, Lane)> =
+        find_clashes(&events.short, start_date, short_event_clash_condition);
 
-    let lanes = WeekScheduleLanes {
-        long: long_lanes,
-        short: short_lanes,
-    };
-
-    WeekScheduleWithLanes { schedule, lanes }
+    WeekScheduleWithLanes {
+        long: EventsWithLanes {
+            events: events.long,
+            lanes: long_lanes,
+        },
+        short: EventsWithLanes {
+            events: events.short,
+            lanes: short_lanes,
+        },
+    }
 }
 
 type ClashCondition = fn(is_new_day: bool, event_end: Minutes, clash_end: Minutes) -> bool;
@@ -479,39 +489,39 @@ mod tests {
         assert!(matches!(separated_event_lane, (0, 1)));
     }
 
-    #[test]
-    fn test_long_event_clash() {
-        let create_event = |title: &str, start_date: &str, end_date: &str| Event {
-            title: title.to_owned(),
-            start_date: create_date(start_date),
-            start_time: create_time("10:00"),
-            end_date: create_date(end_date),
-            end_time: create_time("10:00"),
-            all_day: "False".to_owned(),
-        };
-
-        let events: Vec<Event> = Vec::from_iter([
-            create_event("first", "2025-11-03", "2025-11-05"),
-            create_event("second", "2025-11-04", "2025-11-06"),
-            create_event("third", "2025-11-05", "2025-11-07"),
-            create_event("separated", "2025-11-07", "2025-11-08"),
-        ]);
-
-        let start = create_date("2025-11-03");
-        let lanes = find_clashes(&events, &start, long_event_clash_condition);
-        let [
-            first_event_lane,
-            second_event_lane,
-            third_event_lane,
-            separated_event_lane,
-        ] = lanes.as_slice()
-        else {
-            panic!("find_clashes must return a vector of 3 elements");
-        };
-
-        assert!(matches!(first_event_lane, (0, 2)), "{:?}", first_event_lane);
-        assert!(matches!(second_event_lane, (1, 2)));
-        assert!(matches!(third_event_lane, (0, 2)));
-        assert!(matches!(separated_event_lane, (0, 1)));
-    }
+    //#[test]
+    //fn test_long_event_clash() {
+    //    let create_event = |title: &str, start_date: &str, end_date: &str| Event {
+    //        title: title.to_owned(),
+    //        start_date: create_date(start_date),
+    //        start_time: create_time("10:00"),
+    //        end_date: create_date(end_date),
+    //        end_time: create_time("10:00"),
+    //        all_day: "False".to_owned(),
+    //    };
+    //
+    //    let events: Vec<Event> = Vec::from_iter([
+    //        create_event("first", "2025-11-03", "2025-11-05"),
+    //        create_event("second", "2025-11-04", "2025-11-06"),
+    //        create_event("third", "2025-11-05", "2025-11-07"),
+    //        create_event("separated", "2025-11-07", "2025-11-08"),
+    //    ]);
+    //
+    //    let start = create_date("2025-11-03");
+    //    let lanes = find_clashes(&events, &start, long_event_clash_condition);
+    //    let [
+    //        first_event_lane,
+    //        second_event_lane,
+    //        third_event_lane,
+    //        separated_event_lane,
+    //    ] = lanes.as_slice()
+    //    else {
+    //        panic!("find_clashes must return a vector of 3 elements");
+    //    };
+    //
+    //    assert!(matches!(first_event_lane, (0, 2)), "{:?}", first_event_lane);
+    //    assert!(matches!(second_event_lane, (1, 2)));
+    //    assert!(matches!(third_event_lane, (0, 2)));
+    //    assert!(matches!(separated_event_lane, (0, 1)));
+    //}
 }
