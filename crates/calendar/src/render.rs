@@ -25,7 +25,7 @@ pub struct EventText<'text, T> {
     pub at: Point,
 }
 
-impl<'rect, 'ev, 'text, T> From<(&'rect Rectangle<'ev>, &'text T)> for EventText<'text, T> {
+impl<'rect, 'text, T> From<(&'rect Rectangle, &'text T)> for EventText<'text, T> {
     fn from((rectangle, title): (&'rect Rectangle, &'text T)) -> Self {
         Self {
             text: title,
@@ -37,12 +37,12 @@ impl<'rect, 'ev, 'text, T> From<(&'rect Rectangle<'ev>, &'text T)> for EventText
     }
 }
 
-pub fn place_event_texts<'text, 'rect, 'ev, Text>(
-    rectangles: &'rect [Rectangle<'ev>],
+pub fn place_event_texts<'text, 'rect, Text>(
+    rectangles: &'rect [Rectangle],
     event_titles: &'text [Text],
 ) -> impl Iterator<Item = EventText<'text, Text>>
 where
-    EventText<'text, Text>: From<(&'rect Rectangle<'ev>, &'text Text)>,
+    EventText<'text, Text>: From<(&'rect Rectangle, &'text Text)>,
 {
     rectangles
         .iter()
@@ -149,10 +149,10 @@ impl RenderWeekCaptionsArgs {
 pub type Size = Point;
 
 #[cfg_attr(test, derive(PartialEq))]
-pub struct Rectangle<'s> {
+pub struct Rectangle {
     pub at: Point,
     pub size: Size,
-    pub text: &'s str,
+    //pub text: &'s str,
     pub color: Color,
 }
 
@@ -171,10 +171,10 @@ fn calculate_event_point_x(
     days as f32 * column_width + offset_x
 }
 
-fn create_point<'ev>(
-    first_date: &'_ Date,
-    start_date: &'ev Date,
-    start_time: &'ev Time,
+fn create_point(
+    first_date: &Date,
+    start_date: &Date,
+    start_time: &Time,
     arguments: &Arguments,
 ) -> Point {
     let Arguments {
@@ -189,18 +189,18 @@ fn create_point<'ev>(
     Point { x, y }
 }
 
-pub type Rectangles<'ev> = Vec<Rectangle<'ev>>;
+pub type Rectangles = Vec<Rectangle>;
 
-pub struct RectangleSet<'ev> {
-    pub pinned: Rectangles<'ev>,
-    pub scrolled: Rectangles<'ev>,
+pub struct RectangleSet {
+    pub pinned: Rectangles,
+    pub scrolled: Rectangles,
 }
 
-fn create_long_event_rectangle<'ev>(
-    long_event: &'ev Event,
-    first_date: &'_ Date,
+fn create_long_event_rectangle(
+    long_event: &Event,
+    first_date: &Date,
     arguments: &Arguments,
-) -> Rectangle<'ev> {
+) -> Rectangle {
     let Arguments {
         column_width,
         column_height,
@@ -231,15 +231,14 @@ fn create_long_event_rectangle<'ev>(
         color: long_event.calendar_color,
         at: start_point,
         size,
-        text: &long_event.title,
     }
 }
 
-fn create_short_event_rectangle<'ev>(
-    event: &'ev Event,
-    first_date: &'_ Date,
+fn create_short_event_rectangle(
+    event: &Event,
+    first_date: &Date,
     arguments: &Arguments,
-) -> Rectangle<'ev> {
+) -> Rectangle {
     assert_eq!(event.start_date, event.end_date);
     let start_point: Point =
         create_point(first_date, &event.start_date, &event.start_time, arguments);
@@ -256,15 +255,14 @@ fn create_short_event_rectangle<'ev>(
         color: event.calendar_color,
         at: start_point,
         size,
-        text: &event.title,
     }
 }
 
-pub fn long_event_rectangles<'ev>(
-    long_events: &'ev EventsWithLanes,
+pub fn long_event_rectangles(
+    long_events: &EventsWithLanes,
     first_date: &Date,
     arguments: &Arguments,
-) -> impl Iterator<Item = Rectangle<'ev>> {
+) -> impl Iterator<Item = Rectangle> {
     long_events
         .events
         .iter()
@@ -286,11 +284,11 @@ pub fn long_event_rectangles<'ev>(
 ///
 /// # Assumptions
 /// The `events` are sorted by [`Event::start_time`]
-pub fn short_event_rectangles<'ev>(
-    short_events: &'ev EventsWithLanes,
+pub fn short_event_rectangles(
+    short_events: &EventsWithLanes,
     first_date: &'_ Date,
     arguments: &Arguments,
-) -> impl Iterator<Item = Rectangle<'ev>> {
+) -> impl Iterator<Item = Rectangle> {
     for event in &short_events.events {
         assert_eq!(event.start_date, event.end_date);
     }
@@ -315,15 +313,15 @@ pub fn short_event_rectangles<'ev>(
 
 pub trait RenderRectangles {
     type Result;
-    fn render_rectangles<'r, 's: 'r, I>(&self, data: I) -> Self::Result
+    fn render_rectangles<'r, I>(&self, data: I) -> Self::Result
     where
-        I: Iterator<Item = &'r Rectangle<'s>>;
+        I: Iterator<Item = &'r Rectangle>;
 }
 
-pub fn render_rectangles<'r, 's: 'r, I, DR, R>(rectangles: I, dr: &DR) -> R
+pub fn render_rectangles<'r, I, DR, R>(rectangles: I, dr: &DR) -> R
 where
     DR: RenderRectangles<Result = R>,
-    I: Iterator<Item = &'r Rectangle<'s>>,
+    I: Iterator<Item = &'r Rectangle>,
 {
     dr.render_rectangles(rectangles)
 }
@@ -366,7 +364,7 @@ mod tests {
             offset_y: 70.,
         };
 
-        let rectangle: Rectangle<'_> = create_long_event_rectangle(&event, &first_date, &arguments);
+        let rectangle: Rectangle = create_long_event_rectangle(&event, &first_date, &arguments);
 
         let expected_x: f32 = arguments.offset_x + arguments.column_width * 1.;
         assert_eq!(rectangle.at.x, expected_x);

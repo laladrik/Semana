@@ -170,9 +170,7 @@ impl TextRegistry {
     }
 
     fn clear(&mut self) {
-        // sdl::SDL_DestroySurface(...);
         self.surfaces.clear();
-        // sdl::SDL_DestroyTexture(ptr);
         self.textures.clear();
         self.text_positions.clear();
     }
@@ -240,11 +238,11 @@ impl From<CalendarError> for Error {
     }
 }
 
-fn register_event_titles<'rect, 'event: 'rect, Str>(
+fn register_event_titles<'rect, Str>(
     text_registry: &mut TextRegistry,
     font: &RefCell<Font>,
     titles: &[Str],
-    rectangles: &'rect [calendar::render::Rectangle<'event>],
+    rectangles: &'rect [calendar::render::Rectangle],
 ) -> Result<(), Error>
 where
     Str: AsRef<str>,
@@ -288,7 +286,7 @@ fn create_short_event_rectangles<'ev>(
     grid_rectangle: &sdl::SDL_FRect,
     short_events: &'ev calendar::EventsWithLanes,
     week_start: &calendar::Date,
-) -> calendar::render::Rectangles<'ev> {
+) -> calendar::render::Rectangles {
     let arguments = calendar::render::Arguments {
         column_width: grid_rectangle.w / 7.,
         column_height: grid_rectangle.h,
@@ -306,7 +304,7 @@ fn create_long_event_rectangles<'ev>(
     week_start: &calendar::Date,
     cell_width: f32,
     top_panel_height: f32,
-) -> calendar::render::Rectangles<'ev> {
+) -> calendar::render::Rectangles {
     let arguments = calendar::render::Arguments {
         column_width: cell_width,
         column_height: top_panel_height,
@@ -331,6 +329,7 @@ fn unsafe_main() {
                 sdl_ttf_init(
                     renderer,
                     move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<_, Error> {
+                        let event_render = RectangleRender { renderer };
                         let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
                         let ui_text_factory = SdlTextCreate {
                             engine,
@@ -346,13 +345,11 @@ fn unsafe_main() {
                             validate_week(week)?
                         };
 
-                        let event_render = RectangleRender { renderer };
                         let agenda: calendar::obtain::WeekScheduleWithLanes =
                             obtain_agenda(&week_start).map_err(Error::DataIsNotAvailable)?;
                         let short_event_titles: Vec<&str> = agenda.short_events_titles().collect();
                         let cross_day_event_titles: Vec<&str> =
                             agenda.long_events_titles().collect();
-                        let mut event: sdl::SDL_Event = std::mem::zeroed();
                         let mut short_event_rectangles_opt: Option<calendar::render::Rectangles> =
                             None;
                         let mut pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
@@ -362,6 +359,7 @@ fn unsafe_main() {
                         let long_lane_max_count: f32 =
                             agenda.long.calculate_biggest_clash() as f32;
 
+                        let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
                             // stage: event handle
                             while sdl::SDL_PollEvent(&mut event as _) {
@@ -551,9 +549,9 @@ struct RectangleRender {
 impl calendar::render::RenderRectangles for RectangleRender {
     type Result = Result<(), sdlext::Error>;
 
-    fn render_rectangles<'r, 's: 'r, I>(&self, rectangles: I) -> Self::Result
+    fn render_rectangles<'r, I>(&self, rectangles: I) -> Self::Result
     where
-        I: Iterator<Item = &'r calendar::render::Rectangle<'s>>,
+        I: Iterator<Item = &'r calendar::render::Rectangle>,
     {
         unsafe {
             for rect in rectangles {
@@ -580,7 +578,7 @@ impl calendar::render::RenderRectangles for RectangleRender {
     }
 }
 
-fn create_sdl_frect(from: &calendar::render::Rectangle<'_>) -> sdl::SDL_FRect {
+fn create_sdl_frect(from: &calendar::render::Rectangle) -> sdl::SDL_FRect {
     sdl::SDL_FRect {
         x: from.at.x,
         y: from.at.y,
