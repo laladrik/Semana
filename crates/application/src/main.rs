@@ -284,7 +284,7 @@ fn obtain_agenda(
 
 fn create_short_event_rectangles<'ev>(
     grid_rectangle: &sdl::SDL_FRect,
-    short_events: &'ev calendar::EventsWithLanes,
+    short_events: &'ev calendar::EventData,
     week_start: &calendar::Date,
 ) -> calendar::render::Rectangles {
     let arguments = calendar::render::Arguments {
@@ -300,7 +300,7 @@ fn create_short_event_rectangles<'ev>(
 
 fn create_long_event_rectangles<'ev>(
     event_surface_rectangle: &sdl::SDL_FRect,
-    long_events: &'ev calendar::EventsWithLanes,
+    long_events: &'ev calendar::EventData,
     week_start: &calendar::Date,
     cell_width: f32,
     top_panel_height: f32,

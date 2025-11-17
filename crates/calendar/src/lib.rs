@@ -13,20 +13,20 @@ pub enum Error<'s> {
 }
 
 #[derive(DeJson, Debug)]
-pub struct Event {
-    pub title: String,
+struct Event {
+    title: String,
     #[nserde(rename = "start-date")]
-    pub start_date: Date,
+    start_date: Date,
     #[nserde(rename = "start-time")]
-    pub start_time: Time,
+    start_time: Time,
     #[nserde(rename = "end-date")]
-    pub end_date: Date,
+    end_date: Date,
     #[nserde(rename = "end-time")]
-    pub end_time: Time,
+    end_time: Time,
     #[nserde(rename = "all-day")]
-    pub all_day: String,
+    all_day: String,
     #[nserde(rename = "calendar-color")]
-    pub calendar_color: Color,
+    calendar_color: Color,
 }
 
 #[derive(Clone, Copy)]
@@ -264,8 +264,17 @@ impl Date {
     }
 }
 
-pub struct EventsWithLanes {
-    pub events: obtain::EventVec,
+pub struct EventRange {
+    pub start_date: Date,
+    pub start_time: Time,
+    pub end_date: Date,
+    pub end_time: Time,
+    pub calendar_color: Color,
+}
+
+pub struct EventData {
+    pub event_ranges: Vec<EventRange>,
+    pub titles: Vec<String>,
     pub lanes: Vec<(Lane, Lane)>,
 }
 

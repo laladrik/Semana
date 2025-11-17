@@ -1,4 +1,6 @@
-use super::{Color, Date, Event, EventsWithLanes, Lane, Time};
+use crate::EventRange;
+
+use super::{Color, Date, Event, EventData, Lane, Time};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
@@ -197,7 +199,7 @@ pub struct RectangleSet {
 }
 
 fn create_long_event_rectangle(
-    long_event: &Event,
+    long_event: &EventRange,
     first_date: &Date,
     arguments: &Arguments,
 ) -> Rectangle {
@@ -235,7 +237,7 @@ fn create_long_event_rectangle(
 }
 
 fn create_short_event_rectangle(
-    event: &Event,
+    event: &EventRange,
     first_date: &Date,
     arguments: &Arguments,
 ) -> Rectangle {
@@ -259,16 +261,16 @@ fn create_short_event_rectangle(
 }
 
 pub fn long_event_rectangles(
-    long_events: &EventsWithLanes,
+    long_events: &EventData,
     first_date: &Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle> {
     long_events
-        .events
+        .event_ranges
         .iter()
         .zip(&long_events.lanes)
         .map(|item| {
-            let (event, lane_position): (&Event, &(Lane, Lane)) = item;
+            let (event, lane_position): (&EventRange, &(Lane, Lane)) = item;
             let (event_lane, total_lanes) = *lane_position;
             let mut rect = create_long_event_rectangle(event, first_date, arguments);
             if total_lanes != 1 {
@@ -285,20 +287,20 @@ pub fn long_event_rectangles(
 /// # Assumptions
 /// The `events` are sorted by [`Event::start_time`]
 pub fn short_event_rectangles(
-    short_events: &EventsWithLanes,
+    short_events: &EventData,
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle> {
-    for event in &short_events.events {
+    for event in &short_events.event_ranges {
         assert_eq!(event.start_date, event.end_date);
     }
 
     short_events
-        .events
+        .event_ranges
         .iter()
         .zip(&short_events.lanes)
         .map(|item| {
-            let (event, lane_position): (&Event, &(Lane, Lane)) = item;
+            let (event, lane_position): (&EventRange, &(Lane, Lane)) = item;
             let (event_lane, total_lanes) = *lane_position;
             let mut rect = create_short_event_rectangle(event, first_date, arguments);
             if total_lanes != 1 {
@@ -391,15 +393,15 @@ mod tests {
 
     #[test]
     fn test_top_left_event() {
-        let events = vec![Event {
+        let events = vec![EventRange {
             calendar_color: Color::BLACK,
-            all_day: "False".to_owned(),
-            title: "arst".to_owned(),
             start_date: create_date("2025-09-29"),
             start_time: create_time("00:00"),
             end_date: create_date("2025-09-29"),
             end_time: create_time("01:00"),
         }];
+
+        let titles = vec![String::from("first")];
 
         let arguments = Arguments {
             column_width: 125.0,
@@ -415,7 +417,7 @@ mod tests {
         };
 
         let lanes = Vec::from([(0, 1)]);
-        let events_with_lanes = EventsWithLanes { events, lanes };
+        let events_with_lanes = EventData { event_ranges: events, titles, lanes };
 
         let ret: Rectangles =
             short_event_rectangles(&events_with_lanes, &start_date, &arguments).collect();

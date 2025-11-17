@@ -1,6 +1,6 @@
-use crate::MINUTES_PER_DAY;
+use crate::{EventRange, MINUTES_PER_DAY};
 
-use super::{Date, DateString, DateStream, Event, Minutes, Time, EventsWithLanes};
+use super::{Date, DateStream, DateString, Event, EventData, Minutes, Time};
 use std::ffi::OsStr;
 pub trait EventSource {
     type Data;
@@ -55,8 +55,8 @@ pub enum Error<PE> {
 
 const MAX_DURATION_DAYS: u8 = 35;
 pub mod khal {
-    use super::ObtainArguments;
     use super::Date;
+    use super::ObtainArguments;
     pub fn week_arguments(from: &Date) -> ObtainArguments<'_> {
         ObtainArguments {
             from,
@@ -141,9 +141,7 @@ where
     JP: JsonParser,
     O: AsRef<[u8]>,
 {
-    obtain(agenda_source, json_parser, arguments).map(|events| {
-        get_lanes(events, arguments.from)
-    })
+    obtain(agenda_source, json_parser, arguments).map(|events| get_lanes(events, arguments.from))
 }
 
 fn obtain<AS, JP, O>(
@@ -218,7 +216,7 @@ where
     Ok(week_schedule)
 }
 
-impl EventsWithLanes {
+impl EventData {
     pub fn calculate_biggest_clash(&self) -> Lane {
         self.lanes
             .iter()
@@ -234,17 +232,17 @@ pub struct Events {
 }
 
 pub struct WeekScheduleWithLanes {
-    pub long: EventsWithLanes,
-    pub short: EventsWithLanes,
+    pub long: EventData,
+    pub short: EventData,
 }
 
 impl WeekScheduleWithLanes {
     pub fn long_events_titles(&self) -> impl Iterator<Item = &str> {
-        self.long.events.iter().map(|x| x.title.as_str())
+        self.long.titles.iter().map(String::as_str)
     }
 
     pub fn short_events_titles(&self) -> impl Iterator<Item = &str> {
-        self.short.events.iter().map(|x| x.title.as_str())
+        self.short.titles.iter().map(String::as_str)
     }
 }
 
@@ -255,13 +253,42 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
     let short_lanes: Vec<(Lane, Lane)> =
         find_clashes(&events.short, start_date, short_event_clash_condition);
 
+    let create = |event: Event| -> (EventRange, String) {
+        let Event {
+            title,
+            start_date,
+            start_time,
+            end_date,
+            end_time,
+            all_day: _,
+            calendar_color,
+        } = event;
+        let range = EventRange {
+            start_date,
+            start_time,
+            end_date,
+            end_time,
+            calendar_color,
+        };
+        (range, title)
+    };
+
+    let (long_event_ranges, long_event_titles): (Vec<EventRange>, Vec<String>) =
+        events.long.into_iter().map(create).unzip();
+
+    let (short_event_ranges, short_event_titles): (Vec<EventRange>, Vec<String>) =
+        events.short.into_iter().map(create).unzip();
+
     WeekScheduleWithLanes {
-        long: EventsWithLanes {
-            events: events.long,
+        long: EventData {
+            event_ranges: long_event_ranges,
+            titles: long_event_titles,
             lanes: long_lanes,
         },
-        short: EventsWithLanes {
-            events: events.short,
+
+        short: EventData {
+            event_ranges: short_event_ranges,
+            titles: short_event_titles,
             lanes: short_lanes,
         },
     }
@@ -434,10 +461,14 @@ fn determine_event_type(event: &Event, is_all_day: bool) -> EventType {
     }
 }
 
+pub struct WeekData {
+    pub agenda: WeekScheduleWithLanes,
+}
+
 #[cfg(test)]
 mod tests {
-    use core::str::FromStr;
     use super::*;
+    use core::str::FromStr;
     #[track_caller]
     fn create_date(s: &str) -> Date {
         match Date::from_str(s) {
