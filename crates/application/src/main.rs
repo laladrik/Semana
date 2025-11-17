@@ -337,6 +337,63 @@ impl WeekData {
     }
 }
 
+struct View {
+    event_surface: sdl::SDL_FRect,
+    grid_rectangle: sdl::SDL_FRect,
+    cell_width: f32,
+    top_panel_height: f32,
+    cell_height: f32,
+}
+
+impl View {
+    const EVENT_SURFACE_OFFSET_X: f32 = 100.;
+    const EVENT_SURFACE_OFFSET_Y: f32 = 70.;
+
+    fn new(
+        window_size: sdl::SDL_Point,
+        title_font_height: i32,
+        long_lane_max_count: f32,
+        long_events_count: usize,
+    ) -> Self {
+        let event_surface: sdl::SDL_FRect = {
+            let x = 100.;
+            let y = 70.;
+            sdl::SDL_FRect {
+                x: Self::EVENT_SURFACE_OFFSET_X,
+                y: Self::EVENT_SURFACE_OFFSET_Y,
+                h: window_size.y as f32 - y,
+                w: window_size.x as f32 - x,
+            }
+        };
+
+        let top_panel_height = (title_font_height + 15) as f32 * long_lane_max_count;
+        let cell_width: f32 = event_surface.w / 7.;
+        let grid_rectangle: sdl::SDL_FRect = {
+            let grid_vertical_offset = if long_events_count == 0 {
+                0f32
+            } else {
+                top_panel_height
+            };
+
+            sdl::SDL_FRect {
+                x: event_surface.x,
+                y: event_surface.y + grid_vertical_offset,
+                w: event_surface.w,
+                h: event_surface.h - grid_vertical_offset,
+            }
+        };
+
+        let cell_height = grid_rectangle.h / 24.;
+        Self {
+            cell_height,
+            cell_width,
+            grid_rectangle,
+            event_surface,
+            top_panel_height,
+        }
+    }
+}
+
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -387,33 +444,24 @@ fn unsafe_main() {
                                 }
                             }
 
-                            // Event surface contains the grid with the events and the top panel with the
-                            // "All Day" events.
-                            let event_surface_rectangle: sdl::SDL_FRect = {
-                                let x = 100.;
-                                let y = 70.;
-                                sdl::SDL_FRect {
-                                    x,
-                                    y,
-                                    h: window_size.y as f32 - y,
-                                    w: window_size.x as f32 - x,
-                                }
-                            };
+                            let view = View::new(
+                                window_size,
+                                title_font_height,
+                                long_lane_max_count,
+                                week_data.agenda.long.event_ranges.len(),
+                            );
 
-                            let top_panel_height =
-                                (title_font_height + 15) as f32 * long_lane_max_count;
-                            let cell_width: f32 = event_surface_rectangle.w / 7.;
                             let long_event_rectangles: &calendar::render::Rectangles = {
                                 let ret: Result<&calendar::render::Rectangles, CalendarError> =
                                     match pinned_rectangles_opt {
                                         Some(ref x) => Ok(x),
                                         None => {
                                             let replacement = create_long_event_rectangles(
-                                                &event_surface_rectangle,
+                                                &view.event_surface,
                                                 &week_data.agenda.long,
                                                 &week_start,
-                                                cell_width,
-                                                top_panel_height,
+                                                view.cell_width,
+                                                view.top_panel_height,
                                             );
                                             // TODO: implement a facility which creates the titles
                                             // of the events at once for the "All day" events and
@@ -433,25 +481,9 @@ fn unsafe_main() {
                                 ret?
                             };
 
-                            let grid_rectangle: sdl::SDL_FRect = {
-                                let grid_vertical_offset = if long_event_rectangles.is_empty() {
-                                    0f32
-                                } else {
-                                    top_panel_height
-                                };
-
-                                sdl::SDL_FRect {
-                                    x: event_surface_rectangle.x,
-                                    y: event_surface_rectangle.y + grid_vertical_offset,
-                                    w: event_surface_rectangle.w,
-                                    h: event_surface_rectangle.h - grid_vertical_offset,
-                                }
-                            };
-
-                            let cell_height = grid_rectangle.h / 24.;
                             if short_event_rectangles_opt.is_none() {
                                 let new_rectangles = create_short_event_rectangles(
-                                    &grid_rectangle,
+                                    &view.grid_rectangle,
                                     &week_data.agenda.short,
                                     &week_start,
                                 );
@@ -484,16 +516,16 @@ fn unsafe_main() {
                                 &event_render,
                             )?;
 
-                            render_grid(renderer, &grid_rectangle)?;
+                            render_grid(renderer, &view.grid_rectangle)?;
                             text_registry.render()?;
                             set_color(renderer, Color::from_rgb(0x111111))?;
                             // render the day names and the dates, render hours
                             let render_week_captions_args =
                                 calendar::render::RenderWeekCaptionsArgs::create_for_week(
-                                    cell_width,
-                                    cell_height,
-                                    grid_rectangle.y + 5.,
-                                    event_surface_rectangle.x,
+                                    view.cell_width,
+                                    view.cell_height,
+                                    view.grid_rectangle.y + 5.,
+                                    view.event_surface.x,
                                 );
 
                             week_data
