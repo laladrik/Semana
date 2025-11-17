@@ -6,11 +6,6 @@ mod sdlext;
 
 use crate::sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
 
-#[inline(always)]
-fn format_date(date: &calendar::Date) -> String {
-    format!("{}-{:02}-{:02}", date.year, date.month, date.day)
-}
-
 fn get_current_week_start() -> Result<calendar::Date, TimeError> {
     sdlext::get_current_time().and_then(date::get_week_start)
 }
@@ -238,11 +233,11 @@ impl From<CalendarError> for Error {
     }
 }
 
-fn register_event_titles<'rect, Str>(
+fn register_event_titles<Str>(
     text_registry: &mut TextRegistry,
     font: &RefCell<Font>,
     titles: &[Str],
-    rectangles: &'rect [calendar::render::Rectangle],
+    rectangles: &[calendar::render::Rectangle],
 ) -> Result<(), Error>
 where
     Str: AsRef<str>,
@@ -282,9 +277,9 @@ fn obtain_agenda(
     )
 }
 
-fn create_short_event_rectangles<'ev>(
+fn create_short_event_rectangles(
     grid_rectangle: &sdl::SDL_FRect,
-    short_events: &'ev calendar::EventData,
+    short_events: &calendar::EventData,
     week_start: &calendar::Date,
 ) -> calendar::render::Rectangles {
     let arguments = calendar::render::Arguments {
@@ -294,8 +289,7 @@ fn create_short_event_rectangles<'ev>(
         offset_y: grid_rectangle.y,
     };
 
-    calendar::render::short_event_rectangles(short_events, week_start, &arguments)
-        .collect()
+    calendar::render::short_event_rectangles(short_events, week_start, &arguments).collect()
 }
 
 fn create_long_event_rectangles<'ev>(
@@ -318,6 +312,31 @@ fn create_long_event_rectangles<'ev>(
     pinned_rectangles_res.collect()
 }
 
+struct WeekData {
+    agenda: calendar::obtain::WeekScheduleWithLanes,
+    week: Week,
+}
+
+impl WeekData {
+    const DAYS: u8 = 7;
+
+    fn try_new(
+        week_start: &calendar::Date,
+        ui_text_factory: &SdlTextCreate,
+    ) -> Result<Self, Error> {
+        let week: Week = {
+            let stream = calendar::DateStream::new(week_start.clone()).take(Self::DAYS as _);
+            let week: calendar::ui::Week<Result<sdlext::Text, _>> =
+                calendar::ui::create_texts(ui_text_factory, stream);
+            validate_week(week)?
+        };
+
+        let agenda: calendar::obtain::WeekScheduleWithLanes =
+            obtain_agenda(week_start).map_err(Error::DataIsNotAvailable)?;
+        Ok(Self { agenda, week })
+    }
+}
+
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -338,18 +357,8 @@ fn unsafe_main() {
 
                         let week_start: calendar::Date =
                             get_current_week_start().map_err(sdlext::Error::from)?;
-                        let week: Week = {
-                            let stream = calendar::DateStream::new(week_start.clone()).take(7);
-                            let week: calendar::ui::Week<Result<sdlext::Text, _>> =
-                                calendar::ui::create_texts(&ui_text_factory, stream);
-                            validate_week(week)?
-                        };
+                        let week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
 
-                        let agenda: calendar::obtain::WeekScheduleWithLanes =
-                            obtain_agenda(&week_start).map_err(Error::DataIsNotAvailable)?;
-                        let short_event_titles: Vec<&str> = agenda.short_events_titles().collect();
-                        let cross_day_event_titles: Vec<&str> =
-                            agenda.long_events_titles().collect();
                         let mut short_event_rectangles_opt: Option<calendar::render::Rectangles> =
                             None;
                         let mut pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
@@ -357,7 +366,7 @@ fn unsafe_main() {
                         let title_font_height =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
                         let long_lane_max_count: f32 =
-                            agenda.long.calculate_biggest_clash() as f32;
+                            week_data.agenda.long.calculate_biggest_clash() as f32;
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
@@ -401,7 +410,7 @@ fn unsafe_main() {
                                         None => {
                                             let replacement = create_long_event_rectangles(
                                                 &event_surface_rectangle,
-                                                &agenda.long,
+                                                &week_data.agenda.long,
                                                 &week_start,
                                                 cell_width,
                                                 top_panel_height,
@@ -414,7 +423,7 @@ fn unsafe_main() {
                                             register_event_titles(
                                                 &mut text_registry,
                                                 &fonts.title,
-                                                &cross_day_event_titles,
+                                                &week_data.agenda.long.titles,
                                                 &replacement,
                                             )?;
                                             Ok(pinned_rectangles_opt.get_or_insert(replacement))
@@ -443,13 +452,13 @@ fn unsafe_main() {
                             if short_event_rectangles_opt.is_none() {
                                 let new_rectangles = create_short_event_rectangles(
                                     &grid_rectangle,
-                                    &agenda.short,
+                                    &week_data.agenda.short,
                                     &week_start,
                                 );
                                 register_event_titles(
                                     &mut text_registry,
                                     &fonts.title,
-                                    &short_event_titles,
+                                    &week_data.agenda.short.titles,
                                     &new_rectangles,
                                 )?;
 
@@ -487,7 +496,9 @@ fn unsafe_main() {
                                     event_surface_rectangle.x,
                                 );
 
-                            week.render(&SdlTextRender, &render_week_captions_args)
+                            week_data
+                                .week
+                                .render(&SdlTextRender, &render_week_captions_args)
                                 .collect::<Result<(), sdlext::TtfError>>()
                                 .map_err(sdlext::Error::from)?;
 
