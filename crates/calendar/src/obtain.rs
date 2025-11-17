@@ -1,7 +1,7 @@
 use crate::MINUTES_PER_DAY;
 
 use super::{Date, DateString, DateStream, Event, Minutes, Time, EventsWithLanes};
-use std::{ffi::OsStr, str::FromStr};
+use std::ffi::OsStr;
 pub trait EventSource {
     type Data;
     type Error;
@@ -436,6 +436,7 @@ fn determine_event_type(event: &Event, is_all_day: bool) -> EventType {
 
 #[cfg(test)]
 mod tests {
+    use core::str::FromStr;
     use super::*;
     #[track_caller]
     fn create_date(s: &str) -> Date {
@@ -456,6 +457,7 @@ mod tests {
     #[test]
     fn test_short_event_clash() {
         let create_event = |title: &str, start_time: &str, end_time: &str| Event {
+            calendar_color: crate::Color::BLACK,
             title: title.to_owned(),
             start_date: create_date("2025-11-03"),
             start_time: create_time(start_time),

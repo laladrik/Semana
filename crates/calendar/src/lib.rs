@@ -30,7 +30,13 @@ pub struct Event {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Color(u32);
+
+#[cfg(test)]
+impl Color {
+    const BLACK: Color = Color(0x000000ff);
+}
 
 impl From<Color> for u32 {
     fn from(val: Color) -> Self {

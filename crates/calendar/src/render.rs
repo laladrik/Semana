@@ -1,4 +1,4 @@
-use super::{Color, Date, Event, Lane, Time, EventsWithLanes};
+use super::{Color, Date, Event, EventsWithLanes, Lane, Time};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 #[cfg_attr(test, derive(PartialEq, Debug))]
@@ -265,17 +265,21 @@ pub fn long_event_rectangles<'ev>(
     first_date: &Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle<'ev>> {
-    long_events.events.iter().zip(&long_events.lanes).map(|item| {
-        let (event, lane_position): (&Event, &(Lane, Lane)) = item;
-        let (event_lane, total_lanes) = *lane_position;
-        let mut rect = create_long_event_rectangle(event, first_date, arguments);
-        if total_lanes != 1 {
-            let lane_height: f32 = arguments.column_height / total_lanes as f32;
-            rect.at.y += lane_height * event_lane as f32;
-            rect.size.y = lane_height;
-        }
-        rect
-    })
+    long_events
+        .events
+        .iter()
+        .zip(&long_events.lanes)
+        .map(|item| {
+            let (event, lane_position): (&Event, &(Lane, Lane)) = item;
+            let (event_lane, total_lanes) = *lane_position;
+            let mut rect = create_long_event_rectangle(event, first_date, arguments);
+            if total_lanes != 1 {
+                let lane_height: f32 = arguments.column_height / total_lanes as f32;
+                rect.at.y += lane_height * event_lane as f32;
+                rect.size.y = lane_height;
+            }
+            rect
+        })
 }
 
 /// Creates rectangles which visualize the position of the `events`.
@@ -291,18 +295,22 @@ pub fn short_event_rectangles<'ev>(
         assert_eq!(event.start_date, event.end_date);
     }
 
-    short_events.events.iter().zip(&short_events.lanes).map(|item| {
-        let (event, lane_position): (&Event, &(Lane, Lane)) = item;
-        let (event_lane, total_lanes) = *lane_position;
-        let mut rect = create_short_event_rectangle(event, first_date, arguments);
-        if total_lanes != 1 {
-            let column_width: f32 = arguments.column_width;
-            let lane_width: f32 = column_width / total_lanes as f32;
-            rect.size.x = lane_width;
-            rect.at.x += event_lane as f32 * lane_width;
-        }
-        rect
-    })
+    short_events
+        .events
+        .iter()
+        .zip(&short_events.lanes)
+        .map(|item| {
+            let (event, lane_position): (&Event, &(Lane, Lane)) = item;
+            let (event_lane, total_lanes) = *lane_position;
+            let mut rect = create_short_event_rectangle(event, first_date, arguments);
+            if total_lanes != 1 {
+                let column_width: f32 = arguments.column_width;
+                let lane_width: f32 = column_width / total_lanes as f32;
+                rect.size.x = lane_width;
+                rect.at.x += event_lane as f32 * lane_width;
+            }
+            rect
+        })
 }
 
 pub trait RenderRectangles {
@@ -341,6 +349,7 @@ mod tests {
     #[test]
     fn test_create_long_event_rectangle() {
         let event = Event {
+            calendar_color: Color::BLACK,
             title: "all day event".to_owned(),
             start_date: create_date("2025-11-04"),
             start_time: create_time("00:00"),
@@ -384,7 +393,8 @@ mod tests {
 
     #[test]
     fn test_top_left_event() {
-        let events = [Event {
+        let events = vec![Event {
+            calendar_color: Color::BLACK,
             all_day: "False".to_owned(),
             title: "arst".to_owned(),
             start_date: create_date("2025-09-29"),
@@ -407,8 +417,10 @@ mod tests {
         };
 
         let lanes = Vec::from([(0, 1)]);
+        let events_with_lanes = EventsWithLanes { events, lanes };
+
         let ret: Rectangles =
-            short_event_rectangles(&events, &lanes, &start_date, &arguments).collect();
+            short_event_rectangles(&events_with_lanes, &start_date, &arguments).collect();
         const ONE_HOUR: f32 = 600.0 / 24.0;
         let [x] = ret.as_slice() else {
             panic!("there must be a single rectangle");
