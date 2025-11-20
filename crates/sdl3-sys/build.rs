@@ -2,9 +2,6 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // Tell cargo to look for shared libraries in the specified directory
-    println!("cargo:rustc-link-search=./../dependencies/SDL-release-3.2.12/build");
-
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
     println!("cargo:rustc-link-lib=SDL3");
@@ -15,7 +12,6 @@ fn main() {
     let bindings = bindgen::Builder::default()
         // The input header we would like to generate
         // bindings for.
-        .clang_arg("-I./../../../dependencies/SDL-release-3.2.12/include")
         .header("wrapper.h")
         //.blocklist_type("SDL_EventType")
         // Tell cargo to invalidate the built crate whenever any of the
