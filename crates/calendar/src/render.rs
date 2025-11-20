@@ -348,14 +348,12 @@ mod tests {
 
     #[test]
     fn test_create_long_event_rectangle() {
-        let event = Event {
+        let event = EventRange {
             calendar_color: Color::BLACK,
-            title: "all day event".to_owned(),
             start_date: create_date("2025-11-04"),
             start_time: create_time("00:00"),
             end_date: create_date("2025-11-06"),
             end_time: create_time("00:00"),
-            all_day: "False".to_owned(),
         };
 
         let first_date: Date = create_date("2025-11-03");

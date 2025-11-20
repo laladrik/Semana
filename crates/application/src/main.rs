@@ -84,7 +84,7 @@ mod config {
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
-    pub const COLOR_BACKGROUND: u32 = 0x000000;
+    pub const COLOR_BACKGROUND: u32 = 0x0C0D0C;
     pub const COLOR_EVENT_TITLE: u32 = 0x000000;
 }
 
