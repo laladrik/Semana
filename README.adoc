@@ -1,9 +1,9 @@
 = Semana
 
-A simple GUI calendar backed by link:https://lostpackets.de/khal/[Khal].
-Currently has very limited functionality which narrowed down just to showing
-the current week events.  Please, note that the project is a *proof of
-concept*.
+A simple GUI calendar for GNU/Linux backed by
+link:https://lostpackets.de/khal/[Khal]. Currently has very limited
+functionality which narrowed down just to showing the current week events.
+Please, note that the project is a *proof of concept*.
 
 image::assets/screenshot.png[Screenshot]
 
