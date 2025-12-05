@@ -321,9 +321,9 @@ fn unsafe_main() {
                             font: &fonts.ui,
                         };
 
-                        let week_start: calendar::date::Date =
+                        let mut week_start: calendar::date::Date =
                             get_current_week_start().map_err(sdlext::Error::from)?;
-                        let week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
+                        let mut week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
 
                         let mut short_event_rectangles_opt: Option<calendar::render::Rectangles> =
                             None;
@@ -333,6 +333,7 @@ fn unsafe_main() {
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
                         let long_lane_max_count: f32 =
                             week_data.agenda.long.calculate_biggest_clash() as f32;
+                        let mut is_week_switched = false;
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
@@ -351,13 +352,26 @@ fn unsafe_main() {
                                     }
                                     sdl::SDL_EVENT_KEY_UP => {
                                         match event.key.key {
-                                            sdl::SDLK_PAGEUP => todo!(),
-                                            sdl::SDLK_PAGEDOWN => todo!(),
+                                            sdl::SDLK_PAGEUP => {
+                                                week_start = week_start.subtract_week();
+                                                is_week_switched = true;
+                                            }
+                                            sdl::SDLK_PAGEDOWN => {
+                                                week_start = week_start.add_week();
+                                                is_week_switched = true;
+                                            }
                                             _ => (),
                                         }
                                     }
                                     _ => (),
                                 }
+                            }
+
+                            if is_week_switched {
+                                week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
+                                pinned_rectangles_opt.take();
+                                short_event_rectangles_opt.take();
+                                is_week_switched = false;
                             }
 
                             let s = sdl::SDL_FPoint {

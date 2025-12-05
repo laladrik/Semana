@@ -49,7 +49,9 @@ impl Iterator for DateStream {
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Date {
     pub year: u16,
+    /// 1 .. 12
     pub month: u8,
+    /// 1 .. 31
     pub day: u8,
 }
 
@@ -303,6 +305,7 @@ impl Date {
 use std::ffi::c_char;
 use std::ffi::c_int;
 
+#[repr(C)]
 struct c_tm {
     /// Seconds          [0, 60]
     tm_sec: c_int,
@@ -328,11 +331,16 @@ struct c_tm {
     tm_zone: *mut c_char,
 }
 
+const TM_YEAR_SHIFT: i16 = -1900;
+const TM_MONTH_SHIFT: i16 = -1;
+
 type c_time_t = u64;
+#[link(name="c")]
 unsafe extern "C" {
     /// out is nullable
     fn time(out: *mut c_time_t) -> c_time_t;
     fn localtime(time: *const c_time_t) -> *mut c_tm;
+    fn localtime_r(time: *const c_time_t, result: *mut c_tm) -> *mut c_tm;
     /// c_tm::tm_yday and c_tm::tm_wday are ignored.  Reference: ctime(3)
     fn mktime(broken_time: *const c_tm) -> c_time_t;
 }
@@ -341,26 +349,38 @@ fn add_days(from: &Date, days: i16) -> Date {
     // SAFETY: localtime can't fail with the current time.  Reference: ctime(3)
     unsafe {
         let now_seconds: c_time_t = time(std::ptr::null_mut());
-        let now_broken: *mut c_tm = localtime(&now_seconds as _);
-        if now_broken.is_null() {
+        let mut now_broken: c_tm = std::mem::zeroed();
+        let ret: *const _ = localtime_r(&now_seconds, &mut now_broken);
+        if ret.is_null() {
             panic!("we can't get the today's date");
         }
 
-        (*now_broken).tm_year = from.year as _;
-        (*now_broken).tm_mon = from.month as _;
-        (*now_broken).tm_mday = from.day as _;
-        let from_time_seconds: c_time_t = mktime(now_broken);
-        let result_seconds: c_time_t = if days > 0 {
-            from_time_seconds + (days as u64 * SECONDS_PER_DAY as u64)
+        now_broken.tm_year = (from.year as i32 + TM_YEAR_SHIFT as i32) as _;
+        now_broken.tm_mon = (from.month as i32 + TM_MONTH_SHIFT as i32) as _;
+        now_broken.tm_mday = from.day as _;
+        let from_time_seconds: c_time_t = mktime(&now_broken as _);
+
+        let diff = days as i64 * SECONDS_PER_DAY as i64;
+        let result_seconds: c_time_t = if diff > 0 {
+            from_time_seconds + diff as u64
         } else {
-            from_time_seconds - (days as u64 * SECONDS_PER_DAY as u64)
+            from_time_seconds - diff.abs() as u64
         };
 
         let result_broken: *const c_tm = localtime(&result_seconds as _);
-        Date {
-            year: (*result_broken).tm_year as _,
-            month: (*result_broken).tm_mon as _,
+        let year = (*result_broken).tm_year as i32 - TM_YEAR_SHIFT as i32;
+        assert!(year > 0 && year <= u16::MAX as i32);
+        let month = (*result_broken).tm_mon - TM_MONTH_SHIFT as i32;
+        assert!(month > 0 && month < u8::MAX as i32);
+
+        let ret = Date {
+            year: year as u16,
+            month: month as u8,
             day: (*result_broken).tm_mday as _,
-        }
+        };
+
+        let ret_days = ret.subtract(from);
+        assert_eq!(ret_days, days.into(), "the result date is wrong: {:?}", ret);
+        ret
     }
 }
