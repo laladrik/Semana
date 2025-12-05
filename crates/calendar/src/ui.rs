@@ -132,8 +132,8 @@ impl View
             FRect {
                 x: Self::EVENT_SURFACE_OFFSET_X,
                 y: Self::EVENT_SURFACE_OFFSET_Y,
-                w: window_size.y - y,
-                h: window_size.x - x,
+                w: window_size.x - x,
+                h: window_size.y - y,
             }
         };
 
