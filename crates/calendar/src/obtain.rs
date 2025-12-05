@@ -1,6 +1,7 @@
-use crate::{EventRange, MINUTES_PER_DAY};
+use crate::EventRange;
 
-use super::{Date, DateStream, DateString, Event, EventData, Minutes, Time};
+use super::date::{Date, DateStream, DateString, MINUTES_PER_DAY, Minutes, Time};
+use super::{Event, EventData};
 use std::ffi::OsStr;
 pub trait EventSource {
     type Data;

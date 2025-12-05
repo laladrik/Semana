@@ -1,5 +1,5 @@
 use crate::render;
-use crate::Date;
+use crate::date::Date;
 use crate::EventData;
 
 use super::TextCreate;
@@ -39,7 +39,7 @@ pub fn create_texts<TF, R, I, D>(text_factory: &TF, date_stream: I) -> Week<R>
 where
     TF: TextCreate<Result = R>,
     I: Iterator<Item = D>,
-    D: std::borrow::Borrow<super::Date>,
+    D: std::borrow::Borrow<super::date::Date>,
 {
     let mut dates_iter = create_date_texts(text_factory, date_stream);
     let dates: [R; 7] = core::array::from_fn(|_| {
@@ -87,10 +87,10 @@ pub fn create_date_texts<TF, R, I, D>(text_factory: &TF, dates: I) -> impl Itera
 where
     TF: TextCreate<Result = R>,
     I: Iterator<Item = D>,
-    D: std::borrow::Borrow<super::Date>,
+    D: std::borrow::Borrow<super::date::Date>,
 {
     dates.map(|date| {
-        let date: &super::Date = date.borrow();
+        let date: &super::date::Date = date.borrow();
         let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
         text_factory.text_create(&text)
     })

@@ -1,16 +1,17 @@
 use super::{TimeError, sdl, sdlext};
+use calendar::date::Date;
 
-pub fn get_today() -> Result<calendar::Date, TimeError> {
+pub fn get_today() -> Result<Date, TimeError> {
     let now = sdlext::get_current_time()?;
     let today = sdlext::time_to_date_time(now, true)?;
-    Ok(calendar::Date {
+    Ok(Date {
         day: today.day as u8,
         month: today.month as u8,
         year: today.year as u16,
     })
 }
 
-pub fn get_week_start(now: sdl::SDL_Time) -> Result<calendar::Date, TimeError> {
+pub fn get_week_start(now: sdl::SDL_Time) -> Result<Date, TimeError> {
     let local_time = true;
     unsafe {
         let today = sdlext::time_to_date_time(now, local_time)?;
@@ -43,7 +44,7 @@ pub fn get_week_start(now: sdl::SDL_Time) -> Result<calendar::Date, TimeError> {
             return Err(TimeError::FailConvertingNowToDate);
         }
 
-        Ok(calendar::Date {
+        Ok(Date {
             year: first_day_of_week.year as u16,
             month: first_day_of_week.month as u8,
             day: first_day_of_week.day as u8,

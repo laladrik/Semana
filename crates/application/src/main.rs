@@ -7,7 +7,7 @@ use calendar::ui::View;
 
 use crate::sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
 
-fn get_current_week_start() -> Result<calendar::Date, TimeError> {
+fn get_current_week_start() -> Result<calendar::date::Date, TimeError> {
     sdlext::get_current_time().and_then(date::get_week_start)
 }
 
@@ -200,7 +200,7 @@ impl Fonts {
 
 #[derive(Debug)]
 struct CalendarError {
-    data: String,
+    _data: String,
 }
 
 impl<'event> From<calendar::Error<'event>> for CalendarError {
@@ -263,7 +263,7 @@ where
 }
 
 fn obtain_agenda(
-    week_start: &calendar::Date,
+    week_start: &calendar::date::Date,
 ) -> Result<calendar::obtain::WeekScheduleWithLanes, AgendaObtainError> {
     let mut arguments = calendar::obtain::khal::week_arguments(week_start);
     let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
@@ -287,11 +287,11 @@ impl WeekData {
     const DAYS: u8 = 7;
 
     fn try_new(
-        week_start: &calendar::Date,
+        week_start: &calendar::date::Date,
         ui_text_factory: &SdlTextCreate,
     ) -> Result<Self, Error> {
         let week: Week = {
-            let stream = calendar::DateStream::new(week_start.clone()).take(Self::DAYS as _);
+            let stream = calendar::date::DateStream::new(week_start.clone()).take(Self::DAYS as _);
             let week: calendar::ui::Week<Result<sdlext::Text, _>> =
                 calendar::ui::create_texts(ui_text_factory, stream);
             validate_week(week)?
@@ -321,7 +321,7 @@ fn unsafe_main() {
                             font: &fonts.ui,
                         };
 
-                        let week_start: calendar::Date =
+                        let week_start: calendar::date::Date =
                             get_current_week_start().map_err(sdlext::Error::from)?;
                         let week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
 
@@ -338,22 +338,29 @@ fn unsafe_main() {
                         'outer_loop: loop {
                             // stage: event handle
                             while sdl::SDL_PollEvent(&mut event as _) {
-                                if event.type_ == sdl::SDL_EVENT_QUIT {
-                                    break 'outer_loop;
-                                }
-
-                                if event.type_ == sdl::SDL_EVENT_WINDOW_RESIZED {
-                                    pinned_rectangles_opt.take();
-                                    short_event_rectangles_opt.take();
-                                    _ = sdl::SDL_GetWindowSize(
-                                        root_window,
-                                        &mut window_size.x,
-                                        &mut window_size.y,
-                                    );
+                                match event.type_ {
+                                    sdl::SDL_EVENT_QUIT => break 'outer_loop,
+                                    sdl::SDL_EVENT_WINDOW_RESIZED => {
+                                        pinned_rectangles_opt.take();
+                                        short_event_rectangles_opt.take();
+                                        _ = sdl::SDL_GetWindowSize(
+                                            root_window,
+                                            &mut window_size.x,
+                                            &mut window_size.y,
+                                        );
+                                    }
+                                    sdl::SDL_EVENT_KEY_UP => {
+                                        match event.key.key {
+                                            sdl::SDLK_PAGEUP => todo!(),
+                                            sdl::SDLK_PAGEDOWN => todo!(),
+                                            _ => (),
+                                        }
+                                    }
+                                    _ => (),
                                 }
                             }
 
-                            let s =  sdl::SDL_FPoint {
+                            let s = sdl::SDL_FPoint {
                                 x: window_size.x as f32,
                                 y: window_size.y as f32,
                             };
@@ -572,7 +579,7 @@ mod tests {
             assert!(sdl::SDL_DateTimeToTime(&now_date, &mut now_time));
             let res = date::get_week_start(now_time)
                 .expect("getting the start of the week must not fail");
-            let calendar::Date { year, month, day } = res;
+            let calendar::date::Date { year, month, day } = res;
             assert_eq!(2025, year);
             assert_eq!(10, month);
             assert_eq!(6, day);

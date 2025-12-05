@@ -1,8 +1,8 @@
 use crate::EventRange;
 
 use super::types::{Point, Size};
-use super::{Color, Date, EventData, Lane, Time};
-use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
+use super::{Color, EventData, Lane};
+use super::date::{Date, Time, MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 pub struct Arguments {
     pub column_width: f32,
