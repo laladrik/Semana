@@ -207,7 +207,7 @@ impl<'event> From<calendar::Error<'event>> for CalendarError {
     fn from(value: calendar::Error<'event>) -> Self {
         let (calendar::Error::InvalidDate(data) | calendar::Error::InvalidTime(data)) = value;
         Self {
-            data: data.to_owned(),
+            _data: data.to_owned(),
         }
     }
 }
@@ -276,41 +276,6 @@ fn obtain_agenda(
         &calendar::obtain::NanoSerde,
         &arguments,
     )
-}
-
-fn create_short_event_rectangles(
-    grid_rectangle: &sdl::SDL_FRect,
-    short_events: &calendar::EventData,
-    week_start: &calendar::Date,
-) -> calendar::render::Rectangles {
-    let arguments = calendar::render::Arguments {
-        column_width: grid_rectangle.w / 7.,
-        column_height: grid_rectangle.h,
-        offset_x: grid_rectangle.x,
-        offset_y: grid_rectangle.y,
-    };
-
-    calendar::render::short_event_rectangles(short_events, week_start, &arguments).collect()
-}
-
-fn create_long_event_rectangles<'ev>(
-    event_surface_rectangle: &sdl::SDL_FRect,
-    long_events: &'ev calendar::EventData,
-    week_start: &calendar::Date,
-    cell_width: f32,
-    top_panel_height: f32,
-) -> calendar::render::Rectangles {
-    let arguments = calendar::render::Arguments {
-        column_width: cell_width,
-        column_height: top_panel_height,
-        offset_x: event_surface_rectangle.x,
-        offset_y: event_surface_rectangle.y,
-    };
-
-    let pinned_rectangles_res =
-        calendar::render::long_event_rectangles(long_events, week_start, &arguments);
-
-    pinned_rectangles_res.collect()
 }
 
 struct WeekData {
@@ -405,13 +370,14 @@ fn unsafe_main() {
                                     match pinned_rectangles_opt {
                                         Some(ref x) => Ok(x),
                                         None => {
-                                            let replacement = create_long_event_rectangles(
-                                                &view.event_surface,
-                                                &week_data.agenda.long,
-                                                &week_start,
-                                                view.cell_width,
-                                                view.top_panel_height,
-                                            );
+                                            let replacement =
+                                                calendar::ui::create_long_event_rectangles(
+                                                    &view.event_surface,
+                                                    &week_data.agenda.long,
+                                                    &week_start,
+                                                    view.cell_width,
+                                                    view.top_panel_height,
+                                                );
                                             // TODO: implement a facility which creates the titles
                                             // of the events at once for the "All day" events and
                                             // regular events.  This would allow to prevent
@@ -431,7 +397,7 @@ fn unsafe_main() {
                             };
 
                             if short_event_rectangles_opt.is_none() {
-                                let new_rectangles = create_short_event_rectangles(
+                                let new_rectangles = calendar::ui::create_short_event_rectangles(
                                     &view.grid_rectangle,
                                     &week_data.agenda.short,
                                     &week_start,

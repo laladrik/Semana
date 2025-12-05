@@ -1,3 +1,7 @@
+use crate::render;
+use crate::Date;
+use crate::EventData;
+
 use super::TextCreate;
 use super::render::RenderWeekCaptionsArgs;
 use super::render::TextRender;
@@ -160,3 +164,39 @@ impl View
         }
     }
 }
+
+pub fn create_short_event_rectangles(
+    grid_rectangle: &FRect,
+    short_events: &EventData,
+    week_start: &Date,
+) -> render::Rectangles {
+    let arguments = render::Arguments {
+        column_width: grid_rectangle.w / 7.,
+        column_height: grid_rectangle.h,
+        offset_x: grid_rectangle.x,
+        offset_y: grid_rectangle.y,
+    };
+
+    render::short_event_rectangles(short_events, week_start, &arguments).collect()
+}
+
+pub fn create_long_event_rectangles(
+    event_surface_rectangle: &FRect,
+    long_events: &EventData,
+    week_start: &Date,
+    cell_width: f32,
+    top_panel_height: f32,
+) -> render::Rectangles {
+    let arguments = render::Arguments {
+        column_width: cell_width,
+        column_height: top_panel_height,
+        offset_x: event_surface_rectangle.x,
+        offset_y: event_surface_rectangle.y,
+    };
+
+    let pinned_rectangles_res =
+        render::long_event_rectangles(long_events, week_start, &arguments);
+
+    pinned_rectangles_res.collect()
+}
+
