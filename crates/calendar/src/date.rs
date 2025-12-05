@@ -1,8 +1,10 @@
 use core::str::FromStr;
+use std::ffi::c_long;
 use std::num::ParseIntError;
 
 pub const MINUTES_PER_HOUR: u8 = 60;
 pub const MINUTES_PER_DAY: u16 = MINUTES_PER_HOUR as u16 * 24;
+pub const SECONDS_PER_DAY: u32 = MINUTES_PER_DAY as u32 * 60;
 
 fn increment_date(date: &Date) -> Date {
     let Date { year, month, day } = date;
@@ -77,7 +79,6 @@ pub enum ParseDateError {
     ParseIntError(ParseIntError),
     InputIsShort,
 }
-
 
 pub enum ParseTimeError {
     InvalidInput(InvalidInput),
@@ -224,6 +225,14 @@ impl Date {
         ])
     }
 
+    pub fn add_week(&self) -> Date {
+        add_days(self, 7)
+    }
+
+    pub fn subtract_week(&self) -> Date {
+        add_days(self, -7)
+    }
+
     pub const fn month_day_count(year: u16, month: u8) -> u8 {
         match month {
             2 => {
@@ -291,4 +300,67 @@ impl Date {
     }
 }
 
+use std::ffi::c_char;
+use std::ffi::c_int;
 
+struct c_tm {
+    /// Seconds          [0, 60]
+    tm_sec: c_int,
+    /// Minutes          [0, 59]
+    tm_min: c_int,
+    /// Hour             [0, 23]
+    tm_hour: c_int,
+    /// Day of the month [1, 31]
+    tm_mday: c_int,
+    /// Month            [0, 11]  (January = 0)
+    tm_mon: c_int,
+    /// Year minus 1900
+    tm_year: c_int,
+    /// Day of the week  [0, 6]   (Sunday = 0)
+    tm_wday: c_int,
+    /// Day of the year  [0, 365] (Jan/01 = 0)
+    tm_yday: c_int,
+    /// Daylight savings flag
+    tm_isdst: c_int,
+    /// Seconds East of UTC
+    tm_gmtoff: c_long,
+    /// Timezone abbreviation
+    tm_zone: *mut c_char,
+}
+
+type c_time_t = u64;
+unsafe extern "C" {
+    /// out is nullable
+    fn time(out: *mut c_time_t) -> c_time_t;
+    fn localtime(time: *const c_time_t) -> *mut c_tm;
+    /// c_tm::tm_yday and c_tm::tm_wday are ignored.  Reference: ctime(3)
+    fn mktime(broken_time: *const c_tm) -> c_time_t;
+}
+
+fn add_days(from: &Date, days: i16) -> Date {
+    // SAFETY: localtime can't fail with the current time.  Reference: ctime(3)
+    unsafe {
+        let now_seconds: c_time_t = time(std::ptr::null_mut());
+        let now_broken: *mut c_tm = localtime(&now_seconds as _);
+        if now_broken.is_null() {
+            panic!("we can't get the today's date");
+        }
+
+        (*now_broken).tm_year = from.year as _;
+        (*now_broken).tm_mon = from.month as _;
+        (*now_broken).tm_mday = from.day as _;
+        let from_time_seconds: c_time_t = mktime(now_broken);
+        let result_seconds: c_time_t = if days > 0 {
+            from_time_seconds + (days as u64 * SECONDS_PER_DAY as u64)
+        } else {
+            from_time_seconds - (days as u64 * SECONDS_PER_DAY as u64)
+        };
+
+        let result_broken: *const c_tm = localtime(&result_seconds as _);
+        Date {
+            year: (*result_broken).tm_year as _,
+            month: (*result_broken).tm_mon as _,
+            day: (*result_broken).tm_mday as _,
+        }
+    }
+}
