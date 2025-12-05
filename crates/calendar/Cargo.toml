@@ -5,3 +5,8 @@ edition = "2024"
 
 [dependencies]
 nanoserde = { version = "0.2.1", features = ["json"] }
+sdl3-sys = { path = "../sdl3-sys", optional = true }
+
+[features]
+backend-sdl3 = ["dep:sdl3-sys"]
+backend-native = []

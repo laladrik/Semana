@@ -1,19 +1,8 @@
 use crate::EventRange;
 
-use super::{Color, Date, Event, EventData, Lane, Time};
+use super::types::{Point, Size};
+use super::{Color, Date, EventData, Lane, Time};
 use super::{MINUTES_PER_DAY, MINUTES_PER_HOUR};
-
-#[cfg_attr(test, derive(PartialEq, Debug))]
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Point {
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-}
 
 pub struct Arguments {
     pub column_width: f32,
@@ -147,8 +136,6 @@ impl RenderWeekCaptionsArgs {
         }
     }
 }
-
-pub type Size = Point;
 
 #[cfg_attr(test, derive(PartialEq))]
 pub struct Rectangle {

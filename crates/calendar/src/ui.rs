@@ -1,7 +1,8 @@
 use super::TextCreate;
 use super::render::RenderWeekCaptionsArgs;
 use super::render::TextRender;
-use super::render::{render_weekdays, render_hours};
+use super::render::{render_hours, render_weekdays};
+use super::types::{FPoint, FRect};
 
 pub struct Week<Text> {
     pub days: [Text; 7],
@@ -10,19 +11,14 @@ pub struct Week<Text> {
 }
 
 impl<Text> Week<Text> {
-    pub fn render<TR, R>(
-        &self,
-        tr: &TR,
-        args: &RenderWeekCaptionsArgs,
-    ) -> impl Iterator<Item = R>
+    pub fn render<TR, R>(&self, tr: &TR, args: &RenderWeekCaptionsArgs) -> impl Iterator<Item = R>
     where
         TR: TextRender<Result = R, Text = Text>,
     {
-
         let RenderWeekCaptionsArgs {
-        hours_arguments,
-        days_arguments,
-        dates_arguments,
+            hours_arguments,
+            days_arguments,
+            dates_arguments,
         } = args;
         render_weekdays(tr, self.days.iter(), days_arguments)
             .chain(render_hours(tr, self.hours.iter(), hours_arguments))
@@ -105,4 +101,62 @@ where
     I: Iterator<Item = &'text str>,
 {
     items.map(|text| text_factory.text_create(text))
+}
+
+pub struct View {
+    pub event_surface: FRect,
+    pub grid_rectangle: FRect,
+    pub cell_width: f32,
+    pub top_panel_height: f32,
+    pub cell_height: f32,
+}
+
+impl View
+{
+    const EVENT_SURFACE_OFFSET_X: f32 = 100.;
+    const EVENT_SURFACE_OFFSET_Y: f32 = 70.;
+
+    pub fn new(
+        window_size: FPoint,
+        title_font_height: i32,
+        long_lane_max_count: f32,
+        long_events_count: usize,
+    ) -> Self {
+        let event_surface: FRect = {
+            let x = 100.;
+            let y = 70.;
+            FRect {
+                x: Self::EVENT_SURFACE_OFFSET_X,
+                y: Self::EVENT_SURFACE_OFFSET_Y,
+                w: window_size.y - y,
+                h: window_size.x - x,
+            }
+        };
+
+        let top_panel_height = (title_font_height + 15) as f32 * long_lane_max_count;
+        let cell_width: f32 = event_surface.w / 7.;
+        let grid_rectangle: FRect = {
+            let grid_vertical_offset = if long_events_count == 0 {
+                0f32
+            } else {
+                top_panel_height
+            };
+
+            FRect {
+                x: event_surface.x,
+                y: event_surface.y + grid_vertical_offset,
+                w: event_surface.w,
+                h: event_surface.h - grid_vertical_offset,
+            }
+        };
+
+        let cell_height = grid_rectangle.h / 24.;
+        Self {
+            cell_height,
+            cell_width,
+            grid_rectangle,
+            event_surface,
+            top_panel_height,
+        }
+    }
 }

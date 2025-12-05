@@ -1,6 +1,7 @@
 pub mod obtain;
 pub mod render;
 pub mod ui;
+pub mod types;
 
 use core::str::FromStr;
 use std::num::ParseIntError;

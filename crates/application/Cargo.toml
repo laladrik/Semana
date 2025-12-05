@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 sdl3-sys = { path = "../sdl3-sys" }
 sdl3-ttf-sys = { path = "../sdl3-ttf-sys" }
-calendar = { path = "../calendar" }
+calendar = { path = "../calendar", features = ["backend-sdl3"] }

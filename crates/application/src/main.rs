@@ -3,6 +3,7 @@ use std::{cell::RefCell, mem::MaybeUninit};
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 mod sdlext;
+use calendar::ui::View;
 
 use crate::sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
 
@@ -337,63 +338,6 @@ impl WeekData {
     }
 }
 
-struct View {
-    event_surface: sdl::SDL_FRect,
-    grid_rectangle: sdl::SDL_FRect,
-    cell_width: f32,
-    top_panel_height: f32,
-    cell_height: f32,
-}
-
-impl View {
-    const EVENT_SURFACE_OFFSET_X: f32 = 100.;
-    const EVENT_SURFACE_OFFSET_Y: f32 = 70.;
-
-    fn new(
-        window_size: sdl::SDL_Point,
-        title_font_height: i32,
-        long_lane_max_count: f32,
-        long_events_count: usize,
-    ) -> Self {
-        let event_surface: sdl::SDL_FRect = {
-            let x = 100.;
-            let y = 70.;
-            sdl::SDL_FRect {
-                x: Self::EVENT_SURFACE_OFFSET_X,
-                y: Self::EVENT_SURFACE_OFFSET_Y,
-                h: window_size.y as f32 - y,
-                w: window_size.x as f32 - x,
-            }
-        };
-
-        let top_panel_height = (title_font_height + 15) as f32 * long_lane_max_count;
-        let cell_width: f32 = event_surface.w / 7.;
-        let grid_rectangle: sdl::SDL_FRect = {
-            let grid_vertical_offset = if long_events_count == 0 {
-                0f32
-            } else {
-                top_panel_height
-            };
-
-            sdl::SDL_FRect {
-                x: event_surface.x,
-                y: event_surface.y + grid_vertical_offset,
-                w: event_surface.w,
-                h: event_surface.h - grid_vertical_offset,
-            }
-        };
-
-        let cell_height = grid_rectangle.h / 24.;
-        Self {
-            cell_height,
-            cell_width,
-            grid_rectangle,
-            event_surface,
-            top_panel_height,
-        }
-    }
-}
-
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -444,8 +388,13 @@ fn unsafe_main() {
                                 }
                             }
 
-                            let view = View::new(
-                                window_size,
+                            let s =  sdl::SDL_FPoint {
+                                x: window_size.x as f32,
+                                y: window_size.y as f32,
+                            };
+
+                            let view: View = View::new(
+                                s,
                                 title_font_height,
                                 long_lane_max_count,
                                 week_data.agenda.long.event_ranges.len(),
