@@ -197,6 +197,7 @@ where
         .take_while(|p| !p.is_empty())
         .zip(date_stream);
 
+    let last_day_in_the_range: Date = arguments.from.add_days(6);
     for item in agendas {
         let (agenda_json, date): (&str, Date) = item;
         let agenda: EventVec = json_parser.parse(agenda_json).map_err(Error::Parse)?;
@@ -205,7 +206,8 @@ where
             .filter_map(|event: Event| short_event_filter(event, &date));
 
         for item in event_items {
-            let (is_short, event): (bool, Event) = item;
+            let (is_short, mut event): (bool, Event) = item;
+            event.end_date = event.end_date.min(last_day_in_the_range.clone());
             if is_short {
                 week_schedule.short.push(event)
             } else {

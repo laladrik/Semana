@@ -256,6 +256,10 @@ impl Date {
         add_days(self, -7)
     }
 
+    pub fn add_days(&self, days: i16) -> Date {
+        add_days(self, days)
+    }
+
     pub const fn month_day_count(year: u16, month: u8) -> u8 {
         match month {
             2 => {
