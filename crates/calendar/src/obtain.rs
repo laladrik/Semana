@@ -315,10 +315,20 @@ fn find_clashes(
     let mut lane_count = 0;
     let mut ret: Vec<(Lane, Lane)> = Vec::new();
     for event in events {
+        // the difference between the first day of the week (start_day) and the start day of the
+        // event.
         let start_day_diff: i32 = event.start_date.subtract(start_date);
+        // the difference between the first day of the week (start_day) and the end day of the
+        // event.
         let end_day_diff: i32 = event.end_date.subtract(start_date);
-        assert!((0..7).contains(&start_day_diff));
-        assert!((0..7).contains(&end_day_diff));
+        assert!(
+            (0..7).contains(&start_day_diff),
+            "the events must start within the week"
+        );
+        assert!(
+            (0..7).contains(&end_day_diff),
+            "the events must finish within the week"
+        );
         let start_date_days: Minutes = Minutes(start_day_diff as u16 * MINUTES_PER_DAY);
         let total_event_start: Minutes = event.start_time.total_minutes().add(start_date_days);
         //let event_start: Minutes = event.start_time.total_minutes().add(days);

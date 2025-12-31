@@ -99,7 +99,7 @@ impl FromStr for Time {
         }
 
         if !s.is_ascii() {
-            return Err(ParseTimeError::UnicodeIsNotSupported)
+            return Err(ParseTimeError::UnicodeIsNotSupported);
         }
 
         let hour = u8::from_str(&s[0..2]).map_err(ParseTimeError::ParseIntError)?;
@@ -273,31 +273,31 @@ impl Date {
     }
 
     pub fn days_from_epoch(&self) -> i32 {
-        let mut total_days = 0;
+        //let mut total_days = 0;
 
         const START: i32 = 1970;
         let years_since_the_start: i32 = (self.year as i32) - START;
-        // Days from years
-        total_days += years_since_the_start * 365;
-        total_days += years_since_the_start / 4;
-        total_days -= years_since_the_start / 100;
-        total_days += years_since_the_start / 400;
+        let leap_years = years_since_the_start - 2;
+        #[rustfmt::skip]
+        let year_days =
+            years_since_the_start * 365
+                + leap_years / 4
+                - (leap_years / 100)
+                + leap_years / 400;
 
-        // Days from months (approximate)
-        let month_days = [1, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        for m in 1..(self.month as usize) {
-            total_days += month_days[m - 1];
-        }
+        // Days from months (approximate).  the 31 from December is skipped, because when we pass
+        // December we pass the year.  Given that the days are in `year_days` already.
+        let month_capacities = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30];
+        let month_days: i32 = month_capacities.iter().take(self.month as usize - 1).sum();
 
-        // Add days
-        total_days += self.day as i32;
+        let total_days = self.day as i32 + month_days + year_days;
 
         // Adjust for leap years in current year
         if self.month > 2 && Self::is_leap_year(self.year) {
-            total_days += 1;
+            total_days + 1
+        } else {
+            total_days
         }
-
-        total_days
     }
 
     pub fn subtract(&self, other: &Date) -> i32 {
@@ -340,7 +340,7 @@ const TM_YEAR_SHIFT: i16 = -1900;
 const TM_MONTH_SHIFT: i16 = -1;
 
 type c_time_t = u64;
-#[link(name="c")]
+#[link(name = "c")]
 unsafe extern "C" {
     /// out is nullable
     fn time(out: *mut c_time_t) -> c_time_t;
@@ -387,5 +387,62 @@ fn add_days(from: &Date, days: i16) -> Date {
         let ret_days = ret.subtract(from);
         assert_eq!(ret_days, days.into(), "the result date is wrong: {:?}", ret);
         ret
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod date_subtract {
+        use super::*;
+        #[test]
+        fn test_one_day() {
+            let term1 = Date {
+                year: 2025,
+                month: 12,
+                day: 30,
+            };
+            let term2 = Date {
+                year: 2025,
+                month: 12,
+                day: 29,
+            };
+
+            let diff = term1.subtract(&term2);
+            assert_eq!(diff, 1)
+        }
+
+        #[test]
+        fn test_cross_leap_year() {
+            let week_start = Date {
+                year: 2027,
+                month: 12,
+                day: 29,
+            };
+            let event_start = Date {
+                year: 2028,
+                month: 1,
+                day: 4,
+            };
+            let diff = event_start.subtract(&week_start);
+            assert_eq!(diff, 7)
+        }
+
+        #[test]
+        fn test_cross_year() {
+            let week_start = Date {
+                year: 2025,
+                month: 12,
+                day: 29,
+            };
+            let event_start = Date {
+                year: 2026,
+                month: 1,
+                day: 4,
+            };
+            let diff = event_start.subtract(&week_start);
+            assert_eq!(diff, 6)
+        }
     }
 }
