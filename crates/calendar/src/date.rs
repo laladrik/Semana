@@ -46,13 +46,29 @@ impl Iterator for DateStream {
     }
 }
 
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd)]
 pub struct Date {
     pub year: u16,
     /// 1 .. 12
     pub month: u8,
     /// 1 .. 31
     pub day: u8,
+}
+
+impl Ord for Date {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let year_ordering = self.year.cmp(&other.year);
+        if year_ordering.is_ne() {
+            return year_ordering
+        }
+
+        let month_ordering = self.month.cmp(&other.month);
+        if month_ordering.is_ne() {
+            return month_ordering
+        }
+
+        self.day.cmp(&other.day)
+    }
 }
 
 impl nanoserde::DeJson for Date {
