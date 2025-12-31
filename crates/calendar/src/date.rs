@@ -85,6 +85,7 @@ pub enum ParseDateError {
 pub enum ParseTimeError {
     InvalidInput(InvalidInput),
     ParseIntError(ParseIntError),
+    UnicodeIsNotSupported,
     InputIsShort,
 }
 
@@ -95,6 +96,10 @@ impl FromStr for Time {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.len() < 5 {
             return Err(ParseTimeError::InputIsShort);
+        }
+
+        if !s.is_ascii() {
+            return Err(ParseTimeError::UnicodeIsNotSupported)
         }
 
         let hour = u8::from_str(&s[0..2]).map_err(ParseTimeError::ParseIntError)?;
