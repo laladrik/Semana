@@ -310,6 +310,7 @@ fn years_to_days(year: u16) -> i32 {
 use std::ffi::c_char;
 use std::ffi::c_int;
 
+#[allow(non_camel_case_types)]
 #[repr(C)]
 struct c_tm {
     /// Seconds          [0, 60]
@@ -339,7 +340,9 @@ struct c_tm {
 const TM_YEAR_SHIFT: i16 = -1900;
 const TM_MONTH_SHIFT: i16 = -1;
 
+#[allow(non_camel_case_types)]
 type c_time_t = u64;
+
 #[link(name = "c")]
 unsafe extern "C" {
     /// out is nullable
