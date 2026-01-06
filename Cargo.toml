@@ -1,10 +1,10 @@
 [workspace.package]
-name = "semana"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
+resolver = "3"
 members = [
     "crates/application", "crates/calendar",
-    "crates/sdl3-sys", "crates/sdl3-ttf-sys",
+    "benchmarking",
 ]

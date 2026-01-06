@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 nanoserde = { version = "0.2.1", features = ["json"] }
-sdl3-sys = { path = "../sdl3-sys", optional = true }
+sdl3-sys = { git = "https://codeberg.org/laladrik/sdl3-sys",  rev = "f86a66e7", optional = true }
 
 [features]
 sdl3-geometry = ["dep:sdl3-sys"]
