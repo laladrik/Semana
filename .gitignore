@@ -1,2 +1,4 @@
 /target
 /Session.vim
+/.cargo
+/Cargo.lock
