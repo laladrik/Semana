@@ -1,4 +1,4 @@
-use super::{TimeError, sdl, sdlext};
+use super::{TimeError, sdl};
 use calendar::date::Date;
 
 pub fn get_week_start(now: sdl::SDL_Time) -> Result<Date, TimeError> {

@@ -2,9 +2,10 @@ use std::{cell::Cell, ptr::NonNull};
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
+#[allow(unused)]
 #[derive(Debug)]
 pub enum Error {
-    InitError,
+    Init,
     WindowIsNotCreated,
     CannotSetVsync,
     RenderDrawColorIsNotSet,
@@ -16,6 +17,10 @@ pub enum Error {
     SurfaceIsNotCreated,
     TextureIsNotCreated,
     TextureIsNotRendered,
+    SurfaceIsNotScaled,
+    RenderTargetFailed,
+    RenderFailed,
+    ViewportIsNotSet,
 }
 
 #[derive(Debug)]
@@ -107,7 +112,7 @@ where
 {
     unsafe {
         if !sdl::SDL_Init(sdl::SDL_INIT_VIDEO) {
-            return Err(Error::InitError)?;
+            return Err(Error::Init)?;
         }
 
         let window_title = std::ffi::CString::from(c"semana");
@@ -137,13 +142,26 @@ where
 }
 
 pub struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
 }
 
 impl Color {
+    pub const GREEN: Self = Self {
+        r: 0x00,
+        g: 0xff,
+        b: 0x00,
+        a: 0xff,
+    };
+    pub const RED: Self = Self {
+        r: 0xff,
+        g: 0x00,
+        b: 0x00,
+        a: 0xff,
+    };
+
     pub const fn from_rgb(value: u32) -> Self {
         Self {
             r: (value >> 16) as u8,
@@ -154,17 +172,17 @@ impl Color {
     }
 }
 
-impl From<calendar::Color> for Color {
-    fn from(value: calendar::Color) -> Self {
-        let value = u32::from(value);
-        Self {
-            r: (value >> 24) as u8,
-            g: (value >> 16) as u8,
-            b: (value >> 8) as u8,
-            a: 0xff,
-        }
-    }
-}
+//impl From<calendar::Color> for Color {
+//    fn from(value: calendar::Color) -> Self {
+//        let value = u32::from(value);
+//        Self {
+//            r: (value >> 24) as u8,
+//            g: (value >> 16) as u8,
+//            b: (value >> 8) as u8,
+//            a: 0xff,
+//        }
+//    }
+//}
 
 impl From<Color> for sdl_ttf::SDL_Color {
     fn from(value: Color) -> Self {
@@ -255,6 +273,24 @@ pub struct Surface {
     ptr: NonNull<sdl::SDL_Surface>,
 }
 
+#[allow(unused)]
+#[derive(Clone, Copy)]
+pub enum ScaleMode {
+    Invalid,
+    Nearest,
+    Linear,
+}
+
+impl From<ScaleMode> for sdl::SDL_ScaleMode {
+    fn from(value: ScaleMode) -> Self {
+        match value {
+            ScaleMode::Invalid => sdl::SDL_ScaleMode_SDL_SCALEMODE_INVALID,
+            ScaleMode::Nearest => sdl::SDL_ScaleMode_SDL_SCALEMODE_NEAREST,
+            ScaleMode::Linear => sdl::SDL_ScaleMode_SDL_SCALEMODE_LINEAR,
+        }
+    }
+}
+
 impl Surface {
     pub fn new(ptr: NonNull<sdl::SDL_Surface>) -> Self {
         Self { ptr }
@@ -265,6 +301,33 @@ impl Surface {
     // It's safe to call the method unsell the value of the pointer is not changed.
     pub unsafe fn ptr(&self) -> *mut sdl::SDL_Surface {
         self.ptr.as_ptr()
+    }
+
+    pub fn create_rgb24(w: i32, h: i32) -> Result<Self, Error> {
+        unsafe {
+            NonNull::new(sdl::SDL_CreateSurface(
+                w,
+                h,
+                sdl::SDL_PixelFormat_SDL_PIXELFORMAT_RGB24,
+            ))
+            .ok_or(Error::SurfaceIsNotCreated)
+            .map(Self::new)
+        }
+    }
+
+    pub fn scale(&mut self, w: i32, h: i32, mode: ScaleMode) -> Result<(), Error> {
+        unsafe {
+            NonNull::new(sdl::SDL_ScaleSurface(
+                self.ptr.as_mut(),
+                w,
+                h,
+                sdl::SDL_ScaleMode::from(mode)
+            ))
+            .ok_or(Error::SurfaceIsNotScaled)
+            .map(|ptr| {
+                self.ptr = ptr;
+            })
+        }
     }
 }
 
@@ -314,6 +377,22 @@ impl Texture {
     pub unsafe fn ptr(&self) -> *mut sdl::SDL_Texture {
         self.ptr.as_ptr()
     }
+
+    #[allow(unused)]
+    pub fn create_rgb24(
+        renderer: *mut sdl::SDL_Renderer,
+        w: i32,
+        h: i32,
+    ) -> Result<Texture, Error> {
+        unsafe {
+            let format = sdl::SDL_PixelFormat_SDL_PIXELFORMAT_RGB24;
+            let access = sdl::SDL_TextureAccess_SDL_TEXTUREACCESS_TARGET;
+            let t = sdl::SDL_CreateTexture(renderer, format, access, w, h);
+            NonNull::new(t)
+                .ok_or(Error::TextureIsNotCreated)
+                .map(Texture::new)
+        }
+    }
 }
 
 impl Drop for Texture {
@@ -332,5 +411,89 @@ pub fn create_texture_from_surface(
         NonNull::new(texture)
             .ok_or(Error::TextureIsNotCreated)
             .map(Texture::new)
+    }
+}
+
+pub fn set_render_target<'a>(
+    renderer: *mut sdl::SDL_Renderer,
+    event_sdl_texture: impl Into<Option<&'a Texture>>,
+) -> Result<(), Error> {
+    unsafe {
+        let ptr = event_sdl_texture
+            .into()
+            .map(|x| x.ptr())
+            .unwrap_or(std::ptr::null_mut());
+        if !sdl::SDL_SetRenderTarget(renderer, ptr) {
+            Err(Error::RenderTargetFailed)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn render_clear(renderer: *mut sdl::SDL_Renderer) -> Result<(), Error> {
+    unsafe {
+        if !sdl::SDL_RenderClear(renderer) {
+            Err(Error::RenderClearFailed)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn render_rect(renderer: *mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Result<(), Error> {
+    unsafe {
+        if !sdl::SDL_RenderRect(renderer, &rect as _) {
+            Err(Error::RenderFailed)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn render_fill_rect(
+    renderer: *mut sdl::SDL_Renderer,
+    rect: sdl::SDL_FRect,
+) -> Result<(), Error> {
+    unsafe {
+        if !sdl::SDL_RenderFillRect(renderer, &rect as _) {
+            Err(Error::RenderFailed)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn set_render_viewport<'a>(
+    renderer: *mut sdl::SDL_Renderer,
+    rect: impl Into<Option<&'a sdl::SDL_Rect>>,
+) -> Result<(), Error> {
+    unsafe {
+        let ptr: *const sdl::SDL_Rect = rect
+            .into()
+            .map(|r| r as *const _)
+            .unwrap_or(std::ptr::null());
+        if !sdl::SDL_SetRenderViewport(renderer, ptr) {
+            Err(Error::ViewportIsNotSet)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn set_render_clip_rect<'a>(
+    renderer: *mut sdl::SDL_Renderer,
+    rect: impl Into<Option<&'a sdl::SDL_Rect>>,
+) -> Result<(), Error> {
+    unsafe {
+        let ptr: *const sdl::SDL_Rect = rect
+            .into()
+            .map(|r| r as *const _)
+            .unwrap_or(std::ptr::null());
+        if !sdl::SDL_SetRenderClipRect(renderer, ptr) {
+            Err(Error::ViewportIsNotSet)
+        } else {
+            Ok(())
+        }
     }
 }

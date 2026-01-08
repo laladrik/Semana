@@ -2,10 +2,10 @@ use std::{cell::RefCell, mem::MaybeUninit};
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
-mod sdlext;
+//mod sdlext;
 use calendar::ui::View;
 
-use crate::sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
+use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
 
 fn get_current_week_start() -> Result<calendar::date::Date, TimeError> {
     sdlext::get_current_time().and_then(date::get_week_start)
@@ -534,7 +534,7 @@ impl calendar::render::RenderRectangles for RectangleRender {
     {
         unsafe {
             for rect in rectangles {
-                set_color(self.renderer, Color::from(rect.color))?;
+                set_color(self.renderer, calendar_color_2_to_sdl_color(rect.color))?;
                 let sdl_rect = create_sdl_frect(rect);
                 if !sdl::SDL_RenderFillRect(self.renderer, &sdl_rect as _) {
                     return Err(sdlext::Error::RectangleIsNotDrawn);
@@ -570,6 +570,16 @@ fn main() {
     unsafe_main();
 }
 
+
+fn calendar_color_2_to_sdl_color(value: calendar::Color) -> sdlext::Color {
+        let value = u32::from(value);
+        sdlext::Color {
+            r: (value >> 24) as u8,
+            g: (value >> 16) as u8,
+            b: (value >> 8) as u8,
+            a: 0xff,
+        }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

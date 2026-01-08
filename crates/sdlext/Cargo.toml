@@ -1,10 +1,8 @@
 [package]
-name = "application"
-version = "0.1.0"
-edition = "2024"
+name = "sdlext"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 sdl3-sys = { git = "https://codeberg.org/laladrik/sdl3-sys", rev = "f86a66e7" }
 sdl3-ttf-sys = { git = "https://codeberg.org/laladrik/sdl3-ttf-sys", rev = "b2ef9dc5" }
-sdlext = { path = "../sdlext" }
-calendar = { path = "../calendar", features = ["sdl3-geometry"] }

@@ -6,5 +6,5 @@ edition = "2024"
 resolver = "3"
 members = [
     "crates/application", "crates/calendar",
-    "benchmarking",
+    "benchmarking", "crates/sdlext",
 ]
