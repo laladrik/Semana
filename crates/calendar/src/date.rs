@@ -319,6 +319,10 @@ impl Date {
 fn years_to_days(year: u16) -> i32 {
     const START: i32 = 1970;
     let years_since_the_start: i32 = (year as i32) - START;
+    // As 1970 is not a leap year, that fact that the difference with it is divisible by 4 is an
+    // error.  Therefore, we do (+2) and cound from 1968.
+    //
+    // As we count the days in the years before `year` we do -1
     let leap_years = years_since_the_start + 2 - 1;
     years_since_the_start
         * 365
