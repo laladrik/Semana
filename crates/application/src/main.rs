@@ -216,6 +216,7 @@ type JsonParseError = <calendar::obtain::NanoSerde as calendar::obtain::JsonPars
 type AgendaObtainError = calendar::obtain::Error<JsonParseError>;
 
 #[derive(Debug)]
+#[allow(unused)]
 enum Error {
     Sdl(sdlext::Error),
     Calendar(CalendarError),

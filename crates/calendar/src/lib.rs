@@ -12,7 +12,7 @@ pub enum Error<'s> {
 }
 
 #[derive(DeJson, Debug)]
-struct Event {
+pub struct Event {
     title: String,
     #[nserde(rename = "start-date")]
     start_date: date::Date,
@@ -96,7 +96,6 @@ pub type Lane = u8;
 #[cfg(test)]
 mod tests {
     use crate::date::{Date, Time};
-    use super::*;
     #[test]
     fn test_data_dejson() {
         #[derive(nanoserde::DeJson)]
