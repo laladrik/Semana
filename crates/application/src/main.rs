@@ -1,9 +1,9 @@
 use std::{cell::RefCell, mem::MaybeUninit};
 
+use calendar::ui::{SurfaceAdjustment, View};
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 use sdlext::Ptr;
-use calendar::ui::View;
 
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
 mod render;
@@ -308,7 +308,7 @@ impl WeekData {
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
-            move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer|  {
+            move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
                 let mut text_registry = TextRegistry::new(renderer);
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
@@ -337,6 +337,12 @@ fn unsafe_main() {
                         let mut is_week_switched = false;
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
+
+                        let adjustment = SurfaceAdjustment {
+                            vertical_scale: 0.,
+                            vertical_offset: 0.,
+                        };
+
                         'outer_loop: loop {
                             // stage: event handle
                             while sdl::SDL_PollEvent(&mut event as _) {
@@ -375,9 +381,10 @@ fn unsafe_main() {
 
                             let view = View::new(
                                 sdl::SDL_FPoint {
-                                    x: window_size.x as f32,
-                                    y: window_size.y as f32,
+                                    x: window_size.x as f32 - 100.,
+                                    y: window_size.y as f32 - 70.,
                                 },
+                                &adjustment,
                                 title_font_height,
                                 long_lane_max_count,
                                 week_data.agenda.long.event_ranges.len(),
@@ -435,6 +442,7 @@ fn unsafe_main() {
 
                             let data = &render::RenderData {
                                 view,
+                                window_size,
                                 long_event_rectangles,
                                 week_data: &week_data,
                                 short_event_rectangles,

@@ -115,25 +115,28 @@ pub struct View {
     pub cell_height: f32,
 }
 
-impl View
-{
-    const EVENT_SURFACE_OFFSET_X: f32 = 100.;
-    const EVENT_SURFACE_OFFSET_Y: f32 = 70.;
+pub struct SurfaceAdjustment {
+    pub vertical_scale: f32,
+    pub vertical_offset: f32,
+}
+
+impl View {
+    //const EVENT_SURFACE_OFFSET_X: f32 = 100.;
+    //const EVENT_SURFACE_OFFSET_Y: f32 = 70.;
 
     pub fn new(
-        window_size: FPoint,
+        viewport_size: FPoint,
+        adjuctment: &SurfaceAdjustment,
         title_font_height: i32,
         long_lane_max_count: f32,
         long_events_count: usize,
     ) -> Self {
         let event_surface: FRect = {
-            let x = 100.;
-            let y = 70.;
             FRect {
-                x: Self::EVENT_SURFACE_OFFSET_X,
-                y: Self::EVENT_SURFACE_OFFSET_Y,
-                w: window_size.x - x,
-                h: window_size.y - y,
+                x: 0.,
+                y: adjuctment.vertical_offset,
+                w: viewport_size.x,
+                h: viewport_size.y + adjuctment.vertical_scale,
             }
         };
 
