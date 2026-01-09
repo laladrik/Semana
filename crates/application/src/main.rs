@@ -2,7 +2,7 @@ use std::{cell::RefCell, mem::MaybeUninit};
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
-//mod sdlext;
+use sdlext::Ptr;
 use calendar::ui::View;
 
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
@@ -34,7 +34,7 @@ impl calendar::render::TextRender for SdlTextRender {
 
     fn text_render(&self, text: &Self::Text, x: f32, y: f32) -> Self::Result {
         unsafe {
-            if !sdl_ttf::TTF_DrawRendererText(text.ptr().get(), x, y) {
+            if !sdl_ttf::TTF_DrawRendererText(text.ptr(), x, y) {
                 Err(sdlext::TtfError::TextIsNotDrown)
             } else {
                 Ok(())
@@ -74,11 +74,11 @@ fn validate_week(
     })
 }
 
-struct TextRegistry {
+struct TextRegistry<'a> {
     surfaces: Vec<sdlext::Surface>,
     textures: Vec<sdlext::Texture>,
     text_positions: Vec<sdl::SDL_FRect>,
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &'a sdlext::Renderer,
 }
 
 mod config {
@@ -89,13 +89,13 @@ mod config {
     pub const COLOR_EVENT_TITLE: u32 = 0x000000;
 }
 
-impl TextRegistry {
-    fn new(renderer: *mut sdl::SDL_Renderer) -> Self {
+impl<'a> TextRegistry<'a> {
+    fn new(renderer: &'a sdlext::Renderer) -> Self {
         Self {
+            renderer,
             surfaces: Vec::new(),
             textures: Vec::new(),
             text_positions: Vec::new(),
-            renderer,
         }
     }
 
@@ -157,7 +157,7 @@ impl TextRegistry {
                     h: position.h,
                 };
 
-                if !sdl::SDL_RenderTexture(self.renderer, texture.ptr(), &src, position) {
+                if !sdl::SDL_RenderTexture(self.renderer.ptr(), texture.ptr(), &src, position) {
                     return Err(sdlext::Error::TextureIsNotRendered);
                 }
             }
@@ -172,7 +172,7 @@ impl TextRegistry {
     }
 }
 
-impl Drop for TextRegistry {
+impl<'a> Drop for TextRegistry<'a> {
     fn drop(&mut self) {
         self.clear()
     }
@@ -307,7 +307,7 @@ impl WeekData {
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
-            move |root_window: *mut sdl::SDL_Window, renderer: *mut sdl::SDL_Renderer| {
+            move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
                 let mut text_registry = TextRegistry::new(renderer);
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
@@ -315,7 +315,6 @@ fn unsafe_main() {
                 sdl_ttf_init(
                     renderer,
                     move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<_, Error> {
-                        let event_render = RectangleRender { renderer };
                         let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
                         let ui_text_factory = SdlTextCreate {
                             engine,
@@ -351,19 +350,17 @@ fn unsafe_main() {
                                             &mut window_size.y,
                                         );
                                     }
-                                    sdl::SDL_EVENT_KEY_UP => {
-                                        match event.key.key {
-                                            sdl::SDLK_PAGEUP => {
-                                                week_start = week_start.subtract_week();
-                                                is_week_switched = true;
-                                            }
-                                            sdl::SDLK_PAGEDOWN => {
-                                                week_start = week_start.add_week();
-                                                is_week_switched = true;
-                                            }
-                                            _ => (),
+                                    sdl::SDL_EVENT_KEY_UP => match event.key.key {
+                                        sdl::SDLK_PAGEUP => {
+                                            week_start = week_start.subtract_week();
+                                            is_week_switched = true;
                                         }
-                                    }
+                                        sdl::SDLK_PAGEDOWN => {
+                                            week_start = week_start.add_week();
+                                            is_week_switched = true;
+                                        }
+                                        _ => (),
+                                    },
                                     _ => (),
                                 }
                             }
@@ -439,19 +436,22 @@ fn unsafe_main() {
 
                             // stage: render
                             set_color(renderer, Color::from_rgb(config::COLOR_BACKGROUND))?;
-                            if !sdl::SDL_RenderClear(renderer) {
+                            if !sdl::SDL_RenderClear(renderer.ptr()) {
                                 return Err(sdlext::Error::RenderClearFailed)?;
                             }
 
-                            calendar::render::render_rectangles(
-                                long_event_rectangles.iter(),
-                                &event_render,
-                            )?;
+                            {
+                                let event_render = RectangleRender { renderer };
+                                calendar::render::render_rectangles(
+                                    long_event_rectangles.iter(),
+                                    &event_render,
+                                )?;
 
-                            calendar::render::render_rectangles(
-                                short_event_rectangles.iter(),
-                                &event_render,
-                            )?;
+                                calendar::render::render_rectangles(
+                                    short_event_rectangles.iter(),
+                                    &event_render,
+                                )?;
+                            }
 
                             render_grid(renderer, &view.grid_rectangle)?;
                             text_registry.render()?;
@@ -471,7 +471,7 @@ fn unsafe_main() {
                                 .collect::<Result<(), sdlext::TtfError>>()
                                 .map_err(sdlext::Error::from)?;
 
-                            if !sdl::SDL_RenderPresent(renderer) {
+                            if !sdl::SDL_RenderPresent(renderer.ptr()) {
                                 return Err(sdlext::Error::RenderIsNotPresent)?;
                             }
                         }
@@ -490,7 +490,7 @@ fn unsafe_main() {
 }
 
 fn render_grid(
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &sdlext::Renderer,
     grid_rectangle: &sdl::SDL_FRect,
 ) -> Result<(), sdlext::Error> {
     unsafe {
@@ -499,7 +499,7 @@ fn render_grid(
         for i in 0..24 {
             let ordinate = i as f32 * row_ratio + grid_rectangle.y;
             let _ = sdl::SDL_RenderLine(
-                renderer,
+                renderer.ptr(),
                 grid_rectangle.x,
                 ordinate,
                 grid_rectangle.w + grid_rectangle.x,
@@ -511,7 +511,7 @@ fn render_grid(
         for i in 0..7 {
             let absciss: f32 = i as f32 * col_ratio + grid_rectangle.x;
             _ = sdl::SDL_RenderLine(
-                renderer,
+                renderer.ptr(),
                 absciss,
                 grid_rectangle.y,
                 absciss,
@@ -522,11 +522,11 @@ fn render_grid(
     Ok(())
 }
 
-struct RectangleRender {
-    renderer: *mut sdl::SDL_Renderer,
+struct RectangleRender<'a> {
+    renderer: &'a sdlext::Renderer,
 }
 
-impl calendar::render::RenderRectangles for RectangleRender {
+impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
     type Result = Result<(), sdlext::Error>;
 
     fn render_rectangles<'r, I>(&self, rectangles: I) -> Self::Result
@@ -537,7 +537,7 @@ impl calendar::render::RenderRectangles for RectangleRender {
             for rect in rectangles {
                 set_color(self.renderer, calendar_color_2_to_sdl_color(rect.color))?;
                 let sdl_rect = create_sdl_frect(rect);
-                if !sdl::SDL_RenderFillRect(self.renderer, &sdl_rect as _) {
+                if !sdl::SDL_RenderFillRect(self.renderer.ptr(), &sdl_rect as _) {
                     return Err(sdlext::Error::RectangleIsNotDrawn);
                 }
 
@@ -549,7 +549,7 @@ impl calendar::render::RenderRectangles for RectangleRender {
                 };
 
                 set_color(self.renderer, Color::from_rgb(0xff0000))?;
-                if !sdl::SDL_RenderFillRect(self.renderer, &border) {
+                if !sdl::SDL_RenderFillRect(self.renderer.ptr(), &border) {
                     return Err(sdlext::Error::RectangleIsNotDrawn);
                 }
             }
@@ -571,16 +571,16 @@ fn main() {
     unsafe_main();
 }
 
-
 fn calendar_color_2_to_sdl_color(value: calendar::Color) -> sdlext::Color {
-        let value = u32::from(value);
-        sdlext::Color {
-            r: (value >> 24) as u8,
-            g: (value >> 16) as u8,
-            b: (value >> 8) as u8,
-            a: 0xff,
-        }
+    let value = u32::from(value);
+    sdlext::Color {
+        r: (value >> 24) as u8,
+        g: (value >> 16) as u8,
+        b: (value >> 8) as u8,
+        a: 0xff,
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

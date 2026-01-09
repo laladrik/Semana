@@ -1,8 +1,7 @@
-use std::{cell::Cell, ptr::NonNull};
+use std::ptr::NonNull;
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
-#[allow(unused)]
 #[derive(Debug)]
 pub enum Error {
     Init,
@@ -21,6 +20,7 @@ pub enum Error {
     RenderTargetFailed,
     RenderFailed,
     ViewportIsNotSet,
+    RendererIsNull,
 }
 
 #[derive(Debug)]
@@ -55,6 +55,14 @@ pub struct Font {
     ptr: NonNull<sdl_ttf::TTF_Font>,
 }
 
+impl Ptr for Font {
+    type Inner = sdl_ttf::TTF_Font;
+
+    fn ptr(&self) -> *mut Self::Inner {
+         self.ptr.as_ptr()
+    }
+}
+
 impl Font {
     pub fn new(ptr: NonNull<sdl_ttf::TTF_Font>) -> Self {
         Self { ptr }
@@ -65,10 +73,6 @@ impl Font {
         NonNull::new(ptr)
             .ok_or(TtfError::FontIsNotOpened)
             .map(Self::new)
-    }
-
-    pub fn ptr(&mut self) -> *mut sdl_ttf::TTF_Font {
-        self.ptr.as_ptr()
     }
 }
 
@@ -81,7 +85,7 @@ impl Drop for Font {
 }
 
 pub unsafe fn sdl_ttf_init<R, E>(
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &Renderer,
     body: impl FnOnce(*mut sdl_ttf::TTF_TextEngine) -> Result<R, E>,
 ) -> Result<R, E>
 where
@@ -93,7 +97,7 @@ where
         }
 
         let engine: *mut sdl_ttf::TTF_TextEngine =
-            sdl_ttf::TTF_CreateRendererTextEngine(renderer.cast());
+            sdl_ttf::TTF_CreateRendererTextEngine(renderer.ptr().cast());
         if engine.is_null() {
             return Err(Error::from(TtfError::EngineIsNotCreated))?;
         }
@@ -104,8 +108,11 @@ where
     }
 }
 
+/// # Safety
+///
+/// It's safe to call the function as long the window is not destroyed in the body.
 pub unsafe fn sdl_init<R, E>(
-    body: impl FnOnce(*mut sdl::SDL_Window, *mut sdl::SDL_Renderer) -> Result<R, E>,
+    body: impl FnOnce(*mut sdl::SDL_Window, &Renderer) -> Result<R, E>,
 ) -> Result<R, E>
 where
     E: From<Error>,
@@ -135,7 +142,11 @@ where
             return Err(Error::CannotSetVsync)?;
         }
 
-        let r = body(root_window, renderer);
+        let mut safe_renderer = Renderer {
+            ptr: NonNull::new(renderer).ok_or(Error::RendererIsNull)?,
+        };
+
+        let r = body(root_window, &mut safe_renderer);
         sdl::SDL_Quit();
         r
     }
@@ -172,18 +183,6 @@ impl Color {
     }
 }
 
-//impl From<calendar::Color> for Color {
-//    fn from(value: calendar::Color) -> Self {
-//        let value = u32::from(value);
-//        Self {
-//            r: (value >> 24) as u8,
-//            g: (value >> 16) as u8,
-//            b: (value >> 8) as u8,
-//            a: 0xff,
-//        }
-//    }
-//}
-
 impl From<Color> for sdl_ttf::SDL_Color {
     fn from(value: Color) -> Self {
         Self {
@@ -195,9 +194,17 @@ impl From<Color> for sdl_ttf::SDL_Color {
     }
 }
 
-pub fn set_color(renderer: *mut sdl::SDL_Renderer, color: Color) -> SdlResult<()> {
+impl Ptr for &Renderer {
+    type Inner = sdl::SDL_Renderer;
+
+    fn ptr(&self) -> *mut Self::Inner {
+         self.ptr.as_ptr()
+    }
+}
+
+pub fn set_color(renderer: &Renderer, color: Color) -> SdlResult<()> {
     unsafe {
-        if !sdl::SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a) {
+        if !sdl::SDL_SetRenderDrawColor(renderer.ptr(), color.r, color.g, color.b, color.a) {
             Err(Error::RenderDrawColorIsNotSet)
         } else {
             Ok(())
@@ -206,7 +213,15 @@ pub fn set_color(renderer: *mut sdl::SDL_Renderer, color: Color) -> SdlResult<()
 }
 
 pub struct Text {
-    ptr: Cell<*mut sdl_ttf::TTF_Text>,
+    ptr: *mut sdl_ttf::TTF_Text,
+}
+
+impl Ptr for Text {
+    type Inner = sdl_ttf::TTF_Text;
+
+    fn ptr(&self) -> *mut Self::Inner {
+        self.ptr
+    }
 }
 
 impl Text {
@@ -221,25 +236,16 @@ impl Text {
             if ptr.is_null() {
                 Err(TtfError::TextIsNotCreated)
             } else {
-                Ok(Self {
-                    ptr: Cell::new(ptr),
-                })
+                Ok(Self { ptr })
             }
         }
-    }
-
-    // # Safety:
-    //
-    // It's safe to call the method unsell the value of the pointer is not changed.
-    pub unsafe fn ptr(&self) -> Cell<*mut sdl_ttf::TTF_Text> {
-        self.ptr.clone()
     }
 }
 
 impl Drop for Text {
     fn drop(&mut self) {
         unsafe {
-            sdl_ttf::TTF_DestroyText(self.ptr.get());
+            sdl_ttf::TTF_DestroyText(self.ptr);
         }
     }
 }
@@ -273,7 +279,6 @@ pub struct Surface {
     ptr: NonNull<sdl::SDL_Surface>,
 }
 
-#[allow(unused)]
 #[derive(Clone, Copy)]
 pub enum ScaleMode {
     Invalid,
@@ -296,13 +301,6 @@ impl Surface {
         Self { ptr }
     }
 
-    // # Safety:
-    //
-    // It's safe to call the method unsell the value of the pointer is not changed.
-    pub unsafe fn ptr(&self) -> *mut sdl::SDL_Surface {
-        self.ptr.as_ptr()
-    }
-
     pub fn create_rgb24(w: i32, h: i32) -> Result<Self, Error> {
         unsafe {
             NonNull::new(sdl::SDL_CreateSurface(
@@ -321,7 +319,7 @@ impl Surface {
                 self.ptr.as_mut(),
                 w,
                 h,
-                sdl::SDL_ScaleMode::from(mode)
+                sdl::SDL_ScaleMode::from(mode),
             ))
             .ok_or(Error::SurfaceIsNotScaled)
             .map(|ptr| {
@@ -371,23 +369,11 @@ impl Texture {
         Self { ptr }
     }
 
-    /// # Safety
-    ///
-    /// The method is safe unless the value of the pointer is changed.
-    pub unsafe fn ptr(&self) -> *mut sdl::SDL_Texture {
-        self.ptr.as_ptr()
-    }
-
-    #[allow(unused)]
-    pub fn create_rgb24(
-        renderer: *mut sdl::SDL_Renderer,
-        w: i32,
-        h: i32,
-    ) -> Result<Texture, Error> {
+    pub fn create_rgb25(renderer: &Renderer, w: i32, h: i32) -> Result<Texture, Error> {
         unsafe {
             let format = sdl::SDL_PixelFormat_SDL_PIXELFORMAT_RGB24;
             let access = sdl::SDL_TextureAccess_SDL_TEXTUREACCESS_TARGET;
-            let t = sdl::SDL_CreateTexture(renderer, format, access, w, h);
+            let t = sdl::SDL_CreateTexture(renderer.ptr(), format, access, w, h);
             NonNull::new(t)
                 .ok_or(Error::TextureIsNotCreated)
                 .map(Texture::new)
@@ -403,27 +389,59 @@ impl Drop for Texture {
 }
 
 pub fn create_texture_from_surface(
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &Renderer,
     surface: &Surface,
 ) -> Result<Texture, Error> {
+    // SAFETY: the calling of the function is safe because the pointers of renderer and surface are
+    // guaranteed to be valid because they are validated during the creation of the instances and
+    // don't change during their life.
+    //
+    // TODO: consider guarantee calling the function from the main thread only.
     unsafe {
-        let texture = sdl::SDL_CreateTextureFromSurface(renderer, surface.ptr());
+        let texture = sdl::SDL_CreateTextureFromSurface(renderer.ptr(), surface.ptr());
         NonNull::new(texture)
             .ok_or(Error::TextureIsNotCreated)
             .map(Texture::new)
     }
 }
 
+pub trait Ptr {
+    type Inner;
+    fn ptr(&self) -> *mut Self::Inner;
+}
+
+impl Ptr for Surface {
+    type Inner = sdl::SDL_Surface;
+
+    fn ptr(&self) -> *mut Self::Inner {
+         self.ptr.as_ptr()
+    }
+}
+
+impl Ptr for Texture {
+    type Inner = sdl::SDL_Texture;
+
+    fn ptr(&self) -> *mut Self::Inner {
+         self.ptr.as_ptr()
+    }
+}
+
+fn to_mut_ptr<'a, U, T>(reference: impl Into<Option<&'a mut T>>) -> *mut U
+where
+    T: Ptr<Inner = U> + 'a,
+{
+    reference
+        .into()
+        .map(|x| x.ptr())
+        .unwrap_or(std::ptr::null_mut())
+}
+
 pub fn set_render_target<'a>(
-    renderer: *mut sdl::SDL_Renderer,
-    event_sdl_texture: impl Into<Option<&'a Texture>>,
+    renderer: &Renderer,
+    event_sdl_texture: impl Into<Option<&'a mut Texture>>,
 ) -> Result<(), Error> {
     unsafe {
-        let ptr = event_sdl_texture
-            .into()
-            .map(|x| x.ptr())
-            .unwrap_or(std::ptr::null_mut());
-        if !sdl::SDL_SetRenderTarget(renderer, ptr) {
+        if !sdl::SDL_SetRenderTarget(renderer.ptr(), to_mut_ptr(event_sdl_texture)) {
             Err(Error::RenderTargetFailed)
         } else {
             Ok(())
@@ -431,7 +449,7 @@ pub fn set_render_target<'a>(
     }
 }
 
-pub fn render_clear(renderer: *mut sdl::SDL_Renderer) -> Result<(), Error> {
+pub fn render_clear(renderer: &mut sdl::SDL_Renderer) -> Result<(), Error> {
     unsafe {
         if !sdl::SDL_RenderClear(renderer) {
             Err(Error::RenderClearFailed)
@@ -441,7 +459,7 @@ pub fn render_clear(renderer: *mut sdl::SDL_Renderer) -> Result<(), Error> {
     }
 }
 
-pub fn render_rect(renderer: *mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Result<(), Error> {
+pub fn render_rect(renderer: &mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Result<(), Error> {
     unsafe {
         if !sdl::SDL_RenderRect(renderer, &rect as _) {
             Err(Error::RenderFailed)
@@ -452,7 +470,7 @@ pub fn render_rect(renderer: *mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Re
 }
 
 pub fn render_fill_rect(
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &mut sdl::SDL_Renderer,
     rect: sdl::SDL_FRect,
 ) -> Result<(), Error> {
     unsafe {
@@ -464,8 +482,18 @@ pub fn render_fill_rect(
     }
 }
 
+pub struct Renderer {
+    ptr: NonNull<sdl::SDL_Renderer>,
+}
+
+impl Renderer {
+    pub fn ptr(&self) -> *mut sdl::SDL_Renderer {
+         self.ptr.as_ptr()
+    }
+}
+
 pub fn set_render_viewport<'a>(
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &mut sdl::SDL_Renderer,
     rect: impl Into<Option<&'a sdl::SDL_Rect>>,
 ) -> Result<(), Error> {
     unsafe {
@@ -482,7 +510,7 @@ pub fn set_render_viewport<'a>(
 }
 
 pub fn set_render_clip_rect<'a>(
-    renderer: *mut sdl::SDL_Renderer,
+    renderer: &mut sdl::SDL_Renderer,
     rect: impl Into<Option<&'a sdl::SDL_Rect>>,
 ) -> Result<(), Error> {
     unsafe {
