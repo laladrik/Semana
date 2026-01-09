@@ -493,7 +493,7 @@ impl Renderer {
 }
 
 pub fn set_render_viewport<'a>(
-    renderer: &mut sdl::SDL_Renderer,
+    renderer: &Renderer,
     rect: impl Into<Option<&'a sdl::SDL_Rect>>,
 ) -> Result<()> {
     unsafe {
@@ -501,7 +501,7 @@ pub fn set_render_viewport<'a>(
             .into()
             .map(|r| r as *const _)
             .unwrap_or(std::ptr::null());
-        if !sdl::SDL_SetRenderViewport(renderer, ptr) {
+        if !sdl::SDL_SetRenderViewport(renderer.ptr(), ptr) {
             Err(Error::ViewportIsNotSet)
         } else {
             Ok(())
@@ -525,5 +525,6 @@ pub fn set_render_clip_rect<'a>(
         }
     }
 }
+
 
 //pub type Result<T> = Result<T, Error>;
