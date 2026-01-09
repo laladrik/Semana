@@ -49,7 +49,7 @@ pub enum TtfError {
     TextIsNotDrown,
 }
 
-pub type SdlResult<R> = Result<R, Error>;
+pub type Result<R> = std::result::Result<R, Error>;
 
 pub struct Font {
     ptr: NonNull<sdl_ttf::TTF_Font>,
@@ -68,7 +68,7 @@ impl Font {
         Self { ptr }
     }
 
-    pub fn open(path: &std::ffi::CStr, size: f32) -> Result<Self, TtfError> {
+    pub fn open(path: &std::ffi::CStr, size: f32) -> std::result::Result<Self, TtfError> {
         let ptr = unsafe { sdl_ttf::TTF_OpenFont(path.as_ptr(), size) };
         NonNull::new(ptr)
             .ok_or(TtfError::FontIsNotOpened)
@@ -86,8 +86,8 @@ impl Drop for Font {
 
 pub unsafe fn sdl_ttf_init<R, E>(
     renderer: &Renderer,
-    body: impl FnOnce(*mut sdl_ttf::TTF_TextEngine) -> Result<R, E>,
-) -> Result<R, E>
+    body: impl FnOnce(*mut sdl_ttf::TTF_TextEngine) -> std::result::Result<R, E>,
+) -> std::result::Result<R, E>
 where
     E: From<Error>,
 {
@@ -112,8 +112,8 @@ where
 ///
 /// It's safe to call the function as long the window is not destroyed in the body.
 pub unsafe fn sdl_init<R, E>(
-    body: impl FnOnce(*mut sdl::SDL_Window, &Renderer) -> Result<R, E>,
-) -> Result<R, E>
+    body: impl FnOnce(*mut sdl::SDL_Window, &Renderer) -> std::result::Result<R, E>,
+) -> std::result::Result<R, E>
 where
     E: From<Error>,
 {
@@ -202,7 +202,7 @@ impl Ptr for &Renderer {
     }
 }
 
-pub fn set_color(renderer: &Renderer, color: Color) -> SdlResult<()> {
+pub fn set_color(renderer: &Renderer, color: Color) -> Result<()> {
     unsafe {
         if !sdl::SDL_SetRenderDrawColor(renderer.ptr(), color.r, color.g, color.b, color.a) {
             Err(Error::RenderDrawColorIsNotSet)
@@ -229,7 +229,7 @@ impl Text {
         engine: *mut sdl_ttf::TTF_TextEngine,
         font: &mut Font,
         text: &std::ffi::CStr,
-    ) -> Result<Self, TtfError> {
+    ) -> std::result::Result<Self, TtfError> {
         unsafe {
             let ptr =
                 sdl_ttf::TTF_CreateText(engine, font.ptr(), text.as_ptr(), text.count_bytes());
@@ -250,7 +250,7 @@ impl Drop for Text {
     }
 }
 
-pub fn get_current_time() -> Result<sdl::SDL_Time, TimeError> {
+pub fn get_current_time() -> std::result::Result<sdl::SDL_Time, TimeError> {
     unsafe {
         let mut now: sdl::SDL_Time = 0;
         if !sdl::SDL_GetCurrentTime(&mut now as *mut _) {
@@ -264,7 +264,7 @@ pub fn get_current_time() -> Result<sdl::SDL_Time, TimeError> {
 pub fn time_to_date_time(
     ticks: sdl::SDL_Time,
     local_time: bool,
-) -> Result<sdl::SDL_DateTime, TimeError> {
+) -> std::result::Result<sdl::SDL_DateTime, TimeError> {
     unsafe {
         let mut ret: sdl::SDL_DateTime = std::mem::zeroed();
         if !sdl::SDL_TimeToDateTime(ticks, &mut ret as *mut _, local_time) {
@@ -301,7 +301,7 @@ impl Surface {
         Self { ptr }
     }
 
-    pub fn create_rgb24(w: i32, h: i32) -> Result<Self, Error> {
+    pub fn create_rgb24(w: i32, h: i32) -> Result<Self> {
         unsafe {
             NonNull::new(sdl::SDL_CreateSurface(
                 w,
@@ -313,7 +313,7 @@ impl Surface {
         }
     }
 
-    pub fn scale(&mut self, w: i32, h: i32, mode: ScaleMode) -> Result<(), Error> {
+    pub fn scale(&mut self, w: i32, h: i32, mode: ScaleMode) -> Result<()> {
         unsafe {
             NonNull::new(sdl::SDL_ScaleSurface(
                 self.ptr.as_mut(),
@@ -343,7 +343,7 @@ pub fn ttf_render_text_blended_wrapped(
     text: &std::ffi::CStr,
     color: sdl_ttf::SDL_Color,
     wrap_length: i32,
-) -> Result<Surface, Error> {
+) -> Result<Surface> {
     unsafe {
         let ptr: *mut sdl_ttf::SDL_Surface = sdl_ttf::TTF_RenderText_Blended_Wrapped(
             font.ptr(),
@@ -369,7 +369,7 @@ impl Texture {
         Self { ptr }
     }
 
-    pub fn create_rgb25(renderer: &Renderer, w: i32, h: i32) -> Result<Texture, Error> {
+    pub fn create_rgb25(renderer: &Renderer, w: i32, h: i32) -> Result<Texture> {
         unsafe {
             let format = sdl::SDL_PixelFormat_SDL_PIXELFORMAT_RGB24;
             let access = sdl::SDL_TextureAccess_SDL_TEXTUREACCESS_TARGET;
@@ -391,7 +391,7 @@ impl Drop for Texture {
 pub fn create_texture_from_surface(
     renderer: &Renderer,
     surface: &Surface,
-) -> Result<Texture, Error> {
+) -> Result<Texture> {
     // SAFETY: the calling of the function is safe because the pointers of renderer and surface are
     // guaranteed to be valid because they are validated during the creation of the instances and
     // don't change during their life.
@@ -439,7 +439,7 @@ where
 pub fn set_render_target<'a>(
     renderer: &Renderer,
     event_sdl_texture: impl Into<Option<&'a mut Texture>>,
-) -> Result<(), Error> {
+) -> Result<()> {
     unsafe {
         if !sdl::SDL_SetRenderTarget(renderer.ptr(), to_mut_ptr(event_sdl_texture)) {
             Err(Error::RenderTargetFailed)
@@ -449,7 +449,7 @@ pub fn set_render_target<'a>(
     }
 }
 
-pub fn render_clear(renderer: &mut sdl::SDL_Renderer) -> Result<(), Error> {
+pub fn render_clear(renderer: &mut sdl::SDL_Renderer) -> Result<()> {
     unsafe {
         if !sdl::SDL_RenderClear(renderer) {
             Err(Error::RenderClearFailed)
@@ -459,7 +459,7 @@ pub fn render_clear(renderer: &mut sdl::SDL_Renderer) -> Result<(), Error> {
     }
 }
 
-pub fn render_rect(renderer: &mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Result<(), Error> {
+pub fn render_rect(renderer: &mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Result<()> {
     unsafe {
         if !sdl::SDL_RenderRect(renderer, &rect as _) {
             Err(Error::RenderFailed)
@@ -472,7 +472,7 @@ pub fn render_rect(renderer: &mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Re
 pub fn render_fill_rect(
     renderer: &mut sdl::SDL_Renderer,
     rect: sdl::SDL_FRect,
-) -> Result<(), Error> {
+) -> Result<()> {
     unsafe {
         if !sdl::SDL_RenderFillRect(renderer, &rect as _) {
             Err(Error::RenderFailed)
@@ -495,7 +495,7 @@ impl Renderer {
 pub fn set_render_viewport<'a>(
     renderer: &mut sdl::SDL_Renderer,
     rect: impl Into<Option<&'a sdl::SDL_Rect>>,
-) -> Result<(), Error> {
+) -> Result<()> {
     unsafe {
         let ptr: *const sdl::SDL_Rect = rect
             .into()
@@ -512,7 +512,7 @@ pub fn set_render_viewport<'a>(
 pub fn set_render_clip_rect<'a>(
     renderer: &mut sdl::SDL_Renderer,
     rect: impl Into<Option<&'a sdl::SDL_Rect>>,
-) -> Result<(), Error> {
+) -> Result<()> {
     unsafe {
         let ptr: *const sdl::SDL_Rect = rect
             .into()
@@ -525,3 +525,5 @@ pub fn set_render_clip_rect<'a>(
         }
     }
 }
+
+//pub type Result<T> = Result<T, Error>;
