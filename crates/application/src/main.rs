@@ -6,6 +6,7 @@ use sdlext::Ptr;
 use calendar::ui::View;
 
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
+mod render;
 
 fn get_current_week_start() -> Result<calendar::date::Date, TimeError> {
     sdlext::get_current_time().and_then(date::get_week_start)
@@ -307,14 +308,14 @@ impl WeekData {
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
-            move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
+            move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer|  {
                 let mut text_registry = TextRegistry::new(renderer);
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
                 sdl_ttf_init(
                     renderer,
-                    move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<_, Error> {
+                    move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
                         let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
                         let ui_text_factory = SdlTextCreate {
                             engine,
@@ -372,13 +373,11 @@ fn unsafe_main() {
                                 is_week_switched = false;
                             }
 
-                            let s = sdl::SDL_FPoint {
-                                x: window_size.x as f32,
-                                y: window_size.y as f32,
-                            };
-
-                            let view: View = View::new(
-                                s,
+                            let view = View::new(
+                                sdl::SDL_FPoint {
+                                    x: window_size.x as f32,
+                                    y: window_size.y as f32,
+                                },
                                 title_font_height,
                                 long_lane_max_count,
                                 week_data.agenda.long.event_ranges.len(),
@@ -434,46 +433,16 @@ fn unsafe_main() {
                             let short_event_rectangles =
                                 short_event_rectangles_opt.as_ref().unwrap();
 
-                            // stage: render
-                            set_color(renderer, Color::from_rgb(config::COLOR_BACKGROUND))?;
-                            if !sdl::SDL_RenderClear(renderer.ptr()) {
-                                return Err(sdlext::Error::RenderClearFailed)?;
-                            }
+                            let data = &render::RenderData {
+                                view,
+                                long_event_rectangles,
+                                week_data: &week_data,
+                                short_event_rectangles,
+                                text_registry: &text_registry,
+                            };
 
-                            {
-                                let event_render = RectangleRender { renderer };
-                                calendar::render::render_rectangles(
-                                    long_event_rectangles.iter(),
-                                    &event_render,
-                                )?;
-
-                                calendar::render::render_rectangles(
-                                    short_event_rectangles.iter(),
-                                    &event_render,
-                                )?;
-                            }
-
-                            render_grid(renderer, &view.grid_rectangle)?;
-                            text_registry.render()?;
-                            set_color(renderer, Color::from_rgb(0x111111))?;
-                            // render the day names and the dates, render hours
-                            let render_week_captions_args =
-                                calendar::render::RenderWeekCaptionsArgs::create_for_week(
-                                    view.cell_width,
-                                    view.cell_height,
-                                    view.grid_rectangle.y + 5.,
-                                    view.event_surface.x,
-                                );
-
-                            week_data
-                                .week
-                                .render(&SdlTextRender, &render_week_captions_args)
-                                .collect::<Result<(), sdlext::TtfError>>()
-                                .map_err(sdlext::Error::from)?;
-
-                            if !sdl::SDL_RenderPresent(renderer.ptr()) {
-                                return Err(sdlext::Error::RenderIsNotPresent)?;
-                            }
+                            /* stage: render */
+                            render::render(renderer, data)?;
                         }
 
                         let _ = root_window;
@@ -487,39 +456,6 @@ fn unsafe_main() {
             println!("The application failed with the error {:?}", err);
         }
     }
-}
-
-fn render_grid(
-    renderer: &sdlext::Renderer,
-    grid_rectangle: &sdl::SDL_FRect,
-) -> Result<(), sdlext::Error> {
-    unsafe {
-        set_color(renderer, Color::from_rgb(0x333333))?;
-        let row_ratio: f32 = grid_rectangle.h / 24.0;
-        for i in 0..24 {
-            let ordinate = i as f32 * row_ratio + grid_rectangle.y;
-            let _ = sdl::SDL_RenderLine(
-                renderer.ptr(),
-                grid_rectangle.x,
-                ordinate,
-                grid_rectangle.w + grid_rectangle.x,
-                ordinate,
-            );
-        }
-
-        let col_ratio: f32 = grid_rectangle.w / 7.;
-        for i in 0..7 {
-            let absciss: f32 = i as f32 * col_ratio + grid_rectangle.x;
-            _ = sdl::SDL_RenderLine(
-                renderer.ptr(),
-                absciss,
-                grid_rectangle.y,
-                absciss,
-                grid_rectangle.h + grid_rectangle.y,
-            );
-        }
-    }
-    Ok(())
 }
 
 struct RectangleRender<'a> {
