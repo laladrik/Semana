@@ -1,0 +1,13 @@
+[package]
+name = "benchmarking"
+version = "0.1.0"
+edition = "2024"
+
+
+[dev-dependencies]
+criterion = { version = "0.8.1",  features = ["html_reports"] }
+calendar = {path = '../crates/calendar'}
+
+[[bench]]
+name = "obtain"
+harness = false
