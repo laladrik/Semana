@@ -24,7 +24,7 @@ pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<
 
         let (x, y) = (100, 70);
         render_events(renderer, (x, y), data)?;
-        render_hours(renderer, x, y, data)?;
+        render_hours(renderer, x, y + (data.view.grid_rectangle.y + 5.) as i32, data)?;
         render_days(renderer, x, data)?;
         if !sdl::SDL_RenderPresent(renderer.ptr()) {
             return Err(sdlext::Error::RenderIsNotPresent);
