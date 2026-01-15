@@ -526,5 +526,21 @@ pub fn set_render_clip_rect<'a>(
     }
 }
 
-
+// The function must be called from the main thread.
+//
+// # Safety
+//
+// As of now, there is only one renderer in the entire application - the default renderer.  As the
+// renderer is created in the main thread and it does not implement either Sync or Send, the
+// function can be called from the main thread only.
+pub fn get_mouse_position(
+    _renderer: &Renderer,
+) -> (f32, f32) {
+    unsafe {
+        let mut x: f32 = 0f32;
+        let mut y: f32 = 0f32;
+        _ = sdl::SDL_GetMouseState(&mut x,  &mut y);
+        (x, y)
+    }
+}
 //pub type Result<T> = Result<T, Error>;
