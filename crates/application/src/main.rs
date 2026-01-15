@@ -88,6 +88,7 @@ mod config {
     pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
     pub const COLOR_BACKGROUND: u32 = 0x0C0D0C;
     pub const COLOR_EVENT_TITLE: u32 = 0x000000;
+    pub const GRID_SCALE_STEP: f32 = 50.;
 }
 
 impl<'a> TextRegistry<'a> {
@@ -339,7 +340,8 @@ fn unsafe_main() {
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
 
-                        let adjustment = SurfaceAdjustment {
+                        // the values to scale and scroll the events grid (short events).
+                        let mut adjustment = SurfaceAdjustment {
                             vertical_scale: 0.,
                             vertical_offset: 0.,
                         };
@@ -359,6 +361,16 @@ fn unsafe_main() {
                                         );
                                     }
                                     sdl::SDL_EVENT_KEY_UP => match event.key.key {
+                                        sdl::SDLK_MINUS => {
+                                            adjustment.vertical_scale = 0f32.max(adjustment.vertical_scale - config::GRID_SCALE_STEP);
+                                            pinned_rectangles_opt.take();
+                                            short_event_rectangles_opt.take();
+                                        }
+                                        sdl::SDLK_EQUALS => {
+                                            adjustment.vertical_scale += config::GRID_SCALE_STEP;
+                                            pinned_rectangles_opt.take();
+                                            short_event_rectangles_opt.take();
+                                        }
                                         sdl::SDLK_PAGEUP => {
                                             week_start = week_start.subtract_week();
                                             is_week_switched = true;
