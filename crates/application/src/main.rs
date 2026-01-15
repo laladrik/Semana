@@ -332,8 +332,9 @@ fn unsafe_main() {
 
                         let title_font_height =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
-                        let long_lane_max_count: f32 =
-                            week_data.agenda.long.calculate_biggest_clash() as f32;
+                        // The number of long events making the biggest clash.
+                        let mut long_event_clash_size: calendar::Lane =
+                            week_data.agenda.long.calculate_biggest_clash();
                         let mut is_week_switched = false;
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
@@ -374,10 +375,18 @@ fn unsafe_main() {
 
                             if is_week_switched {
                                 week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
+                                long_event_clash_size =
+                                    week_data.agenda.long.calculate_biggest_clash();
                                 pinned_rectangles_opt.take();
                                 short_event_rectangles_opt.take();
                                 is_week_switched = false;
                             }
+
+                            assert!(
+                                long_event_clash_size as usize
+                                    <= week_data.agenda.long.event_ranges.len(),
+                                "the size of long events' clash can't be bigger than the number of the long events",
+                            );
 
                             let view = View::new(
                                 sdl::SDL_FPoint {
@@ -386,8 +395,7 @@ fn unsafe_main() {
                                 },
                                 &adjustment,
                                 title_font_height,
-                                long_lane_max_count,
-                                week_data.agenda.long.event_ranges.len(),
+                                long_event_clash_size,
                             );
 
                             let long_event_rectangles: &calendar::render::Rectangles = {
@@ -401,7 +409,7 @@ fn unsafe_main() {
                                                     &week_data.agenda.long,
                                                     &week_start,
                                                     view.cell_width,
-                                                    view.top_panel_height,
+                                                    view.calculate_top_panel_height(),
                                                 );
                                             // TODO: implement a facility which creates the titles
                                             // of the events at once for the "All day" events and

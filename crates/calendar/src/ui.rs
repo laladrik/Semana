@@ -1,6 +1,7 @@
-use crate::render;
-use crate::date::Date;
 use crate::EventData;
+use crate::Lane;
+use crate::date::Date;
+use crate::render;
 
 use super::TextCreate;
 use super::render::RenderWeekCaptionsArgs;
@@ -108,10 +109,12 @@ where
 }
 
 pub struct View {
+    /// The rectangle which displays the short events and long events.
     pub event_surface: FRect,
+    /// The rectangle which displays the short events.
     pub grid_rectangle: FRect,
+    /// The width of cell on the grid containing the events.
     pub cell_width: f32,
-    pub top_panel_height: f32,
     pub cell_height: f32,
 }
 
@@ -121,39 +124,32 @@ pub struct SurfaceAdjustment {
 }
 
 impl View {
-    //const EVENT_SURFACE_OFFSET_X: f32 = 100.;
-    //const EVENT_SURFACE_OFFSET_Y: f32 = 70.;
-
+    const LINE_HEIGHT: u8 = 15;
     pub fn new(
         viewport_size: FPoint,
-        adjuctment: &SurfaceAdjustment,
+        adjustment: &SurfaceAdjustment,
         title_font_height: i32,
-        long_lane_max_count: f32,
-        long_events_count: usize,
+        long_event_clash_size: Lane,
     ) -> Self {
         let event_surface: FRect = {
             FRect {
                 x: 0.,
-                y: adjuctment.vertical_offset,
+                y: adjustment.vertical_offset,
                 w: viewport_size.x,
-                h: viewport_size.y + adjuctment.vertical_scale,
+                h: viewport_size.y + adjustment.vertical_scale,
             }
         };
 
-        let top_panel_height = (title_font_height + 15) as f32 * long_lane_max_count;
+        // The panel above the grid with the short events and beyond the days.
+        let top_panel_height =
+            (title_font_height + Self::LINE_HEIGHT as i32) as f32 * long_event_clash_size as f32;
         let cell_width: f32 = event_surface.w / 7.;
         let grid_rectangle: FRect = {
-            let grid_vertical_offset = if long_events_count == 0 {
-                0f32
-            } else {
-                top_panel_height
-            };
-
             FRect {
                 x: event_surface.x,
-                y: event_surface.y + grid_vertical_offset,
+                y: event_surface.y + top_panel_height,
                 w: event_surface.w,
-                h: event_surface.h - grid_vertical_offset,
+                h: event_surface.h - top_panel_height,
             }
         };
 
@@ -163,8 +159,12 @@ impl View {
             cell_width,
             grid_rectangle,
             event_surface,
-            top_panel_height,
         }
+    }
+
+    #[inline(always)]
+    pub fn calculate_top_panel_height(&self) -> f32 {
+        self.grid_rectangle.y - self.event_surface.y
     }
 }
 
@@ -197,9 +197,7 @@ pub fn create_long_event_rectangles(
         offset_y: event_surface_rectangle.y,
     };
 
-    let pinned_rectangles_res =
-        render::long_event_rectangles(long_events, week_start, &arguments);
+    let pinned_rectangles_res = render::long_event_rectangles(long_events, week_start, &arguments);
 
     pinned_rectangles_res.collect()
 }
-
