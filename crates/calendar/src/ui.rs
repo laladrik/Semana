@@ -116,6 +116,7 @@ pub struct View {
     /// The width of cell on the grid containing the events.
     pub cell_width: f32,
     pub cell_height: f32,
+    pub top_panel_height: f32,
 }
 
 pub struct SurfaceAdjustment {
@@ -133,8 +134,8 @@ impl View {
     ) -> Self {
         let event_surface: FRect = {
             FRect {
-                x: 0.,
-                y: adjustment.vertical_offset,
+                x: 0f32,
+                y: 0f32,
                 w: viewport_size.x,
                 h: viewport_size.y + adjustment.vertical_scale,
             }
@@ -147,7 +148,7 @@ impl View {
         let grid_rectangle: FRect = {
             FRect {
                 x: event_surface.x,
-                y: event_surface.y + top_panel_height,
+                y: event_surface.y + top_panel_height + adjustment.vertical_offset,
                 w: event_surface.w,
                 h: event_surface.h - top_panel_height,
             }
@@ -155,6 +156,7 @@ impl View {
 
         let cell_height = grid_rectangle.h / 24.;
         Self {
+            top_panel_height,
             cell_height,
             cell_width,
             grid_rectangle,
@@ -164,7 +166,7 @@ impl View {
 
     #[inline(always)]
     pub fn calculate_top_panel_height(&self) -> f32 {
-        self.grid_rectangle.y - self.event_surface.y
+        self.top_panel_height
     }
 }
 
@@ -200,4 +202,80 @@ pub fn create_long_event_rectangles(
     let pinned_rectangles_res = render::long_event_rectangles(long_events, week_start, &arguments);
 
     pinned_rectangles_res.collect()
+}
+
+pub struct CursorPosition<T> {
+    inner: FPoint,
+    _phantom: std::marker::PhantomData<T>,
+}
+
+impl CursorPosition::<Window>{
+    pub fn in_window(x: f32, y: f32) -> CursorPosition<Window> {
+        CursorPosition {
+            inner: FPoint { x, y },
+            _phantom: std::marker::PhantomData::<Window>,
+        }
+    }
+}
+
+impl CursorPosition::<Surface>{
+    pub fn in_surface(cursor_position: CursorPosition<Window>, surface: &FRect) -> CursorPosition::<Surface> {
+        CursorPosition::<Surface> {
+            inner: FPoint {
+                x: cursor_position.inner.x - surface.x,
+                y: cursor_position.inner.y - surface.y,
+            },
+            _phantom: std::marker::PhantomData::<Surface>,
+        }
+    }
+}
+
+pub struct Surface;
+pub struct Window;
+
+impl From<FPoint> for CursorPosition<Surface> {
+    fn from(inner: FPoint) -> Self {
+        Self {
+            inner,
+            _phantom: std::marker::PhantomData::<Surface>,
+        }
+    }
+}
+
+pub struct RelativeOffset(f32);
+
+pub struct EventSurface;
+impl EventSurface {
+    pub fn calculate_surface_offset(
+        surface: &mut FRect,
+        cursor: &CursorPosition<Surface>,
+    ) {
+        let offset = Self::calculate_cursor_relative_vertical_offset(surface, cursor);
+        Self::calculate_absolute_vertical_offset(surface, cursor, offset);
+    }
+
+    fn calculate_cursor_relative_vertical_offset(
+        surface: &FRect,
+        cursor_position: &CursorPosition<Surface>,
+    ) -> RelativeOffset {
+        RelativeOffset(cursor_position.inner.y / surface.h)
+    }
+
+    fn calculate_absolute_vertical_offset(
+        surface: &mut FRect,
+        cursor: &CursorPosition<Surface>,
+        cursor_offset: RelativeOffset,
+    ) {
+        // the position of the cursor where it could be
+        let RelativeOffset(cursor_offset) = cursor_offset;
+        let yp = surface.h * cursor_offset;
+        surface.y -= yp - cursor.inner.y;
+    }
+}
+
+//pub fn zoom_event_surface(event: ZoomEvent) {}
+
+pub struct ZoomEvent {
+    pub cursor_position: FPoint,
+    pub scroll_size: f32,
 }
