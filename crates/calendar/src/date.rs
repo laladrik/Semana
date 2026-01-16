@@ -232,8 +232,7 @@ impl DateString {
 }
 
 impl Date {
-    #[cfg(test)]
-    const fn new<const YEAR: u16, const MONTH: u8, const DAY: u8>() -> Date {
+    pub const fn new<const YEAR: u16, const MONTH: u8, const DAY: u8>() -> Date {
         const {
             struct C<const YEAR: u16, const MONTH: u8>();
             impl<const YEAR: u16, const MONTH: u8> C<YEAR, MONTH> {
