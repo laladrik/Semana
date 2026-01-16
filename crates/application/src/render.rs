@@ -7,11 +7,14 @@ use super::config;
 use sdlext::{Color, set_color};
 
 pub struct RenderData<'a, 'b> {
+    pub event_viewport: sdl::SDL_Rect,
+    pub event_offset: sdl::SDL_FPoint,
     pub view: View,
     pub long_event_rectangles: &'a calendar::render::Rectangles,
     pub short_event_rectangles: &'a calendar::render::Rectangles,
     pub week_data: &'a WeekData,
-    pub text_registry: &'a crate::TextRegistry<'b>,
+    pub long_event_text_registry: &'a crate::TextRegistry<'b>,
+    pub short_event_text_registry: &'a crate::TextRegistry<'b>,
     pub window_size: sdl3_sys::SDL_Point,
 }
 
@@ -22,9 +25,9 @@ pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<
             return Err(sdlext::Error::RenderClearFailed);
         }
 
-        let (x, y) = (100, 70);
-        render_events(renderer, (x, y), data)?;
-        render_hours(renderer, x, y + (data.view.grid_rectangle.y + 5.) as i32, data)?;
+        let (x, _y) = (data.event_offset.x as i32, data.event_offset.y as i32);
+        render_events(renderer, data)?;
+        render_hours(renderer, x, data)?;
         render_days(renderer, x, data)?;
         if !sdl::SDL_RenderPresent(renderer.ptr()) {
             return Err(sdlext::Error::RenderIsNotPresent);
@@ -34,37 +37,23 @@ pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<
     Ok(())
 }
 
-fn render_events(
-    renderer: &sdlext::Renderer,
-    viewport_offset: (i32, i32),
-    data: &RenderData,
-) -> sdlext::Result<()> {
-    let event_viewport = sdl::SDL_Rect {
-        x: viewport_offset.0,
-        y: viewport_offset.1,
-        w: data.window_size.x - viewport_offset.0,
-        h: data.window_size.y - viewport_offset.1,
-    };
-
+fn render_events(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
+    let event_viewport = data.event_viewport;
     set_render_viewport_context(renderer, &event_viewport, || {
         render_grid(renderer, &data.view.grid_rectangle)?;
         let event_render = RectangleRender { renderer };
-        calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
         calendar::render::render_rectangles(data.short_event_rectangles.iter(), &event_render)?;
-        data.text_registry.render()?;
+        data.short_event_text_registry.render()?;
+        calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
+        data.long_event_text_registry.render()?;
         Ok(())
     })
 }
 
-fn render_hours(
-    renderer: &sdlext::Renderer,
-    width: i32,
-    vertical_offset: i32,
-    data: &RenderData,
-) -> sdlext::Result<()> {
+fn render_hours(renderer: &sdlext::Renderer, width: i32, data: &RenderData) -> sdlext::Result<()> {
     let hours_viewport = sdl::SDL_Rect {
         x: 10,
-        y: vertical_offset,
+        y: data.event_viewport.y + data.view.calculate_top_panel_height() as i32,
         w: width,
         h: data.window_size.y,
     };
@@ -73,7 +62,7 @@ fn render_hours(
         let arguments = calendar::render::RenderHoursArgs {
             row_height: data.view.cell_height,
             offset_x: 0.,
-            offset_y: 0.,
+            offset_y: data.view.grid_rectangle.y - data.view.calculate_top_panel_height(),
         };
 
         calendar::render::render_hours(&SdlTextRender, data.week_data.week.hours.iter(), &arguments)

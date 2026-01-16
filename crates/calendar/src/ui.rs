@@ -128,7 +128,10 @@ impl View {
     const LINE_HEIGHT: u8 = 15;
     pub fn new(
         viewport_size: FPoint,
-        adjustment: &SurfaceAdjustment,
+        // mutable for the case when we zoom out enough to make a gap between the bottom of the
+        // viewport of the grid and the bottom of the grid.  Other words, the adjustment changes if
+        // there empty space as a result of zooming out.
+        adjustment: &mut SurfaceAdjustment,
         title_font_height: i32,
         long_event_clash_size: Lane,
     ) -> Self {
@@ -146,12 +149,23 @@ impl View {
             (title_font_height + Self::LINE_HEIGHT as i32) as f32 * long_event_clash_size as f32;
         let cell_width: f32 = event_surface.w / 7.;
         let grid_rectangle: FRect = {
-            FRect {
-                x: event_surface.x,
-                y: event_surface.y + top_panel_height + adjustment.vertical_offset,
-                w: event_surface.w,
-                h: event_surface.h - top_panel_height,
+            let create = |offset| {
+                FRect {
+                    x: event_surface.x,
+                    y: event_surface.y + top_panel_height + offset,
+                    w: event_surface.w,
+                    h: event_surface.h - top_panel_height,
+                }
+            };
+
+            let mut ret = create(adjustment.vertical_offset);
+            let bottom = ret.y + ret.h;
+            let bottom_gap = viewport_size.y - bottom;
+            if bottom_gap.is_sign_positive() {
+                adjustment.vertical_offset += bottom_gap;
+                ret = create(adjustment.vertical_offset);
             }
+            ret
         };
 
         let cell_height = grid_rectangle.h / 24.;

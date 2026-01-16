@@ -89,6 +89,7 @@ mod config {
     pub const COLOR_BACKGROUND: u32 = 0x0C0D0C;
     pub const COLOR_EVENT_TITLE: u32 = 0x000000;
     pub const GRID_SCALE_STEP: f32 = 50.;
+    pub const GRID_OFFSET_STEP: f32 = 50.;
 }
 
 impl<'a> TextRegistry<'a> {
@@ -310,7 +311,8 @@ fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
-                let mut text_registry = TextRegistry::new(renderer);
+                let mut short_event_text_registry = TextRegistry::new(renderer);
+                let mut long_event_text_registry = TextRegistry::new(renderer);
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
@@ -360,9 +362,27 @@ fn unsafe_main() {
                                             &mut window_size.y,
                                         );
                                     }
-                                    sdl::SDL_EVENT_KEY_UP => match event.key.key {
+                                    sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
+                                        sdl::SDLK_UP => {
+                                            adjustment.vertical_offset -= config::GRID_OFFSET_STEP;
+                                            adjustment.vertical_offset = adjustment
+                                                .vertical_offset
+                                                .clamp(-adjustment.vertical_scale, 0f32);
+                                            pinned_rectangles_opt.take();
+                                            short_event_rectangles_opt.take();
+                                        }
+                                        sdl::SDLK_DOWN => {
+                                            adjustment.vertical_offset += config::GRID_OFFSET_STEP;
+                                            adjustment.vertical_offset = adjustment
+                                                .vertical_offset
+                                                .clamp(-adjustment.vertical_scale, 0f32);
+                                            pinned_rectangles_opt.take();
+                                            short_event_rectangles_opt.take();
+                                        }
                                         sdl::SDLK_MINUS => {
-                                            adjustment.vertical_scale = 0f32.max(adjustment.vertical_scale - config::GRID_SCALE_STEP);
+                                            adjustment.vertical_scale = 0f32.max(
+                                                adjustment.vertical_scale - config::GRID_SCALE_STEP,
+                                            );
                                             pinned_rectangles_opt.take();
                                             short_event_rectangles_opt.take();
                                         }
@@ -371,6 +391,9 @@ fn unsafe_main() {
                                             pinned_rectangles_opt.take();
                                             short_event_rectangles_opt.take();
                                         }
+                                        _ => (),
+                                    },
+                                    sdl::SDL_EVENT_KEY_UP => match event.key.key {
                                         sdl::SDLK_PAGEUP => {
                                             week_start = week_start.subtract_week();
                                             is_week_switched = true;
@@ -400,12 +423,25 @@ fn unsafe_main() {
                                 "the size of long events' clash can't be bigger than the number of the long events",
                             );
 
+                            let event_offset = sdl::SDL_FPoint {
+                                x: 100f32,
+                                y: 70f32,
+                            };
+
+                            //let event_surface = view.event_surface;
+                            let event_viewport = sdl::SDL_Rect {
+                                x: event_offset.x as i32,
+                                y: event_offset.y as i32,
+                                w: window_size.x - event_offset.x as i32,
+                                h: window_size.y - event_offset.y as i32,
+                            };
+
                             let view = View::new(
                                 sdl::SDL_FPoint {
-                                    x: window_size.x as f32 - 100.,
-                                    y: window_size.y as f32 - 70.,
+                                    x: window_size.x as f32 - event_offset.x,
+                                    y: window_size.y as f32 - event_offset.y,
                                 },
-                                &adjustment,
+                                &mut adjustment,
                                 title_font_height,
                                 long_event_clash_size,
                             );
@@ -427,9 +463,9 @@ fn unsafe_main() {
                                             // of the events at once for the "All day" events and
                                             // regular events.  This would allow to prevent
                                             // accidential calling of `clear` twice.
-                                            text_registry.clear();
+                                            long_event_text_registry.clear();
                                             register_event_titles(
-                                                &mut text_registry,
+                                                &mut long_event_text_registry,
                                                 &fonts.title,
                                                 &week_data.agenda.long.titles,
                                                 &replacement,
@@ -447,8 +483,9 @@ fn unsafe_main() {
                                     &week_data.agenda.short,
                                     &week_start,
                                 );
+                                short_event_text_registry.clear();
                                 register_event_titles(
-                                    &mut text_registry,
+                                    &mut short_event_text_registry,
                                     &fonts.title,
                                     &week_data.agenda.short.titles,
                                     &new_rectangles,
@@ -466,7 +503,10 @@ fn unsafe_main() {
                                 long_event_rectangles,
                                 week_data: &week_data,
                                 short_event_rectangles,
-                                text_registry: &text_registry,
+                                long_event_text_registry: &long_event_text_registry,
+                                short_event_text_registry: &short_event_text_registry,
+                                event_viewport,
+                                event_offset,
                             };
 
                             /* stage: render */
