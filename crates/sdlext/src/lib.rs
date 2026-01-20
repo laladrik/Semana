@@ -21,6 +21,7 @@ pub enum Error {
     RenderFailed,
     ViewportIsNotSet,
     RendererIsNull,
+    LineIsNotDrawn,
 }
 
 #[derive(Debug)]
@@ -59,7 +60,7 @@ impl Ptr for Font {
     type Inner = sdl_ttf::TTF_Font;
 
     fn ptr(&self) -> *mut Self::Inner {
-         self.ptr.as_ptr()
+        self.ptr.as_ptr()
     }
 }
 
@@ -198,7 +199,7 @@ impl Ptr for &Renderer {
     type Inner = sdl::SDL_Renderer;
 
     fn ptr(&self) -> *mut Self::Inner {
-         self.ptr.as_ptr()
+        self.ptr.as_ptr()
     }
 }
 
@@ -388,10 +389,7 @@ impl Drop for Texture {
     }
 }
 
-pub fn create_texture_from_surface(
-    renderer: &Renderer,
-    surface: &Surface,
-) -> Result<Texture> {
+pub fn create_texture_from_surface(renderer: &Renderer, surface: &Surface) -> Result<Texture> {
     // SAFETY: the calling of the function is safe because the pointers of renderer and surface are
     // guaranteed to be valid because they are validated during the creation of the instances and
     // don't change during their life.
@@ -414,7 +412,7 @@ impl Ptr for Surface {
     type Inner = sdl::SDL_Surface;
 
     fn ptr(&self) -> *mut Self::Inner {
-         self.ptr.as_ptr()
+        self.ptr.as_ptr()
     }
 }
 
@@ -422,7 +420,7 @@ impl Ptr for Texture {
     type Inner = sdl::SDL_Texture;
 
     fn ptr(&self) -> *mut Self::Inner {
-         self.ptr.as_ptr()
+        self.ptr.as_ptr()
     }
 }
 
@@ -449,46 +447,116 @@ pub fn set_render_target<'a>(
     }
 }
 
-pub fn render_clear(renderer: &mut sdl::SDL_Renderer) -> Result<()> {
-    unsafe {
-        if !sdl::SDL_RenderClear(renderer) {
-            Err(Error::RenderClearFailed)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-pub fn render_rect(renderer: &mut sdl::SDL_Renderer, rect: sdl::SDL_FRect) -> Result<()> {
-    unsafe {
-        if !sdl::SDL_RenderRect(renderer, &rect as _) {
-            Err(Error::RenderFailed)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-pub fn render_fill_rect(
-    renderer: &mut sdl::SDL_Renderer,
-    rect: sdl::SDL_FRect,
-) -> Result<()> {
-    unsafe {
-        if !sdl::SDL_RenderFillRect(renderer, &rect as _) {
-            Err(Error::RenderFailed)
-        } else {
-            Ok(())
-        }
-    }
-}
-
 pub struct Renderer {
     ptr: NonNull<sdl::SDL_Renderer>,
 }
 
 impl Renderer {
-    pub fn ptr(&self) -> *mut sdl::SDL_Renderer {
-         self.ptr.as_ptr()
+    fn ptr(&self) -> *mut sdl::SDL_Renderer {
+        self.ptr.as_ptr()
+    }
+
+    fn call0(
+        &self,
+        unsafe_fn: unsafe extern "C" fn(*mut sdl::SDL_Renderer) -> bool,
+        err: Error,
+    ) -> Result<()> {
+        // SAFETY: the pointer of the renderer is initialized and remains immutable through out the
+        // life time of the data structure.
+        unsafe {
+            if !(unsafe_fn)(self.ptr()) {
+                Err(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn call1<Arg1>(
+        &self,
+        unsafe_fn: unsafe extern "C" fn(*mut sdl::SDL_Renderer, Arg1) -> bool,
+        arg1: Arg1,
+        err: Error,
+    ) -> Result<()> {
+        // SAFETY: the pointer of the renderer is initialized and remains immutable through out the
+        // life time of the data structure.
+        unsafe {
+            if !(unsafe_fn)(self.ptr(), arg1) {
+                Err(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn call3<Arg1, Arg2, Arg3>(
+        &self,
+        unsafe_fn: unsafe extern "C" fn(*mut sdl::SDL_Renderer, Arg1, Arg2, Arg3) -> bool,
+        arg1: Arg1,
+        arg2: Arg2,
+        arg3: Arg3,
+        err: Error,
+    ) -> Result<()> {
+        // SAFETY: the pointer of the renderer is initialized and remains immutable through out the
+        // life time of the data structure.
+        unsafe {
+            if !(unsafe_fn)(self.ptr(), arg1, arg2, arg3) {
+                Err(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn call4<Arg1, Arg2, Arg3, Arg4>(
+        &self,
+        unsafe_fn: unsafe extern "C" fn(*mut sdl::SDL_Renderer, Arg1, Arg2, Arg3, Arg4) -> bool,
+        arg1: Arg1,
+        arg2: Arg2,
+        arg3: Arg3,
+        arg4: Arg4,
+        err: Error,
+    ) -> Result<()> {
+        // SAFETY: the pointer of the renderer is initialized and remains immutable through out the
+        // life time of the data structure.
+        unsafe {
+            if !(unsafe_fn)(self.ptr(), arg1, arg2, arg3, arg4) {
+                Err(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    pub fn present(&self) -> Result<()> {
+        self.call0(sdl::SDL_RenderPresent, Error::RenderIsNotPresent)
+    }
+
+    pub fn clear(&self) -> Result<()> {
+        self.call0(sdl::SDL_RenderClear, Error::RenderClearFailed)
+    }
+
+    pub fn render_fill_rect(&self, rect: &sdl::SDL_FRect) -> Result<()> {
+        self.call1(sdl::SDL_RenderFillRect, rect, Error::RectangleIsNotDrawn)
+    }
+
+    pub fn render_line(&self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<()> {
+        self.call4(sdl::SDL_RenderLine, x1, y1, x2, y2, Error::LineIsNotDrawn)
+    }
+
+    pub fn render_texture(
+        &self,
+        texture: &Texture,
+        srcrect: &sdl::SDL_FRect,
+        dstrect: &sdl::SDL_FRect,
+    ) -> Result<()> {
+        self.call3(
+            sdl::SDL_RenderTexture,
+            texture.ptr(),
+            srcrect,
+            dstrect,
+            Error::TextureIsNotRendered,
+        )
     }
 }
 
@@ -533,13 +601,11 @@ pub fn set_render_clip_rect<'a>(
 // As of now, there is only one renderer in the entire application - the default renderer.  As the
 // renderer is created in the main thread and it does not implement either Sync or Send, the
 // function can be called from the main thread only.
-pub fn get_mouse_position(
-    _renderer: &Renderer,
-) -> (f32, f32) {
+pub fn get_mouse_position(_renderer: &Renderer) -> (f32, f32) {
     unsafe {
         let mut x: f32 = 0f32;
         let mut y: f32 = 0f32;
-        _ = sdl::SDL_GetMouseState(&mut x,  &mut y);
+        _ = sdl::SDL_GetMouseState(&mut x, &mut y);
         (x, y)
     }
 }

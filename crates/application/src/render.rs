@@ -21,20 +21,13 @@ pub struct RenderData<'a, 'b> {
 pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
     unsafe {
         set_color(renderer, Color::from_rgb(config::COLOR_BACKGROUND))?;
-        if !sdl::SDL_RenderClear(renderer.ptr()) {
-            return Err(sdlext::Error::RenderClearFailed);
-        }
-
+        renderer.clear()?;
         let (x, _y) = (data.event_offset.x as i32, data.event_offset.y as i32);
         render_events(renderer, data)?;
         render_hours(renderer, x, data)?;
         render_days(renderer, x, data)?;
-        if !sdl::SDL_RenderPresent(renderer.ptr()) {
-            return Err(sdlext::Error::RenderIsNotPresent);
-        }
+        renderer.present()
     }
-
-    Ok(())
 }
 
 fn render_events(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
@@ -118,25 +111,23 @@ fn render_grid(
         let row_ratio: f32 = grid_rectangle.h / 24.0;
         for i in 0..24 {
             let ordinate = i as f32 * row_ratio + grid_rectangle.y;
-            let _ = sdl::SDL_RenderLine(
-                renderer.ptr(),
+            renderer.render_line(
                 grid_rectangle.x,
                 ordinate,
                 grid_rectangle.w + grid_rectangle.x,
                 ordinate,
-            );
+            )?;
         }
 
         let col_ratio: f32 = grid_rectangle.w / 7.;
         for i in 0..7 {
             let absciss: f32 = i as f32 * col_ratio + grid_rectangle.x;
-            _ = sdl::SDL_RenderLine(
-                renderer.ptr(),
+            renderer.render_line(
                 absciss,
                 grid_rectangle.y,
                 absciss,
                 grid_rectangle.h + grid_rectangle.y,
-            );
+            )?;
         }
     }
     Ok(())

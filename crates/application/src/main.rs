@@ -152,18 +152,14 @@ impl<'a> TextRegistry<'a> {
 
     fn render(&self) -> Result<(), sdlext::Error> {
         for (texture, position) in self.textures.iter().zip(self.text_positions.iter()) {
-            unsafe {
-                let src = sdl::SDL_FRect {
-                    x: 0f32,
-                    y: 0f32,
-                    w: position.w,
-                    h: position.h,
-                };
+            let src = sdl::SDL_FRect {
+                x: 0f32,
+                y: 0f32,
+                w: position.w,
+                h: position.h,
+            };
 
-                if !sdl::SDL_RenderTexture(self.renderer.ptr(), texture.ptr(), &src, position) {
-                    return Err(sdlext::Error::TextureIsNotRendered);
-                }
-            }
+            self.renderer.render_texture(texture, &src, position)?;
         }
         Ok(())
     }
@@ -537,26 +533,20 @@ impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
     where
         I: Iterator<Item = &'r calendar::render::Rectangle>,
     {
-        unsafe {
-            for rect in rectangles {
-                set_color(self.renderer, calendar_color_2_to_sdl_color(rect.color))?;
-                let sdl_rect = create_sdl_frect(rect);
-                if !sdl::SDL_RenderFillRect(self.renderer.ptr(), &sdl_rect as _) {
-                    return Err(sdlext::Error::RectangleIsNotDrawn);
-                }
+        for rect in rectangles {
+            set_color(self.renderer, calendar_color_2_to_sdl_color(rect.color))?;
+            let sdl_rect = create_sdl_frect(rect);
+            self.renderer.render_fill_rect(&sdl_rect)?;
 
-                let border = sdl::SDL_FRect {
-                    x: sdl_rect.x,
-                    y: sdl_rect.y,
-                    w: sdl_rect.w,
-                    h: 5.0,
-                };
+            let border = sdl::SDL_FRect {
+                x: sdl_rect.x,
+                y: sdl_rect.y,
+                w: sdl_rect.w,
+                h: 5.0,
+            };
 
-                set_color(self.renderer, Color::from_rgb(0xff0000))?;
-                if !sdl::SDL_RenderFillRect(self.renderer.ptr(), &border) {
-                    return Err(sdlext::Error::RectangleIsNotDrawn);
-                }
-            }
+            set_color(self.renderer, Color::from_rgb(0xff0000))?;
+            self.renderer.render_fill_rect(&border)?;
         }
         Ok(())
     }
