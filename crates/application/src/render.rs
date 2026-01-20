@@ -104,29 +104,27 @@ fn render_grid(
     renderer: &sdlext::Renderer,
     grid_rectangle: &sdl::SDL_FRect,
 ) -> Result<(), sdlext::Error> {
-    unsafe {
-        renderer.set_render_draw_color(Color::from_rgb(0x333333))?;
-        let row_ratio: f32 = grid_rectangle.h / 24.0;
-        for i in 0..24 {
-            let ordinate = i as f32 * row_ratio + grid_rectangle.y;
-            renderer.render_line(
-                grid_rectangle.x,
-                ordinate,
-                grid_rectangle.w + grid_rectangle.x,
-                ordinate,
-            )?;
-        }
+    renderer.set_render_draw_color(Color::from_rgb(0x333333))?;
+    let row_ratio: f32 = grid_rectangle.h / 24.0;
+    for i in 0..24 {
+        let ordinate = i as f32 * row_ratio + grid_rectangle.y;
+        renderer.render_line(
+            grid_rectangle.x,
+            ordinate,
+            grid_rectangle.w + grid_rectangle.x,
+            ordinate,
+        )?;
+    }
 
-        let col_ratio: f32 = grid_rectangle.w / 7.;
-        for i in 0..7 {
-            let absciss: f32 = i as f32 * col_ratio + grid_rectangle.x;
-            renderer.render_line(
-                absciss,
-                grid_rectangle.y,
-                absciss,
-                grid_rectangle.h + grid_rectangle.y,
-            )?;
-        }
+    let col_ratio: f32 = grid_rectangle.w / 7.;
+    for i in 0..7 {
+        let absciss: f32 = i as f32 * col_ratio + grid_rectangle.x;
+        renderer.render_line(
+            absciss,
+            grid_rectangle.y,
+            absciss,
+            grid_rectangle.h + grid_rectangle.y,
+        )?;
     }
     Ok(())
 }
