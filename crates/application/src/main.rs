@@ -5,7 +5,7 @@ use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 use sdlext::Ptr;
 
-use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init, set_color};
+use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 mod render;
 
 fn get_current_week_start() -> Result<calendar::date::Date, TimeError> {
@@ -534,7 +534,7 @@ impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
         I: Iterator<Item = &'r calendar::render::Rectangle>,
     {
         for rect in rectangles {
-            set_color(self.renderer, calendar_color_2_to_sdl_color(rect.color))?;
+            self.renderer.set_render_draw_color(calendar_color_2_to_sdl_color(rect.color))?;
             let sdl_rect = create_sdl_frect(rect);
             self.renderer.render_fill_rect(&sdl_rect)?;
 
@@ -545,7 +545,7 @@ impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
                 h: 5.0,
             };
 
-            set_color(self.renderer, Color::from_rgb(0xff0000))?;
+            self.renderer.set_render_draw_color(Color::from_rgb(0xff0000))?;
             self.renderer.render_fill_rect(&border)?;
         }
         Ok(())

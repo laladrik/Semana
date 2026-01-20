@@ -4,7 +4,7 @@ use sdl3_sys as sdl;
 use crate::{RectangleRender, SdlTextRender, WeekData};
 
 use super::config;
-use sdlext::{Color, set_color};
+use sdlext::Color;
 
 pub struct RenderData<'a, 'b> {
     pub event_viewport: sdl::SDL_Rect,
@@ -19,15 +19,13 @@ pub struct RenderData<'a, 'b> {
 }
 
 pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
-    unsafe {
-        set_color(renderer, Color::from_rgb(config::COLOR_BACKGROUND))?;
-        renderer.clear()?;
-        let (x, _y) = (data.event_offset.x as i32, data.event_offset.y as i32);
-        render_events(renderer, data)?;
-        render_hours(renderer, x, data)?;
-        render_days(renderer, x, data)?;
-        renderer.present()
-    }
+    renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
+    renderer.clear()?;
+    let (x, _y) = (data.event_offset.x as i32, data.event_offset.y as i32);
+    render_events(renderer, data)?;
+    render_hours(renderer, x, data)?;
+    render_days(renderer, x, data)?;
+    renderer.present()
 }
 
 fn render_events(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
@@ -107,7 +105,7 @@ fn render_grid(
     grid_rectangle: &sdl::SDL_FRect,
 ) -> Result<(), sdlext::Error> {
     unsafe {
-        set_color(renderer, Color::from_rgb(0x333333))?;
+        renderer.set_render_draw_color(Color::from_rgb(0x333333))?;
         let row_ratio: f32 = grid_rectangle.h / 24.0;
         for i in 0..24 {
             let ordinate = i as f32 * row_ratio + grid_rectangle.y;

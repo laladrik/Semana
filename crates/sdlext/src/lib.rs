@@ -203,16 +203,6 @@ impl Ptr for &Renderer {
     }
 }
 
-pub fn set_color(renderer: &Renderer, color: Color) -> Result<()> {
-    unsafe {
-        if !sdl::SDL_SetRenderDrawColor(renderer.ptr(), color.r, color.g, color.b, color.a) {
-            Err(Error::RenderDrawColorIsNotSet)
-        } else {
-            Ok(())
-        }
-    }
-}
-
 pub struct Text {
     ptr: *mut sdl_ttf::TTF_Text,
 }
@@ -556,6 +546,17 @@ impl Renderer {
             srcrect,
             dstrect,
             Error::TextureIsNotRendered,
+        )
+    }
+
+    pub fn set_render_draw_color(&self, color: Color) -> Result<()> {
+        self.call4(
+            sdl::SDL_SetRenderDrawColor,
+            color.r,
+            color.g,
+            color.b,
+            color.a,
+            Error::RenderDrawColorIsNotSet,
         )
     }
 }
