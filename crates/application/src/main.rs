@@ -303,6 +303,111 @@ impl WeekData {
     }
 }
 
+mod state {
+    use super::{Error, SdlTextCreate, SurfaceAdjustment, WeekData, get_current_week_start};
+    pub struct Calendar {
+        pub week_start: calendar::date::Date,
+        pub week_data: WeekData,
+        pub short_event_rectangles_opt: Option<calendar::render::Rectangles>,
+        pub pinned_rectangles_opt: Option<calendar::render::Rectangles>,
+        pub long_event_clash_size: calendar::Lane,
+        pub is_week_switched: bool,
+    }
+
+    impl Calendar {
+        pub fn new(ui_text_factory: &SdlTextCreate) -> Result<Self, Error> {
+            let week_start: calendar::date::Date =
+                get_current_week_start().map_err(sdlext::Error::from)?;
+            let week_data = WeekData::try_new(&week_start, ui_text_factory)?;
+
+            let short_event_rectangles_opt: Option<calendar::render::Rectangles> = None;
+            let pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
+
+            // The number of long events making the biggest clash.
+            let long_event_clash_size: calendar::Lane =
+                week_data.agenda.long.calculate_biggest_clash();
+            let is_week_switched = false;
+            Ok(Self {
+                week_start,
+                week_data,
+                short_event_rectangles_opt,
+                pinned_rectangles_opt,
+                long_event_clash_size,
+                is_week_switched,
+            })
+        }
+
+        pub fn add_week(&mut self) {
+            self.week_start = self.week_start.add_week();
+            self.is_week_switched = true;
+        }
+
+        pub fn subtract_week(&mut self) {
+            self.week_start = self.week_start.subtract_week();
+            self.is_week_switched = true;
+        }
+
+        pub fn update_week_data(
+            &mut self,
+            ui_text_factory: &SdlTextCreate<'_>,
+        ) -> Result<(), Error> {
+            self.week_data = WeekData::try_new(&self.week_start, ui_text_factory)?;
+            self.long_event_clash_size = self.week_data.agenda.long.calculate_biggest_clash();
+            self.is_week_switched = false;
+            self.pinned_rectangles_opt.take();
+            self.short_event_rectangles_opt.take();
+            Ok(())
+        }
+    }
+
+    pub struct UserInterface {
+        pub adjustment: SurfaceAdjustment,
+        pub title_font_height: std::ffi::c_int,
+    }
+
+    impl UserInterface {
+        fn new(title_font_height: std::ffi::c_int) -> Result<Self, Error> {
+            // the values to scale and scroll the events grid (short events).
+            let adjustment = SurfaceAdjustment {
+                vertical_scale: 0.,
+                vertical_offset: 0.,
+            };
+
+            Ok(Self {
+                adjustment,
+                title_font_height,
+            })
+        }
+
+        pub fn add_adjustment(&mut self, value: f32) {
+            self.adjustment.vertical_offset -= value;
+            self.adjustment.vertical_offset = self
+                .adjustment
+                .vertical_offset
+                .clamp(-self.adjustment.vertical_scale, 0f32);
+        }
+    }
+
+    // The state of the application
+    pub struct App {
+        pub calendar: Calendar,
+        pub ui: UserInterface,
+    }
+
+    impl App {
+        pub fn new(
+            ui_text_factory: &SdlTextCreate,
+            title_font_height: std::ffi::c_int,
+        ) -> Result<Self, Error> {
+            let ui = UserInterface::new(title_font_height)?;
+            let calendar = Calendar::new(ui_text_factory)?;
+            Ok(Self { calendar, ui })
+        }
+    }
+}
+
+use state::App;
+
 fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
@@ -316,42 +421,23 @@ fn unsafe_main() {
                     renderer,
                     move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
                         let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
+                        let title_font_height: std::ffi::c_int =
+                            sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
                         let ui_text_factory = SdlTextCreate {
                             engine,
                             font: &fonts.ui,
                         };
-
-                        let mut week_start: calendar::date::Date =
-                            get_current_week_start().map_err(sdlext::Error::from)?;
-                        let mut week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
-
-                        let mut short_event_rectangles_opt: Option<calendar::render::Rectangles> =
-                            None;
-                        let mut pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
-
-                        let title_font_height =
-                            sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
-                        // The number of long events making the biggest clash.
-                        let mut long_event_clash_size: calendar::Lane =
-                            week_data.agenda.long.calculate_biggest_clash();
-                        let mut is_week_switched = false;
+                        let mut app = App::new(&ui_text_factory, title_font_height)?;
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
-
-                        // the values to scale and scroll the events grid (short events).
-                        let mut adjustment = SurfaceAdjustment {
-                            vertical_scale: 0.,
-                            vertical_offset: 0.,
-                        };
-
                         'outer_loop: loop {
                             // stage: event handle
                             while sdl::SDL_PollEvent(&mut event as _) {
                                 match event.type_ {
                                     sdl::SDL_EVENT_QUIT => break 'outer_loop,
                                     sdl::SDL_EVENT_WINDOW_RESIZED => {
-                                        pinned_rectangles_opt.take();
-                                        short_event_rectangles_opt.take();
+                                        app.calendar.pinned_rectangles_opt.take();
+                                        app.calendar.short_event_rectangles_opt.take();
                                         _ = sdl::SDL_GetWindowSize(
                                             root_window,
                                             &mut window_size.x,
@@ -360,62 +446,47 @@ fn unsafe_main() {
                                     }
                                     sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
                                         sdl::SDLK_UP => {
-                                            adjustment.vertical_offset -= config::GRID_OFFSET_STEP;
-                                            adjustment.vertical_offset = adjustment
-                                                .vertical_offset
-                                                .clamp(-adjustment.vertical_scale, 0f32);
-                                            pinned_rectangles_opt.take();
-                                            short_event_rectangles_opt.take();
+                                            app.ui.add_adjustment(-config::GRID_OFFSET_STEP);
+                                            app.calendar.pinned_rectangles_opt.take();
+                                            app.calendar.short_event_rectangles_opt.take();
                                         }
                                         sdl::SDLK_DOWN => {
-                                            adjustment.vertical_offset += config::GRID_OFFSET_STEP;
-                                            adjustment.vertical_offset = adjustment
-                                                .vertical_offset
-                                                .clamp(-adjustment.vertical_scale, 0f32);
-                                            pinned_rectangles_opt.take();
-                                            short_event_rectangles_opt.take();
+                                            app.ui.add_adjustment(config::GRID_OFFSET_STEP);
+                                            app.calendar.pinned_rectangles_opt.take();
+                                            app.calendar.short_event_rectangles_opt.take();
                                         }
                                         sdl::SDLK_MINUS => {
-                                            adjustment.vertical_scale = 0f32.max(
-                                                adjustment.vertical_scale - config::GRID_SCALE_STEP,
+                                            app.ui.adjustment.vertical_scale = 0f32.max(
+                                                app.ui.adjustment.vertical_scale
+                                                    - config::GRID_SCALE_STEP,
                                             );
-                                            pinned_rectangles_opt.take();
-                                            short_event_rectangles_opt.take();
+                                            app.calendar.pinned_rectangles_opt.take();
+                                            app.calendar.short_event_rectangles_opt.take();
                                         }
                                         sdl::SDLK_EQUALS => {
-                                            adjustment.vertical_scale += config::GRID_SCALE_STEP;
-                                            pinned_rectangles_opt.take();
-                                            short_event_rectangles_opt.take();
+                                            app.ui.adjustment.vertical_scale +=
+                                                config::GRID_SCALE_STEP;
+                                            app.calendar.pinned_rectangles_opt.take();
+                                            app.calendar.short_event_rectangles_opt.take();
                                         }
                                         _ => (),
                                     },
                                     sdl::SDL_EVENT_KEY_UP => match event.key.key {
-                                        sdl::SDLK_PAGEUP => {
-                                            week_start = week_start.subtract_week();
-                                            is_week_switched = true;
-                                        }
-                                        sdl::SDLK_PAGEDOWN => {
-                                            week_start = week_start.add_week();
-                                            is_week_switched = true;
-                                        }
+                                        sdl::SDLK_PAGEUP => app.calendar.subtract_week(),
+                                        sdl::SDLK_PAGEDOWN => app.calendar.add_week(),
                                         _ => (),
                                     },
                                     _ => (),
                                 }
                             }
 
-                            if is_week_switched {
-                                week_data = WeekData::try_new(&week_start, &ui_text_factory)?;
-                                long_event_clash_size =
-                                    week_data.agenda.long.calculate_biggest_clash();
-                                pinned_rectangles_opt.take();
-                                short_event_rectangles_opt.take();
-                                is_week_switched = false;
+                            if app.calendar.is_week_switched {
+                                app.calendar.update_week_data(&ui_text_factory)?;
                             }
 
                             assert!(
-                                long_event_clash_size as usize
-                                    <= week_data.agenda.long.event_ranges.len(),
+                                app.calendar.long_event_clash_size as usize
+                                    <= app.calendar.week_data.agenda.long.event_ranges.len(),
                                 "the size of long events' clash can't be bigger than the number of the long events",
                             );
 
@@ -437,21 +508,21 @@ fn unsafe_main() {
                                     x: window_size.x as f32 - event_offset.x,
                                     y: window_size.y as f32 - event_offset.y,
                                 },
-                                &mut adjustment,
-                                title_font_height,
-                                long_event_clash_size,
+                                &mut app.ui.adjustment,
+                                app.ui.title_font_height,
+                                app.calendar.long_event_clash_size,
                             );
 
                             let long_event_rectangles: &calendar::render::Rectangles = {
                                 let ret: Result<&calendar::render::Rectangles, CalendarError> =
-                                    match pinned_rectangles_opt {
+                                    match app.calendar.pinned_rectangles_opt {
                                         Some(ref x) => Ok(x),
                                         None => {
                                             let replacement =
                                                 calendar::ui::create_long_event_rectangles(
                                                     &view.event_surface,
-                                                    &week_data.agenda.long,
-                                                    &week_start,
+                                                    &app.calendar.week_data.agenda.long,
+                                                    &app.calendar.week_start,
                                                     view.cell_width,
                                                     view.calculate_top_panel_height(),
                                                 );
@@ -463,41 +534,46 @@ fn unsafe_main() {
                                             register_event_titles(
                                                 &mut long_event_text_registry,
                                                 &fonts.title,
-                                                &week_data.agenda.long.titles,
+                                                &app.calendar.week_data.agenda.long.titles,
                                                 &replacement,
                                             )?;
-                                            Ok(pinned_rectangles_opt.get_or_insert(replacement))
+                                            Ok(app
+                                                .calendar
+                                                .pinned_rectangles_opt
+                                                .get_or_insert(replacement))
                                         }
                                     };
 
                                 ret?
                             };
 
-                            if short_event_rectangles_opt.is_none() {
+                            if app.calendar.short_event_rectangles_opt.is_none() {
                                 let new_rectangles = calendar::ui::create_short_event_rectangles(
                                     &view.grid_rectangle,
-                                    &week_data.agenda.short,
-                                    &week_start,
+                                    &app.calendar.week_data.agenda.short,
+                                    &app.calendar.week_start,
                                 );
                                 short_event_text_registry.clear();
                                 register_event_titles(
                                     &mut short_event_text_registry,
                                     &fonts.title,
-                                    &week_data.agenda.short.titles,
+                                    &app.calendar.week_data.agenda.short.titles,
                                     &new_rectangles,
                                 )?;
 
-                                short_event_rectangles_opt.replace(new_rectangles);
+                                app.calendar
+                                    .short_event_rectangles_opt
+                                    .replace(new_rectangles);
                             }
 
                             let short_event_rectangles =
-                                short_event_rectangles_opt.as_ref().unwrap();
+                                app.calendar.short_event_rectangles_opt.as_ref().unwrap();
 
                             let data = &render::RenderData {
                                 view,
                                 window_size,
                                 long_event_rectangles,
-                                week_data: &week_data,
+                                week_data: &app.calendar.week_data,
                                 short_event_rectangles,
                                 long_event_text_registry: &long_event_text_registry,
                                 short_event_text_registry: &short_event_text_registry,
@@ -534,7 +610,8 @@ impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
         I: Iterator<Item = &'r calendar::render::Rectangle>,
     {
         for rect in rectangles {
-            self.renderer.set_render_draw_color(calendar_color_2_to_sdl_color(rect.color))?;
+            self.renderer
+                .set_render_draw_color(calendar_color_2_to_sdl_color(rect.color))?;
             let sdl_rect = create_sdl_frect(rect);
             self.renderer.render_fill_rect(&sdl_rect)?;
 
@@ -545,7 +622,8 @@ impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
                 h: 5.0,
             };
 
-            self.renderer.set_render_draw_color(Color::from_rgb(0xff0000))?;
+            self.renderer
+                .set_render_draw_color(Color::from_rgb(0xff0000))?;
             self.renderer.render_fill_rect(&border)?;
         }
         Ok(())
