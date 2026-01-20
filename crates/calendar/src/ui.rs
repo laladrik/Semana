@@ -31,81 +31,93 @@ impl<Text> Week<Text> {
     }
 }
 
-/// create a structure with all of the texts for the week view.
-///
-/// # Panics
-///
-/// if `date_stream` does not provide 7 elements.
-pub fn create_texts<TF, R, I, D>(text_factory: &TF, date_stream: I) -> Week<R>
-where
-    TF: TextCreate<Result = R>,
-    I: Iterator<Item = D>,
-    D: std::borrow::Borrow<super::date::Date>,
-{
-    let mut dates_iter = create_date_texts(text_factory, date_stream);
-    let dates: [R; 7] = core::array::from_fn(|_| {
-        dates_iter
-            .next()
-            .expect("date_stream didn't sufficient amount of elements")
-    });
+pub trait Mod {
+    type TextFactoryResult;
+    type TextFactory: TextCreate<Result = Self::TextFactoryResult>;
 
-    Week {
-        days: create_weekday_texts(text_factory),
-        hours: create_hours_texts(text_factory),
-        dates,
+    /// create a structure with all of the texts for the week view.
+    ///
+    /// # Panics
+    ///
+    /// if `date_stream` does not provide 7 elements.
+    fn create_texts<I, D>(
+        text_factory: &Self::TextFactory,
+        date_stream: I,
+    ) -> Week<Self::TextFactoryResult>
+    where
+        I: Iterator<Item = D>,
+        D: std::borrow::Borrow<super::date::Date>,
+    {
+        let mut dates_iter = Self::create_date_texts(text_factory, date_stream);
+        let dates: [Self::TextFactoryResult; 7] = core::array::from_fn(|_| {
+            dates_iter
+                .next()
+                .expect("date_stream didn't sufficient amount of elements")
+        });
+
+        Week {
+            days: Self::create_weekday_texts(text_factory),
+            hours: Self::create_hours_texts(text_factory),
+            dates,
+        }
+    }
+
+    fn create_hours_texts(text_factory: &Self::TextFactory) -> [Self::TextFactoryResult; 24] {
+        core::array::from_fn(|i| {
+            let s = format!("{:02}:00", i);
+            text_factory.text_create(s.as_str())
+        })
+    }
+
+    fn create_weekday_texts(text_factory: &Self::TextFactory) -> [Self::TextFactoryResult; 7] {
+        let weekdays = [
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+            "Sunday",
+        ];
+        core::array::from_fn(|i| text_factory.text_create(weekdays[i]))
+    }
+
+    fn create_date_texts<I, D>(
+        text_factory: &Self::TextFactory,
+        dates: I,
+    ) -> impl Iterator<Item = Self::TextFactoryResult>
+    where
+        I: Iterator<Item = D>,
+        D: std::borrow::Borrow<super::date::Date>,
+    {
+        dates.map(|date| {
+            let date: &super::date::Date = date.borrow();
+            let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
+            text_factory.text_create(&text)
+        })
+    }
+
+    fn create_event_title_texts<'text, 'tf, I>(
+        text_factory: &'tf Self::TextFactory,
+        items: I,
+    ) -> impl Iterator<Item = Self::TextFactoryResult>
+    where
+        I: Iterator<Item = &'text str>,
+    {
+        items.map(|text| text_factory.text_create(text))
     }
 }
 
-pub fn create_hours_texts<TF, R>(text_factory: &TF) -> [R; 24]
+pub struct UI<TF, R> {
+    _marker: std::marker::PhantomData<(TF, R)>,
+}
+
+impl<TF, R> Mod for UI<TF, R>
 where
     TF: TextCreate<Result = R>,
 {
-    let hours: [R; 24] = core::array::from_fn(|i| {
-        let s = format!("{:02}:00", i);
-        text_factory.text_create(s.as_str())
-    });
-    hours
-}
-
-pub fn create_weekday_texts<TF, R>(text_factory: &TF) -> [R; 7]
-where
-    TF: TextCreate<Result = R>,
-{
-    let weekdays = [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ];
-    let ret: [R; 7] = core::array::from_fn(|i| text_factory.text_create(weekdays[i]));
-    ret
-}
-
-pub fn create_date_texts<TF, R, I, D>(text_factory: &TF, dates: I) -> impl Iterator<Item = R>
-where
-    TF: TextCreate<Result = R>,
-    I: Iterator<Item = D>,
-    D: std::borrow::Borrow<super::date::Date>,
-{
-    dates.map(|date| {
-        let date: &super::date::Date = date.borrow();
-        let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
-        text_factory.text_create(&text)
-    })
-}
-
-pub fn create_event_title_texts<'text, 'tf, TF, R, I>(
-    text_factory: &'tf TF,
-    items: I,
-) -> impl Iterator<Item = R>
-where
-    TF: TextCreate<Result = R> + 'tf,
-    I: Iterator<Item = &'text str>,
-{
-    items.map(|text| text_factory.text_create(text))
+    type TextFactoryResult = R;
+    type TextFactory = TF;
 }
 
 pub struct View {
@@ -149,13 +161,11 @@ impl View {
             (title_font_height + Self::LINE_HEIGHT as i32) as f32 * long_event_clash_size as f32;
         let cell_width: f32 = event_surface.w / 7.;
         let grid_rectangle: FRect = {
-            let create = |offset| {
-                FRect {
-                    x: event_surface.x,
-                    y: event_surface.y + top_panel_height + offset,
-                    w: event_surface.w,
-                    h: event_surface.h - top_panel_height,
-                }
+            let create = |offset| FRect {
+                x: event_surface.x,
+                y: event_surface.y + top_panel_height + offset,
+                w: event_surface.w,
+                h: event_surface.h - top_panel_height,
             };
 
             let mut ret = create(adjustment.vertical_offset);
@@ -223,7 +233,7 @@ pub struct CursorPosition<T> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl CursorPosition::<Window>{
+impl CursorPosition<Window> {
     pub fn in_window(x: f32, y: f32) -> CursorPosition<Window> {
         CursorPosition {
             inner: FPoint { x, y },
@@ -232,8 +242,11 @@ impl CursorPosition::<Window>{
     }
 }
 
-impl CursorPosition::<Surface>{
-    pub fn in_surface(cursor_position: CursorPosition<Window>, surface: &FRect) -> CursorPosition::<Surface> {
+impl CursorPosition<Surface> {
+    pub fn in_surface(
+        cursor_position: CursorPosition<Window>,
+        surface: &FRect,
+    ) -> CursorPosition<Surface> {
         CursorPosition::<Surface> {
             inner: FPoint {
                 x: cursor_position.inner.x - surface.x,
@@ -260,10 +273,7 @@ pub struct RelativeOffset(f32);
 
 pub struct EventSurface;
 impl EventSurface {
-    pub fn calculate_surface_offset(
-        surface: &mut FRect,
-        cursor: &CursorPosition<Surface>,
-    ) {
+    pub fn calculate_surface_offset(surface: &mut FRect, cursor: &CursorPosition<Surface>) {
         let offset = Self::calculate_cursor_relative_vertical_offset(surface, cursor);
         Self::calculate_absolute_vertical_offset(surface, cursor, offset);
     }

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, mem::MaybeUninit};
 
-use calendar::ui::{SurfaceAdjustment, View};
+use calendar::ui::{Mod, SurfaceAdjustment, View};
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 use sdlext::Ptr;
@@ -278,6 +278,8 @@ fn obtain_agenda(
     )
 }
 
+type UI<'a> = calendar::ui::UI<SdlTextCreate<'a>, Result<sdlext::Text, sdlext::TtfError>>;
+
 struct WeekData {
     agenda: calendar::obtain::WeekScheduleWithLanes,
     week: Week,
@@ -293,7 +295,7 @@ impl WeekData {
         let week: Week = {
             let stream = calendar::date::DateStream::new(week_start.clone()).take(Self::DAYS as _);
             let week: calendar::ui::Week<Result<sdlext::Text, _>> =
-                calendar::ui::create_texts(ui_text_factory, stream);
+                UI::create_texts(ui_text_factory, stream);
             validate_week(week)?
         };
 
@@ -495,7 +497,6 @@ fn unsafe_main() {
                                 y: 70f32,
                             };
 
-                            //let event_surface = view.event_surface;
                             let event_viewport = sdl::SDL_Rect {
                                 x: event_offset.x as i32,
                                 y: event_offset.y as i32,
