@@ -1,6 +1,6 @@
 use std::{cell::RefCell, mem::MaybeUninit};
 
-use calendar::ui::{Mod, SurfaceAdjustment, View};
+use calendar::ui::{TextObjectFactory, SurfaceAdjustment, View};
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 use sdlext::Ptr;

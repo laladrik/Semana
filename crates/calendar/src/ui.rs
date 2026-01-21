@@ -9,9 +9,14 @@ use super::render::TextRender;
 use super::render::{render_hours, render_weekdays};
 use super::types::{FPoint, FRect};
 
+/// The structure contains the text objects to be rendered.  See
+/// [`TextObjectFactory::BackendResult`].
 pub struct Week<Text> {
+    /// The names of the days of the week. (E.g.  Sunday, Monday etc.)
     pub days: [Text; 7],
+    /// The hours through out a day. (E.g. 00:00, 01:00, 02:00 etc.)
     pub hours: [Text; 24],
+    /// The dates of the days of the week.  (E.g.  2025-11-17, 2025-11-18 etc.)
     pub dates: [Text; 7],
 }
 
@@ -31,25 +36,27 @@ impl<Text> Week<Text> {
     }
 }
 
-pub trait Mod {
-    type TextFactoryResult;
-    type TextFactory: TextCreate<Result = Self::TextFactoryResult>;
+/// The trait is effectively a module with compile-time arguments.  It converts the input strings
+/// into the text objects to be rendered.  The creation of a text object is defined by Backend.
+pub trait TextObjectFactory {
+    /// The result of Backend work.  It's conceived that it contains the text object to be
+    /// rendered.
+    type BackendResult;
+    /// The implementation of creation of a text object.
+    type Backend: TextCreate<Result = Self::BackendResult>;
 
-    /// create a structure with all of the texts for the week view.
+    /// Create the texts for the week calendar.  See [`Week`].
     ///
     /// # Panics
     ///
     /// if `date_stream` does not provide 7 elements.
-    fn create_texts<I, D>(
-        text_factory: &Self::TextFactory,
-        date_stream: I,
-    ) -> Week<Self::TextFactoryResult>
+    fn create_texts<I, D>(text_factory: &Self::Backend, date_stream: I) -> Week<Self::BackendResult>
     where
         I: Iterator<Item = D>,
         D: std::borrow::Borrow<super::date::Date>,
     {
         let mut dates_iter = Self::create_date_texts(text_factory, date_stream);
-        let dates: [Self::TextFactoryResult; 7] = core::array::from_fn(|_| {
+        let dates: [Self::BackendResult; 7] = core::array::from_fn(|_| {
             dates_iter
                 .next()
                 .expect("date_stream didn't sufficient amount of elements")
@@ -62,14 +69,14 @@ pub trait Mod {
         }
     }
 
-    fn create_hours_texts(text_factory: &Self::TextFactory) -> [Self::TextFactoryResult; 24] {
+    fn create_hours_texts(text_factory: &Self::Backend) -> [Self::BackendResult; 24] {
         core::array::from_fn(|i| {
             let s = format!("{:02}:00", i);
             text_factory.text_create(s.as_str())
         })
     }
 
-    fn create_weekday_texts(text_factory: &Self::TextFactory) -> [Self::TextFactoryResult; 7] {
+    fn create_weekday_texts(text_factory: &Self::Backend) -> [Self::BackendResult; 7] {
         let weekdays = [
             "Monday",
             "Tuesday",
@@ -83,9 +90,9 @@ pub trait Mod {
     }
 
     fn create_date_texts<I, D>(
-        text_factory: &Self::TextFactory,
+        text_factory: &Self::Backend,
         dates: I,
-    ) -> impl Iterator<Item = Self::TextFactoryResult>
+    ) -> impl Iterator<Item = Self::BackendResult>
     where
         I: Iterator<Item = D>,
         D: std::borrow::Borrow<super::date::Date>,
@@ -97,13 +104,10 @@ pub trait Mod {
         })
     }
 
-    fn create_event_title_texts<'text, 'tf, I>(
-        text_factory: &'tf Self::TextFactory,
-        items: I,
-    ) -> impl Iterator<Item = Self::TextFactoryResult>
-    where
-        I: Iterator<Item = &'text str>,
-    {
+    fn create_event_title_texts<'text, 'tf>(
+        text_factory: &'tf Self::Backend,
+        items: impl Iterator<Item = &'text str>,
+    ) -> impl Iterator<Item = Self::BackendResult> {
         items.map(|text| text_factory.text_create(text))
     }
 }
@@ -112,12 +116,12 @@ pub struct UI<TF, R> {
     _marker: std::marker::PhantomData<(TF, R)>,
 }
 
-impl<TF, R> Mod for UI<TF, R>
+impl<TF, R> TextObjectFactory for UI<TF, R>
 where
     TF: TextCreate<Result = R>,
 {
-    type TextFactoryResult = R;
-    type TextFactory = TF;
+    type BackendResult = R;
+    type Backend = TF;
 }
 
 pub struct View {
