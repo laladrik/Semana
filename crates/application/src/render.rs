@@ -1,8 +1,9 @@
 use calendar::ui::View;
 use sdl3_sys as sdl;
 
-use crate::{RectangleRender, SdlTextRender, WeekData};
+use crate::{RectangleRender, SdlTextRender};
 
+use crate::state::WeekData;
 use super::config;
 use sdlext::Color;
 
@@ -12,7 +13,7 @@ pub struct RenderData<'a, 'b> {
     pub view: View,
     pub long_event_rectangles: &'a calendar::render::Rectangles,
     pub short_event_rectangles: &'a calendar::render::Rectangles,
-    pub week_data: &'a WeekData,
+    pub week_data: &'a WeekData<sdlext::Text>,
     pub long_event_text_registry: &'a crate::TextRegistry<'b>,
     pub short_event_text_registry: &'a crate::TextRegistry<'b>,
     pub window_size: sdl3_sys::SDL_Point,
