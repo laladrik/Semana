@@ -1,10 +1,12 @@
 use std::cell::RefCell;
 use std::mem::MaybeUninit;
 
-use crate::{TextRegistry, register_event_titles, render::RenderData};
+use crate::{
+    DumbFrontend, Error, SdlTextCreate, TextRegistry, get_current_week_start,
+    register_event_titles, render::RenderData,
+};
 
-use super::{DumbObtainAgenda, Error, SdlTextCreate, SurfaceAdjustment, get_current_week_start};
-use calendar::ui::{TextObjectFactory, View};
+use calendar::ui::{SurfaceAdjustment, TextObjectFactory, View};
 
 use sdl3_sys::{SDL_FPoint as FPoint, SDL_Point as Point, SDL_Rect as Rect};
 
@@ -17,19 +19,11 @@ pub struct Calendar {
     pub is_week_switched: bool,
 }
 
-fn wrap_error(e: WeekDataError<sdlext::TtfError, crate::AgendaObtainError>) -> Error {
-    match e {
-        WeekDataError::Validate(e) => Error::from(sdlext::Error::from(e)),
-        WeekDataError::Obtain(e) => Error::from(e),
-    }
-}
-
 impl Calendar {
     pub fn new(ui_text_factory: &SdlTextCreate) -> Result<Self, Error> {
         let week_start: calendar::date::Date =
             get_current_week_start().map_err(sdlext::Error::from)?;
-        let week_data = WeekData::try_new(&week_start, &DumbObtainAgenda, ui_text_factory)
-            .map_err(wrap_error)?;
+        let week_data = WeekData::try_new(&week_start, &DumbFrontend(ui_text_factory))?;
 
         let short_event_rectangles_opt: Option<calendar::render::Rectangles> = None;
         let pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
@@ -58,8 +52,7 @@ impl Calendar {
     }
 
     pub fn update_week_data(&mut self, ui_text_factory: &SdlTextCreate<'_>) -> Result<(), Error> {
-        self.week_data = WeekData::try_new(&self.week_start, &DumbObtainAgenda, ui_text_factory)
-            .map_err(wrap_error)?;
+        self.week_data = WeekData::try_new(&self.week_start, &DumbFrontend(ui_text_factory))?;
         self.long_event_clash_size = self.week_data.agenda.long.calculate_biggest_clash();
         self.is_week_switched = false;
         self.drop_events();
@@ -232,43 +225,39 @@ pub fn create_short_events(
     Ok(())
 }
 
+pub trait Frontend: calendar::TextCreate<Result = Result<Self::TextObject, Self::Error>> {
+    type TextObject;
+    type Error;
+
+    fn obtain_agenda(
+        &self,
+        week_start: &calendar::date::Date,
+    ) -> Result<calendar::obtain::WeekScheduleWithLanes, Self::Error>;
+}
+
 pub struct WeekData<Text> {
     pub agenda: calendar::obtain::WeekScheduleWithLanes,
     pub week: calendar::ui::Week<Text>,
 }
 
-enum WeekDataError<V, O> {
-    Validate(V),
-    Obtain(O),
-}
-
 impl<Text> WeekData<Text> {
     const DAYS: u8 = 7;
 
-    fn try_new<TF, AO, ValidateErr, ObtainErr>(
-        week_start: &calendar::date::Date,
-        agenda_obtain: &AO,
-        ui_text_factory: &TF,
-    ) -> Result<Self, WeekDataError<ValidateErr, ObtainErr>>
+    fn try_new<F, E>(week_start: &calendar::date::Date, frontend: &F) -> Result<Self, E>
     where
-        TF: calendar::TextCreate<Result = Result<Text, ValidateErr>>,
-        AO: crate::ObtainAgenda<Error = ObtainErr>,
+        F: Frontend<TextObject = Text, Error = E>,
     {
         let week: calendar::ui::Week<Text> = {
             let stream = calendar::date::DateStream::new(week_start.clone()).take(Self::DAYS as _);
-            let week: calendar::ui::Week<TF::Result> =
-                calendar::ui::UI::<TF, TF::Result>::create_texts(ui_text_factory, stream);
+            let week: calendar::ui::Week<Result<Text, E>> =
+                calendar::ui::UI::<F, Result<Text, E>>::create_texts(frontend, stream);
 
-            match validate_week::<Text, ValidateErr>(week) {
-                Ok(x) => x,
-                Err(e) => return Err(WeekDataError::Validate(e)),
-            }
+            validate_week(week)?
         };
 
-        match agenda_obtain.obtain_agenda(week_start) {
-            Ok(agenda) => Ok(Self { agenda, week }),
-            Err(e) => Err(WeekDataError::Obtain(e)),
-        }
+        frontend
+            .obtain_agenda(week_start)
+            .map(|agenda| Self { agenda, week })
     }
 }
 

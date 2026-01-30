@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 
-use calendar::ui::SurfaceAdjustment;
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
 use sdlext::Ptr;
@@ -193,6 +192,14 @@ enum Error {
     DataIsNotAvailable(AgendaObtainError),
 }
 
+impl From<FrontendError> for Error {
+    fn from(value: FrontendError) -> Self {
+        match value {
+            FrontendError::TextObjectIsNotCreated(e) => Error::from(sdlext::Error::from(e)),
+            FrontendError::AgendaIsNotObtained(e) => Error::from(e),
+        }
+    }
+}
 impl From<sdlext::Error> for Error {
     fn from(value: sdlext::Error) -> Self {
         Error::Sdl(value)
@@ -239,18 +246,25 @@ where
     Ok(())
 }
 
-trait ObtainAgenda {
-    type Error;
+struct DumbFrontend<'a, 'b>(&'b SdlTextCreate<'a>);
+impl<'a, 'b> calendar::TextCreate for DumbFrontend<'a, 'b> {
+    type Result = Result<<Self as Frontend>::TextObject, FrontendError>;
 
-    fn obtain_agenda(
-        &self,
-        week_start: &calendar::date::Date,
-    ) -> Result<calendar::obtain::WeekScheduleWithLanes, Self::Error>;
+    fn text_create(&self, s: &str) -> Self::Result {
+        self.0
+            .text_create(s)
+            .map_err(FrontendError::TextObjectIsNotCreated)
+    }
 }
 
-struct DumbObtainAgenda;
-impl ObtainAgenda for DumbObtainAgenda {
-    type Error = AgendaObtainError;
+enum FrontendError {
+    TextObjectIsNotCreated(sdlext::TtfError),
+    AgendaIsNotObtained(AgendaObtainError),
+}
+
+impl<'a, 'b> Frontend for DumbFrontend<'a, 'b> {
+    type TextObject = sdlext::Text;
+    type Error = FrontendError;
 
     fn obtain_agenda(
         &self,
@@ -267,12 +281,15 @@ impl ObtainAgenda for DumbObtainAgenda {
             &calendar::obtain::NanoSerde,
             &arguments,
         )
+        .map_err(FrontendError::AgendaIsNotObtained)
     }
 }
 
 mod state;
 
 use state::App;
+
+use crate::state::Frontend;
 
 fn unsafe_main() {
     let event_offset = sdl::SDL_FPoint {
