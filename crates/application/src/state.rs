@@ -1,11 +1,11 @@
-use std::cell::RefCell;
+use crate::config;
 use std::mem::MaybeUninit;
 
-use crate::{Error, TextRegistry, register_event_titles, render::RenderData};
+use crate::{render::RenderData};
 
 use calendar::ui::{SurfaceAdjustment, TextObjectFactory, View};
 
-use sdl3_sys::{SDL_FPoint as FPoint, SDL_Point as Point, SDL_Rect as Rect};
+use sdl3_sys::{SDL_FPoint as FPoint, SDL_FRect as FRect, SDL_Point as Point, SDL_Rect as Rect};
 
 pub struct Calendar<F: Frontend> {
     pub week_start: calendar::date::Date,
@@ -129,13 +129,13 @@ impl<F: Frontend> App<F> {
         )
     }
 
-    pub fn create_render_data<'a, 'b>(
-        &'a mut self,
+    pub fn create_render_data<'wdrect, 'ttc, TTC: TextTextureCreate>(
+        &'wdrect mut self,
         window_size: Point,
-        long_event_text_registry: &'b mut TextRegistry,
-        short_event_text_registry: &'b mut TextRegistry,
-        title_font: &RefCell<sdlext::Font>,
-    ) -> Result<RenderData<'a, 'b, F::TextObject>, Error> {
+        long_event_text_registry: &'ttc mut TTC,
+        short_event_text_registry: &'ttc mut TTC,
+        title_font: &TTC::Font,
+    ) -> Result<RenderData<'wdrect, 'wdrect, 'ttc, F::TextObject, TTC>, TTC::Error> {
         let event_viewport = self.ui.calculate_viewport(&window_size);
         let view = self.create_view(&window_size);
         if self.calendar.long_event_rectangles_opt.is_none() {
@@ -173,12 +173,12 @@ impl<F: Frontend> App<F> {
     }
 }
 
-pub fn create_long_events<F: Frontend>(
+pub fn create_long_events<F: Frontend, TTC: TextTextureCreate>(
     calendar: &mut Calendar<F>,
-    text_registry: &mut TextRegistry,
+    text_registry: &mut TTC,
     view: &View,
-    title_font: &RefCell<sdlext::Font>,
-) -> Result<(), Error> {
+    title_font: &TTC::Font,
+) -> Result<(), TTC::Error> {
     let replacement = calendar::ui::create_long_event_rectangles(
         &view.event_surface,
         &calendar.week_data.agenda.long,
@@ -198,12 +198,12 @@ pub fn create_long_events<F: Frontend>(
     Ok(())
 }
 
-pub fn create_short_events<F: Frontend>(
+pub fn create_short_events<F: Frontend, TTC: TextTextureCreate>(
     calendar: &mut Calendar<F>,
-    text_registry: &mut TextRegistry,
+    text_registry: &mut TTC,
     view: &View,
-    title_font: &RefCell<sdlext::Font>,
-) -> Result<(), Error> {
+    title_font: &TTC::Font,
+) -> Result<(), TTC::Error> {
     let new_rectangles = calendar::ui::create_short_event_rectangles(
         &view.grid_rectangle,
         &calendar.week_data.agenda.short,
@@ -283,4 +283,45 @@ fn validate_week<T, E>(
         hours: validate_array(dirty.hours)?,
         dates: validate_array(dirty.dates)?,
     })
+}
+
+pub trait TextTextureCreate {
+    type Error;
+    type Font;
+
+    fn clear(&mut self);
+    fn create(
+        &mut self,
+        text: &std::ffi::CStr,
+        font: &Self::Font,
+        position: FRect,
+    ) -> Result<(), Self::Error>;
+}
+
+fn register_event_titles<Str, TTC: TextTextureCreate>(
+    text_registry: &mut TTC,
+    font: &TTC::Font,
+    titles: &[Str],
+    rectangles: &[calendar::render::Rectangle],
+) -> Result<(), TTC::Error>
+where
+    Str: AsRef<str>,
+{
+    assert_eq!(titles.len(), rectangles.len());
+    for item in titles.iter().zip(rectangles.iter()) {
+        let (title, rectangle): (&Str, &calendar::render::Rectangle) = item;
+        let c_title =
+            std::ffi::CString::new(title.as_ref()).expect("can't create c string for an event");
+        let offset_x = config::EVENT_TITLE_OFFSET_X;
+        let offset_y = config::EVENT_TITLE_OFFSET_Y;
+        let dstrect = FRect {
+            x: rectangle.at.x + offset_x,
+            y: rectangle.at.y + offset_y,
+            w: rectangle.size.x - offset_x * 2f32,
+            h: rectangle.size.y - offset_y * 2f32,
+        };
+
+        text_registry.create(c_title.as_c_str(), font, dstrect)?;
+    }
+    Ok(())
 }

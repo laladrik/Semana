@@ -40,8 +40,9 @@ impl calendar::render::TextRender for SdlTextRender {
         }
     }
 }
-/// The registry with the text objects to be rendered.
-struct TextRegistry<'a> {
+
+/// The registry with the textures of the text objects.
+struct TextTextureRegistry<'a> {
     surfaces: Vec<sdlext::Surface>,
     textures: Vec<sdlext::Texture>,
     text_positions: Vec<sdl::SDL_FRect>,
@@ -58,7 +59,7 @@ mod config {
     pub const GRID_OFFSET_STEP: f32 = 50.;
 }
 
-impl<'a> TextRegistry<'a> {
+impl<'a> TextTextureRegistry<'a> {
     fn new(renderer: &'a sdlext::Renderer) -> Self {
         Self {
             renderer,
@@ -137,7 +138,7 @@ impl<'a> TextRegistry<'a> {
     }
 }
 
-impl<'a> Drop for TextRegistry<'a> {
+impl<'a> Drop for TextTextureRegistry<'a> {
     fn drop(&mut self) {
         self.clear()
     }
@@ -216,32 +217,22 @@ impl From<AgendaObtainError> for Error {
     }
 }
 
-fn register_event_titles<Str>(
-    text_registry: &mut TextRegistry,
-    font: &RefCell<Font>,
-    titles: &[Str],
-    rectangles: &[calendar::render::Rectangle],
-) -> Result<(), Error>
-where
-    Str: AsRef<str>,
-{
-    assert_eq!(titles.len(), rectangles.len());
-    for item in titles.iter().zip(rectangles.iter()) {
-        let (title, rectangle): (&Str, &calendar::render::Rectangle) = item;
-        let c_title =
-            std::ffi::CString::new(title.as_ref()).expect("can't create c string for an event");
-        let offset_x = config::EVENT_TITLE_OFFSET_X;
-        let offset_y = config::EVENT_TITLE_OFFSET_Y;
-        let dstrect = sdl::SDL_FRect {
-            x: rectangle.at.x + offset_x,
-            y: rectangle.at.y + offset_y,
-            w: rectangle.size.x - offset_x * 2f32,
-            h: rectangle.size.y - offset_y * 2f32,
-        };
+impl<'a> TextTextureCreate for TextTextureRegistry<'a> {
+    type Error = sdlext::Error;
+    type Font = RefCell<sdlext::Font>;
 
-        text_registry.create(c_title.as_c_str(), font, dstrect)?;
+    fn clear(&mut self) {
+        self.clear()
     }
-    Ok(())
+
+    fn create(
+        &mut self,
+        text: &std::ffi::CStr,
+        font: &Self::Font,
+        position: sdl3_sys::SDL_FRect,
+    ) -> Result<(), Self::Error> {
+        self.create(text, font, position)
+    }
 }
 
 struct DumbFrontend<'a, 'b>(&'b SdlTextCreate<'a>);
@@ -294,7 +285,7 @@ mod state;
 
 use state::App;
 
-use crate::state::Frontend;
+use crate::state::{Frontend, TextTextureCreate};
 
 fn unsafe_main() {
     let event_offset = sdl::SDL_FPoint {
@@ -305,8 +296,8 @@ fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
-                let mut short_event_text_registry = TextRegistry::new(renderer);
-                let mut long_event_text_registry = TextRegistry::new(renderer);
+                let mut short_event_text_registry = TextTextureRegistry::new(renderer);
+                let mut long_event_text_registry = TextTextureRegistry::new(renderer);
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
@@ -320,9 +311,9 @@ fn unsafe_main() {
                             engine,
                             font: &fonts.ui,
                         };
+
                         let frontend = DumbFrontend(&ui_text_factory);
                         let mut app = App::new(&frontend, title_font_height, event_offset)?;
-
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
                             // stage: event handle
@@ -385,6 +376,7 @@ fn unsafe_main() {
                                 &mut short_event_text_registry,
                                 &fonts.title,
                             )?;
+
                             /* stage: render */
                             render::render(renderer, &data)?;
                         }
