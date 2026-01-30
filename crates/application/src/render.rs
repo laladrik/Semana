@@ -7,19 +7,19 @@ use crate::state::WeekData;
 use super::config;
 use sdlext::Color;
 
-pub struct RenderData<'a, 'b> {
+pub struct RenderData<'a, 'b, TextObject> {
     pub event_viewport: sdl::SDL_Rect,
     pub event_offset: sdl::SDL_FPoint,
     pub view: View,
     pub long_event_rectangles: &'a calendar::render::Rectangles,
     pub short_event_rectangles: &'a calendar::render::Rectangles,
-    pub week_data: &'a WeekData<sdlext::Text>,
+    pub week_data: &'a WeekData<TextObject>,
     pub long_event_text_registry: &'a crate::TextRegistry<'b>,
     pub short_event_text_registry: &'a crate::TextRegistry<'b>,
     pub window_size: sdl3_sys::SDL_Point,
 }
 
-pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
+pub fn render(renderer: &sdlext::Renderer, data: &RenderData<sdlext::Text>) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
     let (x, _y) = (data.event_offset.x as i32, data.event_offset.y as i32);
@@ -29,7 +29,7 @@ pub fn render(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<
     renderer.present()
 }
 
-fn render_events(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Result<()> {
+fn render_events(renderer: &sdlext::Renderer, data: &RenderData<sdlext::Text>) -> sdlext::Result<()> {
     let event_viewport = data.event_viewport;
     set_render_viewport_context(renderer, &event_viewport, || {
         render_grid(renderer, &data.view.grid_rectangle)?;
@@ -42,7 +42,7 @@ fn render_events(renderer: &sdlext::Renderer, data: &RenderData) -> sdlext::Resu
     })
 }
 
-fn render_hours(renderer: &sdlext::Renderer, width: i32, data: &RenderData) -> sdlext::Result<()> {
+fn render_hours(renderer: &sdlext::Renderer, width: i32, data: &RenderData<sdlext::Text>) -> sdlext::Result<()> {
     let hours_viewport = sdl::SDL_Rect {
         x: 10,
         y: data.event_viewport.y + data.view.calculate_top_panel_height() as i32,
@@ -66,7 +66,7 @@ fn render_hours(renderer: &sdlext::Renderer, width: i32, data: &RenderData) -> s
 fn render_days(
     renderer: &sdlext::Renderer,
     horizontal_offset: i32,
-    data: &RenderData,
+    data: &RenderData<sdlext::Text>,
 ) -> sdlext::Result<()> {
     let dates_viewport = sdl::SDL_Rect {
         x: horizontal_offset,

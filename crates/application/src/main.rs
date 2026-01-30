@@ -9,10 +9,6 @@ use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 mod date;
 mod render;
 
-fn get_current_week_start() -> Result<calendar::date::Date, TimeError> {
-    sdlext::get_current_time().and_then(date::get_week_start)
-}
-
 struct SdlTextCreate<'a> {
     engine: *mut sdl_ttf::TTF_TextEngine,
     font: &'a RefCell<sdlext::Font>,
@@ -197,9 +193,11 @@ impl From<FrontendError> for Error {
         match value {
             FrontendError::TextObjectIsNotCreated(e) => Error::from(sdlext::Error::from(e)),
             FrontendError::AgendaIsNotObtained(e) => Error::from(e),
+            FrontendError::WeekStartIsNotObtained(e) => Error::from(sdlext::Error::from(e)),
         }
     }
 }
+
 impl From<sdlext::Error> for Error {
     fn from(value: sdlext::Error) -> Self {
         Error::Sdl(value)
@@ -260,11 +258,18 @@ impl<'a, 'b> calendar::TextCreate for DumbFrontend<'a, 'b> {
 enum FrontendError {
     TextObjectIsNotCreated(sdlext::TtfError),
     AgendaIsNotObtained(AgendaObtainError),
+    WeekStartIsNotObtained(TimeError),
 }
 
 impl<'a, 'b> Frontend for DumbFrontend<'a, 'b> {
     type TextObject = sdlext::Text;
     type Error = FrontendError;
+
+    fn get_current_week_start(&self) -> Result<calendar::date::Date, FrontendError> {
+        sdlext::get_current_time()
+            .and_then(date::get_week_start)
+            .map_err(FrontendError::WeekStartIsNotObtained)
+    }
 
     fn obtain_agenda(
         &self,
@@ -315,7 +320,8 @@ fn unsafe_main() {
                             engine,
                             font: &fonts.ui,
                         };
-                        let mut app = App::new(&ui_text_factory, title_font_height, event_offset)?;
+                        let frontend = DumbFrontend(&ui_text_factory);
+                        let mut app = App::new(&frontend, title_font_height, event_offset)?;
 
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
@@ -364,7 +370,7 @@ fn unsafe_main() {
                             }
 
                             if app.calendar.is_week_switched {
-                                app.calendar.update_week_data(&ui_text_factory)?;
+                                app.calendar.update_week_data(&frontend)?;
                             }
 
                             assert!(

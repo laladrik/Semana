@@ -1,29 +1,25 @@
 use std::cell::RefCell;
 use std::mem::MaybeUninit;
 
-use crate::{
-    DumbFrontend, Error, SdlTextCreate, TextRegistry, get_current_week_start,
-    register_event_titles, render::RenderData,
-};
+use crate::{Error, TextRegistry, register_event_titles, render::RenderData};
 
 use calendar::ui::{SurfaceAdjustment, TextObjectFactory, View};
 
 use sdl3_sys::{SDL_FPoint as FPoint, SDL_Point as Point, SDL_Rect as Rect};
 
-pub struct Calendar {
+pub struct Calendar<F: Frontend> {
     pub week_start: calendar::date::Date,
-    pub week_data: WeekData<sdlext::Text>,
+    pub week_data: WeekData<F::TextObject>,
     pub short_event_rectangles_opt: Option<calendar::render::Rectangles>,
     pub long_event_rectangles_opt: Option<calendar::render::Rectangles>,
     pub long_event_clash_size: calendar::Lane,
     pub is_week_switched: bool,
 }
 
-impl Calendar {
-    pub fn new(ui_text_factory: &SdlTextCreate) -> Result<Self, Error> {
-        let week_start: calendar::date::Date =
-            get_current_week_start().map_err(sdlext::Error::from)?;
-        let week_data = WeekData::try_new(&week_start, &DumbFrontend(ui_text_factory))?;
+impl<F: Frontend> Calendar<F> {
+    pub fn new(frontend: &F) -> Result<Self, F::Error> {
+        let week_start: calendar::date::Date = frontend.get_current_week_start()?;
+        let week_data = WeekData::try_new(&week_start, frontend)?;
 
         let short_event_rectangles_opt: Option<calendar::render::Rectangles> = None;
         let pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
@@ -51,8 +47,8 @@ impl Calendar {
         self.is_week_switched = true;
     }
 
-    pub fn update_week_data(&mut self, ui_text_factory: &SdlTextCreate<'_>) -> Result<(), Error> {
-        self.week_data = WeekData::try_new(&self.week_start, &DumbFrontend(ui_text_factory))?;
+    pub fn update_week_data(&mut self, frontend: &F) -> Result<(), F::Error> {
+        self.week_data = WeekData::try_new(&self.week_start, frontend)?;
         self.long_event_clash_size = self.week_data.agenda.long.calculate_biggest_clash();
         self.is_week_switched = false;
         self.drop_events();
@@ -105,19 +101,19 @@ impl UserInterface {
 }
 
 // The state of the application
-pub struct App {
-    pub calendar: Calendar,
+pub struct App<F: Frontend> {
+    pub calendar: Calendar<F>,
     pub ui: UserInterface,
 }
 
-impl App {
+impl<F: Frontend> App<F> {
     pub fn new(
-        ui_text_factory: &SdlTextCreate,
+        frontend: &F,
         title_font_height: std::ffi::c_int,
         event_offset: FPoint,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, F::Error> {
         let ui = UserInterface::new(title_font_height, event_offset);
-        let calendar = Calendar::new(ui_text_factory)?;
+        let calendar = Calendar::new(frontend)?;
         Ok(Self { calendar, ui })
     }
 
@@ -139,7 +135,7 @@ impl App {
         long_event_text_registry: &'b mut TextRegistry,
         short_event_text_registry: &'b mut TextRegistry,
         title_font: &RefCell<sdlext::Font>,
-    ) -> Result<RenderData<'a, 'b>, Error> {
+    ) -> Result<RenderData<'a, 'b, F::TextObject>, Error> {
         let event_viewport = self.ui.calculate_viewport(&window_size);
         let view = self.create_view(&window_size);
         if self.calendar.long_event_rectangles_opt.is_none() {
@@ -177,8 +173,8 @@ impl App {
     }
 }
 
-pub fn create_long_events(
-    calendar: &mut Calendar,
+pub fn create_long_events<F: Frontend>(
+    calendar: &mut Calendar<F>,
     text_registry: &mut TextRegistry,
     view: &View,
     title_font: &RefCell<sdlext::Font>,
@@ -202,8 +198,8 @@ pub fn create_long_events(
     Ok(())
 }
 
-pub fn create_short_events(
-    calendar: &mut Calendar,
+pub fn create_short_events<F: Frontend>(
+    calendar: &mut Calendar<F>,
     text_registry: &mut TextRegistry,
     view: &View,
     title_font: &RefCell<sdlext::Font>,
@@ -229,15 +225,17 @@ pub trait Frontend: calendar::TextCreate<Result = Result<Self::TextObject, Self:
     type TextObject;
     type Error;
 
+    fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
+
     fn obtain_agenda(
         &self,
         week_start: &calendar::date::Date,
     ) -> Result<calendar::obtain::WeekScheduleWithLanes, Self::Error>;
 }
 
-pub struct WeekData<Text> {
+pub struct WeekData<TextObject> {
     pub agenda: calendar::obtain::WeekScheduleWithLanes,
-    pub week: calendar::ui::Week<Text>,
+    pub week: calendar::ui::Week<TextObject>,
 }
 
 impl<Text> WeekData<Text> {
