@@ -1,3 +1,5 @@
+mod error;
+
 use std::cell::RefCell;
 
 use sdl3_sys as sdl;
@@ -6,6 +8,7 @@ use sdlext::Ptr;
 
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 
+use crate::error::{Error, FrontendError};
 mod date;
 mod render;
 
@@ -164,59 +167,6 @@ impl Fonts {
     }
 }
 
-#[derive(Debug)]
-struct CalendarError {
-    _data: String,
-}
-
-impl<'event> From<calendar::Error<'event>> for CalendarError {
-    fn from(value: calendar::Error<'event>) -> Self {
-        let (calendar::Error::InvalidDate(data) | calendar::Error::InvalidTime(data)) = value;
-        Self {
-            _data: data.to_owned(),
-        }
-    }
-}
-
-type JsonParseError = <calendar::obtain::NanoSerde as calendar::obtain::JsonParser>::Error;
-type AgendaObtainError = calendar::obtain::Error<JsonParseError>;
-
-#[derive(Debug)]
-#[allow(unused)]
-enum Error {
-    Sdl(sdlext::Error),
-    Calendar(CalendarError),
-    DataIsNotAvailable(AgendaObtainError),
-}
-
-impl From<FrontendError> for Error {
-    fn from(value: FrontendError) -> Self {
-        match value {
-            FrontendError::TextObjectIsNotCreated(e) => Error::from(sdlext::Error::from(e)),
-            FrontendError::AgendaIsNotObtained(e) => Error::from(e),
-            FrontendError::WeekStartIsNotObtained(e) => Error::from(sdlext::Error::from(e)),
-        }
-    }
-}
-
-impl From<sdlext::Error> for Error {
-    fn from(value: sdlext::Error) -> Self {
-        Error::Sdl(value)
-    }
-}
-
-impl From<CalendarError> for Error {
-    fn from(value: CalendarError) -> Self {
-        Error::Calendar(value)
-    }
-}
-
-impl From<AgendaObtainError> for Error {
-    fn from(value: AgendaObtainError) -> Self {
-        Error::DataIsNotAvailable(value)
-    }
-}
-
 impl<'a> TextTextureCreate for TextTextureRegistry<'a> {
     type Error = sdlext::Error;
     type Font = RefCell<sdlext::Font>;
@@ -244,12 +194,6 @@ impl<'a, 'b> calendar::TextCreate for DumbFrontend<'a, 'b> {
             .text_create(s)
             .map_err(FrontendError::TextObjectIsNotCreated)
     }
-}
-
-enum FrontendError {
-    TextObjectIsNotCreated(sdlext::TtfError),
-    AgendaIsNotObtained(AgendaObtainError),
-    WeekStartIsNotObtained(TimeError),
 }
 
 impl<'a, 'b> Frontend for DumbFrontend<'a, 'b> {
