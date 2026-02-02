@@ -1,41 +1,43 @@
 use calendar::ui::View;
 use sdl3_sys as sdl;
 
-use crate::{RectangleRender, SdlTextRender};
+use crate::DumbFrontend;
+use crate::RectangleRender;
 
 use super::config;
-use crate::state::WeekData;
 use sdlext::Color;
 
-pub struct RenderData<'rect, 'wd, 'ttc, TextObject, TTC> {
+pub struct RenderData<'rect, 'ttc, TTC, F> {
     pub event_viewport: sdl::SDL_Rect,
-    pub event_offset: sdl::SDL_FPoint,
     pub view: View,
     pub long_event_rectangles: &'rect calendar::render::Rectangles,
     pub short_event_rectangles: &'rect calendar::render::Rectangles,
-    pub week_data: &'wd WeekData<TextObject>,
+    pub hours_viewport: sdl::SDL_Rect,
     pub long_event_text_registry: &'ttc TTC,
     pub short_event_text_registry: &'ttc TTC,
-    pub window_size: sdl3_sys::SDL_Point,
+    pub frontend: &'ttc F,
+    pub dates_viewport: sdl::SDL_Rect,
 }
 
-pub fn render(
-    renderer: &sdlext::Renderer,
-    data: &RenderData<sdlext::Text, crate::TextTextureRegistry>,
-) -> sdlext::Result<()> {
+type RD<'a, 'b, 'c, 'd, 'rect, 'ttc> =
+    RenderData<'rect, 'ttc, crate::TextTextureRegistry<'d>, DumbFrontend<'a, 'b, 'c>>;
+
+pub fn render(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
-    let (x, _y) = (data.event_offset.x as i32, data.event_offset.y as i32);
     render_events(renderer, data)?;
-    render_hours(renderer, x, data)?;
-    render_days(renderer, x, data)?;
+    set_render_viewport_context(renderer, &data.hours_viewport, || {
+        data.frontend.hour_text_texture_regirsty.render()
+    })?;
+
+    set_render_viewport_context(renderer, &data.dates_viewport, || {
+        data.frontend.dates_text_texture_regirsty.render()?;
+        data.frontend.days_text_texture_regirsty.render()
+    })?;
     renderer.present()
 }
 
-fn render_events(
-    renderer: &sdlext::Renderer,
-    data: &RenderData<sdlext::Text, crate::TextTextureRegistry>,
-) -> sdlext::Result<()> {
+fn render_events(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
     let event_viewport = data.event_viewport;
     set_render_viewport_context(renderer, &event_viewport, || {
         render_grid(renderer, &data.view.grid_rectangle)?;
@@ -43,71 +45,7 @@ fn render_events(
         calendar::render::render_rectangles(data.short_event_rectangles.iter(), &event_render)?;
         data.short_event_text_registry.render()?;
         calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
-        data.long_event_text_registry.render()?;
-        Ok(())
-    })
-}
-
-fn render_hours(
-    renderer: &sdlext::Renderer,
-    width: i32,
-    data: &RenderData<sdlext::Text, crate::TextTextureRegistry>,
-) -> sdlext::Result<()> {
-    let hours_viewport = sdl::SDL_Rect {
-        x: 10,
-        y: data.event_viewport.y + data.view.calculate_top_panel_height() as i32,
-        w: width,
-        h: data.window_size.y,
-    };
-
-    set_render_viewport_context(renderer, &hours_viewport, || {
-        let arguments = calendar::render::RenderHoursArgs {
-            row_height: data.view.cell_height,
-            offset_x: 0.,
-            offset_y: data.view.grid_rectangle.y - data.view.calculate_top_panel_height(),
-        };
-
-        calendar::render::render_hours(&SdlTextRender, data.week_data.week.hours.iter(), &arguments)
-            .collect::<Result<(), sdlext::TtfError>>()
-            .map_err(sdlext::Error::from)
-    })
-}
-
-fn render_days(
-    renderer: &sdlext::Renderer,
-    horizontal_offset: i32,
-    data: &RenderData<sdlext::Text, crate::TextTextureRegistry>,
-) -> sdlext::Result<()> {
-    let dates_viewport = sdl::SDL_Rect {
-        x: horizontal_offset,
-        y: 0,
-        w: data.window_size.x - horizontal_offset,
-        h: 200,
-    };
-
-    set_render_viewport_context(renderer, &dates_viewport, || {
-        let get_arguments = |offset| calendar::render::Arguments {
-            column_width: data.view.cell_width,
-            column_height: data.view.cell_height,
-            offset_x: 0.,
-            offset_y: 0. + offset,
-        };
-
-        calendar::render::render_weekdays(
-            &SdlTextRender,
-            data.week_data.week.dates.iter(),
-            &get_arguments(10f32),
-        )
-        .collect::<Result<(), sdlext::TtfError>>()
-        .map_err(sdlext::Error::from)?;
-
-        calendar::render::render_weekdays(
-            &SdlTextRender,
-            data.week_data.week.days.iter(),
-            &get_arguments(35f32),
-        )
-        .collect::<Result<(), sdlext::TtfError>>()
-        .map_err(sdlext::Error::from)
+        data.long_event_text_registry.render()
     })
 }
 

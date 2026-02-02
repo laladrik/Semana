@@ -1,16 +1,18 @@
+mod date;
 mod error;
+mod render;
+mod state;
 
 use std::cell::RefCell;
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
-use sdlext::Ptr;
 
+use sdlext::Ptr;
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 
 use crate::error::{Error, FrontendError};
-mod date;
-mod render;
+use state::{App, Frontend};
 
 struct SdlTextCreate<'a> {
     engine: *mut sdl_ttf::TTF_TextEngine,
@@ -26,28 +28,17 @@ impl calendar::TextCreate for SdlTextCreate<'_> {
     }
 }
 
-struct SdlTextRender;
-
-impl calendar::render::TextRender for SdlTextRender {
-    type Text = sdlext::Text;
-
-    type Result = Result<(), sdlext::TtfError>;
-
-    fn text_render(&self, text: &Self::Text, x: f32, y: f32) -> Self::Result {
-        unsafe {
-            if !sdl_ttf::TTF_DrawRendererText(text.ptr(), x, y) {
-                Err(sdlext::TtfError::TextIsNotDrown)
-            } else {
-                Ok(())
-            }
-        }
-    }
-}
-
 /// The registry with the textures of the text objects.
 struct TextTextureRegistry<'a> {
     surfaces: Vec<sdlext::Surface>,
     textures: Vec<sdlext::Texture>,
+    // An element of the vector is the original size of the texture.  It is used to prevent
+    // stretching of a texture when a new size comes through
+    // [`TextTextureCreate::update_positions`].
+    texture_sizes: Vec<sdl::SDL_FPoint>,
+    // An element of the vector is the destination rectangle where a texture of a text object is
+    // rendered.  Which means that if the size of the destination rectangle is smaller than the
+    // size of the respective texture, the texture is cropped.
     text_positions: Vec<sdl::SDL_FRect>,
     renderer: &'a sdlext::Renderer,
 }
@@ -62,62 +53,15 @@ mod config {
     pub const GRID_OFFSET_STEP: f32 = 50.;
 }
 
-impl<'a> TextTextureRegistry<'a> {
-    fn new(renderer: &'a sdlext::Renderer) -> Self {
+impl<'renderer> TextTextureRegistry<'renderer> {
+    fn new(renderer: &'renderer sdlext::Renderer) -> Self {
         Self {
             renderer,
+            texture_sizes: Vec::new(),
             surfaces: Vec::new(),
             textures: Vec::new(),
             text_positions: Vec::new(),
         }
-    }
-
-    fn create(
-        &mut self,
-        text: &std::ffi::CStr,
-        font: &RefCell<Font>,
-        position: sdl::SDL_FRect,
-    ) -> Result<(), sdlext::Error> {
-        unsafe {
-            let wrap_length: i32 = {
-                let p = position.w.floor();
-                assert!(p <= i32::MAX as f32);
-                p as i32
-            };
-
-            let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
-                &mut font.borrow_mut(),
-                text,
-                Color::from_rgb(config::COLOR_EVENT_TITLE).into(),
-                wrap_length,
-            )?;
-
-            let texture: sdlext::Texture =
-                sdlext::create_texture_from_surface(self.renderer, &surf)?;
-
-            let pos = {
-                let (texture_width, texture_height): (f32, f32) = {
-                    let mut width = 0f32;
-                    let mut height = 0f32;
-                    if !sdl::SDL_GetTextureSize(texture.ptr(), &mut width, &mut height) {
-                        panic!("the texture size failed to be obtained");
-                    }
-                    (width, height)
-                };
-
-                sdl::SDL_FRect {
-                    x: position.x,
-                    y: position.y,
-                    w: texture_width.min(position.w as _),
-                    h: texture_height.min(position.h as _),
-                }
-            };
-
-            self.surfaces.push(surf);
-            self.textures.push(texture);
-            self.text_positions.push(pos);
-        }
-        Ok(())
     }
 
     fn render(&self) -> Result<(), sdlext::Error> {
@@ -138,6 +82,7 @@ impl<'a> TextTextureRegistry<'a> {
         self.surfaces.clear();
         self.textures.clear();
         self.text_positions.clear();
+        self.texture_sizes.clear();
     }
 }
 
@@ -167,40 +112,126 @@ impl Fonts {
     }
 }
 
-impl<'a> TextTextureCreate for TextTextureRegistry<'a> {
-    type Error = sdlext::Error;
+impl<'a> state::TextTextureRegistry for TextTextureRegistry<'a> {
+    type Error = FrontendError;
     type Font = RefCell<sdlext::Font>;
 
     fn clear(&mut self) {
         self.clear()
     }
 
+    fn update_positions(&mut self, values: impl Iterator<Item = sdl3_sys::SDL_FRect>) {
+        let clipped_positions =
+            values
+                .zip(self.texture_sizes.iter())
+                .map(|(rect, texture_size)| sdl3_sys::SDL_FRect {
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w.min(texture_size.x),
+                    h: rect.h.min(texture_size.y),
+                });
+
+        let size_before = self.text_positions.len();
+        self.text_positions.clear();
+        self.text_positions.extend(clipped_positions);
+        let size_after = self.text_positions.len();
+        assert_eq!(
+            size_before, size_after,
+            "the update_positions took an iterator which provided unexpected amount of values."
+        );
+    }
+
     fn create(
         &mut self,
-        text: &std::ffi::CStr,
+        text: impl Into<Vec<u8>>,
         font: &Self::Font,
+        color: Color,
         position: sdl3_sys::SDL_FRect,
     ) -> Result<(), Self::Error> {
-        self.create(text, font, position)
+        unsafe {
+            let wrap_length: i32 = {
+                let p = position.w.floor();
+                assert!(p <= i32::MAX as f32);
+                p as i32
+            };
+
+            let cstring =
+                std::ffi::CString::new(text).map_err(FrontendError::CStringIsNotCreated)?;
+            let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
+                &mut font.borrow_mut(),
+                cstring.as_c_str(),
+                color.into(),
+                wrap_length,
+            )
+            .map_err(FrontendError::TextObjectIsNotRegistered)?;
+
+            let texture: sdlext::Texture =
+                sdlext::create_texture_from_surface(self.renderer, &surf)
+                    .map_err(FrontendError::TextObjectIsNotRegistered)?;
+
+            let (texture_width, texture_height): (f32, f32) = {
+                let mut width = 0f32;
+                let mut height = 0f32;
+                if !sdl::SDL_GetTextureSize(texture.ptr(), &mut width, &mut height) {
+                    panic!("the texture size failed to be obtained");
+                }
+                (width, height)
+            };
+
+            let pos = sdl::SDL_FRect {
+                x: position.x,
+                y: position.y,
+                w: texture_width.min(position.w as _),
+                h: texture_height.min(position.h as _),
+            };
+
+            self.surfaces.push(surf);
+            self.textures.push(texture);
+            self.texture_sizes.push(sdl3_sys::SDL_FPoint {
+                x: texture_width,
+                y: texture_height,
+            });
+            self.text_positions.push(pos);
+        }
+        Ok(())
     }
 }
 
-struct DumbFrontend<'a, 'b>(&'b SdlTextCreate<'a>);
-impl<'a, 'b> calendar::TextCreate for DumbFrontend<'a, 'b> {
+struct DumbFrontend<'font, 'a, 'renderer> {
+    text_object_factory: &'a SdlTextCreate<'font>,
+    hour_text_texture_regirsty: TextTextureRegistry<'renderer>,
+    days_text_texture_regirsty: TextTextureRegistry<'renderer>,
+    dates_text_texture_regirsty: TextTextureRegistry<'renderer>,
+}
+
+impl<'font, 'a, 'renderer> calendar::TextCreate for DumbFrontend<'font, 'a, 'renderer> {
     type Result = Result<<Self as Frontend>::TextObject, FrontendError>;
 
     fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result {
-        self.0
+        self.text_object_factory
             .text_create(s)
             .map_err(FrontendError::TextObjectIsNotCreated)
     }
 }
 
-impl<'a, 'b> Frontend for DumbFrontend<'a, 'b> {
+impl<'font, 'a, 'renderer> Frontend for DumbFrontend<'font, 'a, 'renderer> {
     type TextObject = sdlext::Text;
     type Error = FrontendError;
+    type TextTextureRegistry = TextTextureRegistry<'renderer>;
 
-    fn get_current_week_start(&self) -> Result<calendar::date::Date, FrontendError> {
+    fn get_hours_text_registry(&mut self) -> &mut TextTextureRegistry<'renderer> {
+        &mut self.hour_text_texture_regirsty
+    }
+
+    fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry {
+        &mut self.days_text_texture_regirsty
+    }
+
+    fn get_dates_text_registry(&mut self) -> &mut Self::TextTextureRegistry {
+        &mut self.dates_text_texture_regirsty
+    }
+
+    fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error> {
         sdlext::get_current_time()
             .and_then(date::get_week_start)
             .map_err(FrontendError::WeekStartIsNotObtained)
@@ -225,12 +256,6 @@ impl<'a, 'b> Frontend for DumbFrontend<'a, 'b> {
     }
 }
 
-mod state;
-
-use state::App;
-
-use crate::state::{Frontend, TextTextureCreate};
-
 fn unsafe_main() {
     let event_offset = sdl::SDL_FPoint {
         x: 100f32,
@@ -242,6 +267,14 @@ fn unsafe_main() {
             move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
                 let mut short_event_text_registry = TextTextureRegistry::new(renderer);
                 let mut long_event_text_registry = TextTextureRegistry::new(renderer);
+
+                // hours (00:00, 01:00 etc)
+                let hour_text_texture_regirsty = TextTextureRegistry::new(renderer);
+                // days (Monday, Tuesday etc.)
+                let days_text_texture_regirsty = TextTextureRegistry::new(renderer);
+                // dates (2025-12-16, 2025-12-17 etc)
+                let dates_text_texture_regirsty = TextTextureRegistry::new(renderer);
+
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
@@ -256,8 +289,15 @@ fn unsafe_main() {
                             font: &fonts.ui,
                         };
 
-                        let frontend = DumbFrontend(&ui_text_factory);
-                        let mut app = App::new(&frontend, title_font_height, event_offset)?;
+                        let mut frontend = DumbFrontend {
+                            text_object_factory: &ui_text_factory,
+                            hour_text_texture_regirsty,
+                            days_text_texture_regirsty,
+                            dates_text_texture_regirsty,
+                        };
+
+                        let mut app =
+                            App::new(&mut frontend, title_font_height, &fonts.title, event_offset)?;
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
                             // stage: event handle
@@ -304,17 +344,8 @@ fn unsafe_main() {
                                 }
                             }
 
-                            if app.calendar.is_week_switched {
-                                app.calendar.update_week_data(&frontend)?;
-                            }
-
-                            assert!(
-                                app.calendar.long_event_clash_size as usize
-                                    <= app.calendar.week_data.agenda.long.event_ranges.len(),
-                                "the size of long events' clash can't be bigger than the number of the long events",
-                            );
-
                             let data = app.create_render_data(
+                                &mut frontend,
                                 window_size,
                                 &mut long_event_text_registry,
                                 &mut short_event_text_registry,
