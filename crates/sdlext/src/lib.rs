@@ -153,6 +153,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -167,8 +168,23 @@ impl Color {
         b: 0x00,
         a: 0xff,
     };
+
     pub const RED: Self = Self {
         r: 0xff,
+        g: 0x00,
+        b: 0x00,
+        a: 0xff,
+    };
+
+    pub const WHITE: Self = Self {
+        r: 0xff,
+        g: 0xff,
+        b: 0xff,
+        a: 0xff,
+    };
+
+    pub const BLACK: Self = Self {
+        r: 0x00,
         g: 0x00,
         b: 0x00,
         a: 0xff,
