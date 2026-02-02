@@ -17,7 +17,7 @@ struct SdlTextCreate<'a> {
 impl calendar::TextCreate for SdlTextCreate<'_> {
     type Result = Result<sdlext::Text, sdlext::TtfError>;
 
-    fn text_create(&self, s: &str) -> Self::Result {
+    fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result {
         let cstring = std::ffi::CString::new(s).unwrap();
         sdlext::Text::try_new(self.engine, &mut self.font.borrow_mut(), cstring.as_c_str())
     }
@@ -239,7 +239,7 @@ struct DumbFrontend<'a, 'b>(&'b SdlTextCreate<'a>);
 impl<'a, 'b> calendar::TextCreate for DumbFrontend<'a, 'b> {
     type Result = Result<<Self as Frontend>::TextObject, FrontendError>;
 
-    fn text_create(&self, s: &str) -> Self::Result {
+    fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result {
         self.0
             .text_create(s)
             .map_err(FrontendError::TextObjectIsNotCreated)

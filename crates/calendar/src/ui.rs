@@ -100,7 +100,7 @@ pub trait TextObjectFactory {
         dates.map(|date| {
             let date: &super::date::Date = date.borrow();
             let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
-            text_factory.text_create(&text)
+            text_factory.text_create(text.as_str())
         })
     }
 
@@ -124,6 +124,11 @@ where
     type Backend = TF;
 }
 
+pub struct SurfaceAdjustment {
+    pub vertical_scale: f32,
+    pub vertical_offset: f32,
+}
+
 pub struct View {
     /// The rectangle which displays the short events and long events.
     pub event_surface: FRect,
@@ -133,11 +138,6 @@ pub struct View {
     pub cell_width: f32,
     pub cell_height: f32,
     pub top_panel_height: f32,
-}
-
-pub struct SurfaceAdjustment {
-    pub vertical_scale: f32,
-    pub vertical_offset: f32,
 }
 
 impl View {

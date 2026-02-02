@@ -74,7 +74,7 @@ impl nanoserde::DeJson for Color {
 
 pub trait TextCreate {
     type Result;
-    fn text_create(&self, s: &str) -> Self::Result;
+    fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result;
 }
 
 pub struct EventRange {
