@@ -14,22 +14,9 @@ use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 use crate::error::{Error, FrontendError};
 use state::{App, Frontend};
 
-struct SdlTextCreate<'a> {
-    engine: *mut sdl_ttf::TTF_TextEngine,
-    font: &'a RefCell<sdlext::Font>,
-}
-
-impl calendar::TextCreate for SdlTextCreate<'_> {
-    type Result = Result<sdlext::Text, sdlext::TtfError>;
-
-    fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result {
-        let cstring = std::ffi::CString::new(s).unwrap();
-        sdlext::Text::try_new(self.engine, &mut self.font.borrow_mut(), cstring.as_c_str())
-    }
-}
-
 /// The registry with the textures of the text objects.
-struct TextTextureRegistry<'a> {
+struct TextTextureRegistry<'renderer, 'font> {
+    font: &'font RefCell<sdlext::Font>,
     surfaces: Vec<sdlext::Surface>,
     textures: Vec<sdlext::Texture>,
     // An element of the vector is the original size of the texture.  It is used to prevent
@@ -40,7 +27,7 @@ struct TextTextureRegistry<'a> {
     // rendered.  Which means that if the size of the destination rectangle is smaller than the
     // size of the respective texture, the texture is cropped.
     text_positions: Vec<sdl::SDL_FRect>,
-    renderer: &'a sdlext::Renderer,
+    renderer: &'renderer sdlext::Renderer,
 }
 
 mod config {
@@ -53,9 +40,10 @@ mod config {
     pub const GRID_OFFSET_STEP: f32 = 50.;
 }
 
-impl<'renderer> TextTextureRegistry<'renderer> {
-    fn new(renderer: &'renderer sdlext::Renderer) -> Self {
+impl<'renderer, 'font> TextTextureRegistry<'renderer, 'font> {
+    fn new(renderer: &'renderer sdlext::Renderer, font: &'font RefCell<sdlext::Font>) -> Self {
         Self {
+            font,
             renderer,
             texture_sizes: Vec::new(),
             surfaces: Vec::new(),
@@ -86,7 +74,7 @@ impl<'renderer> TextTextureRegistry<'renderer> {
     }
 }
 
-impl<'a> Drop for TextTextureRegistry<'a> {
+impl<'renderer, 'font> Drop for TextTextureRegistry<'renderer, 'font> {
     fn drop(&mut self) {
         self.clear()
     }
@@ -112,9 +100,8 @@ impl Fonts {
     }
 }
 
-impl<'a> state::TextTextureRegistry for TextTextureRegistry<'a> {
+impl<'renderer, 'font> state::TextTextureRegistry for TextTextureRegistry<'renderer, 'font> {
     type Error = FrontendError;
-    type Font = RefCell<sdlext::Font>;
 
     fn clear(&mut self) {
         self.clear()
@@ -144,7 +131,6 @@ impl<'a> state::TextTextureRegistry for TextTextureRegistry<'a> {
     fn create(
         &mut self,
         text: impl Into<Vec<u8>>,
-        font: &Self::Font,
         color: Color,
         position: sdl3_sys::SDL_FRect,
     ) -> Result<(), Self::Error> {
@@ -158,7 +144,7 @@ impl<'a> state::TextTextureRegistry for TextTextureRegistry<'a> {
             let cstring =
                 std::ffi::CString::new(text).map_err(FrontendError::CStringIsNotCreated)?;
             let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
-                &mut font.borrow_mut(),
+                &mut self.font.borrow_mut(),
                 cstring.as_c_str(),
                 color.into(),
                 wrap_length,
@@ -197,29 +183,18 @@ impl<'a> state::TextTextureRegistry for TextTextureRegistry<'a> {
     }
 }
 
-struct DumbFrontend<'font, 'a, 'renderer> {
-    text_object_factory: &'a SdlTextCreate<'font>,
-    hour_text_texture_regirsty: TextTextureRegistry<'renderer>,
-    days_text_texture_regirsty: TextTextureRegistry<'renderer>,
-    dates_text_texture_regirsty: TextTextureRegistry<'renderer>,
+struct DumbFrontend<'renderer, 'font> {
+    hour_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
+    days_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
+    dates_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
 }
 
-impl<'font, 'a, 'renderer> calendar::TextCreate for DumbFrontend<'font, 'a, 'renderer> {
-    type Result = Result<<Self as Frontend>::TextObject, FrontendError>;
-
-    fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result {
-        self.text_object_factory
-            .text_create(s)
-            .map_err(FrontendError::TextObjectIsNotCreated)
-    }
-}
-
-impl<'font, 'a, 'renderer> Frontend for DumbFrontend<'font, 'a, 'renderer> {
+impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
     type TextObject = sdlext::Text;
     type Error = FrontendError;
-    type TextTextureRegistry = TextTextureRegistry<'renderer>;
+    type TextTextureRegistry = TextTextureRegistry<'renderer, 'font>;
 
-    fn get_hours_text_registry(&mut self) -> &mut TextTextureRegistry<'renderer> {
+    fn get_hours_text_registry(&mut self) -> &mut TextTextureRegistry<'renderer, 'font> {
         &mut self.hour_text_texture_regirsty
     }
 
@@ -265,39 +240,38 @@ fn unsafe_main() {
     unsafe {
         let ret: Result<(), Error> = sdl_init(
             move |root_window: *mut sdl::SDL_Window, renderer: &sdlext::Renderer| {
-                let mut short_event_text_registry = TextTextureRegistry::new(renderer);
-                let mut long_event_text_registry = TextTextureRegistry::new(renderer);
-
-                // hours (00:00, 01:00 etc)
-                let hour_text_texture_regirsty = TextTextureRegistry::new(renderer);
-                // days (Monday, Tuesday etc.)
-                let days_text_texture_regirsty = TextTextureRegistry::new(renderer);
-                // dates (2025-12-16, 2025-12-17 etc)
-                let dates_text_texture_regirsty = TextTextureRegistry::new(renderer);
-
                 let mut window_size = sdl::SDL_Point { x: 800, y: 600 };
                 _ = sdl::SDL_GetWindowSize(root_window, &mut window_size.x, &mut window_size.y);
 
                 sdl_ttf_init(
                     renderer,
-                    move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
+                    move |_engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
                         let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
                         let title_font_height: std::ffi::c_int =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
-                        let ui_text_factory = SdlTextCreate {
-                            engine,
-                            font: &fonts.ui,
-                        };
+
+                        let mut short_event_text_registry =
+                            TextTextureRegistry::new(renderer, &fonts.title);
+                        let mut long_event_text_registry =
+                            TextTextureRegistry::new(renderer, &fonts.title);
+
+                        // hours (00:00, 01:00 etc)
+                        let hour_text_texture_regirsty =
+                            TextTextureRegistry::new(renderer, &fonts.ui);
+                        // days (Monday, Tuesday etc.)
+                        let days_text_texture_regirsty =
+                            TextTextureRegistry::new(renderer, &fonts.ui);
+                        // dates (2025-12-16, 2025-12-17 etc)
+                        let dates_text_texture_regirsty =
+                            TextTextureRegistry::new(renderer, &fonts.ui);
 
                         let mut frontend = DumbFrontend {
-                            text_object_factory: &ui_text_factory,
                             hour_text_texture_regirsty,
                             days_text_texture_regirsty,
                             dates_text_texture_regirsty,
                         };
 
-                        let mut app =
-                            App::new(&mut frontend, title_font_height, &fonts.title, event_offset)?;
+                        let mut app = App::new(&mut frontend, title_font_height, event_offset)?;
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
                             // stage: event handle
@@ -349,7 +323,6 @@ fn unsafe_main() {
                                 window_size,
                                 &mut long_event_text_registry,
                                 &mut short_event_text_registry,
-                                &fonts.title,
                             )?;
 
                             /* stage: render */

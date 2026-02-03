@@ -19,8 +19,12 @@ pub struct RenderData<'rect, 'ttc, TTC, F> {
     pub dates_viewport: sdl::SDL_Rect,
 }
 
-type RD<'a, 'b, 'c, 'd, 'rect, 'ttc> =
-    RenderData<'rect, 'ttc, crate::TextTextureRegistry<'d>, DumbFrontend<'a, 'b, 'c>>;
+type RD<'renderer, 'rect, 'ttc, 'font> = RenderData<
+    'rect,
+    'ttc,
+    crate::TextTextureRegistry<'renderer, 'font>,
+    DumbFrontend<'renderer, 'font>,
+>;
 
 pub fn render(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;

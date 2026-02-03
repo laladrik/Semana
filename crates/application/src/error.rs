@@ -14,13 +14,10 @@ pub enum Error {
 impl From<FrontendError> for Error {
     fn from(value: FrontendError) -> Self {
         match value {
-            FrontendError::TextObjectIsNotCreated(e) => Error::from(sdlext::Error::from(e)),
             FrontendError::AgendaIsNotObtained(e) => Error::from(e),
             FrontendError::WeekStartIsNotObtained(e) => Error::from(sdlext::Error::from(e)),
             FrontendError::CStringIsNotCreated(_nul_error) => todo!("handle zeroes in UTF-8"),
-            FrontendError::TextObjectIsNotRegistered(e) | FrontendError::ColorIsNotSet(e) => {
-                Error::from(e)
-            }
+            FrontendError::TextObjectIsNotRegistered(e) => Error::from(e),
         }
     }
 }
@@ -44,12 +41,10 @@ impl From<AgendaObtainError> for Error {
 }
 
 pub enum FrontendError {
-    TextObjectIsNotCreated(sdlext::TtfError),
     AgendaIsNotObtained(AgendaObtainError),
     WeekStartIsNotObtained(TimeError),
     CStringIsNotCreated(std::ffi::NulError),
     TextObjectIsNotRegistered(sdlext::Error),
-    ColorIsNotSet(sdlext::Error),
 }
 
 #[derive(Debug)]

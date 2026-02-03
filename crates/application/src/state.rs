@@ -111,21 +111,22 @@ pub struct App<F: Frontend> {
     pub ui: UserInterface,
 }
 
+const DUMB_CELL_WIDTH: f32 = 130f32;
+
 impl<F: Frontend> App<F> {
     pub fn new(
         frontend: &mut F,
         title_font_height: std::ffi::c_int,
-        title_font: &<F::TextTextureRegistry as TextTextureRegistry>::Font,
         event_offset: FPoint,
     ) -> Result<Self, F::Error> {
         let ui = UserInterface::new(title_font_height, event_offset);
         let calendar = Calendar::new(frontend)?;
-        App::create_hours_text_objects(frontend, ui.event_offset.x, title_font)?;
+        App::create_hours_text_objects(frontend, ui.event_offset.x)?;
 
-        let cell_width = 100f32; // FIXME: the value must be calculated
-        App::create_days_text_objects(frontend, cell_width, title_font)?;
+        let cell_width = DUMB_CELL_WIDTH; // FIXME: the value must be calculated
+        App::create_days_text_objects(frontend, cell_width)?;
 
-        App::create_dates_text_objects(frontend, cell_width, title_font, &calendar.week_start)?;
+        App::create_dates_text_objects(frontend, cell_width, &calendar.week_start)?;
         Ok(Self { calendar, ui })
     }
 
@@ -161,7 +162,6 @@ impl<F: Frontend> App<F> {
     fn create_hours_text_objects(
         frontend: &mut F,
         panel_width: f32,
-        title_font: &<F::TextTextureRegistry as TextTextureRegistry>::Font,
     ) -> Result<(), F::Error> {
         let hours_registry: &mut _ = frontend.get_hours_text_registry();
         hours_registry.clear();
@@ -176,7 +176,7 @@ impl<F: Frontend> App<F> {
                 h: 0f32,
             };
 
-            hours_registry.create(s.as_str(), title_font, Color::WHITE, position)?;
+            hours_registry.create(s.as_str(), Color::WHITE, position)?;
         }
         Ok(())
     }
@@ -214,7 +214,6 @@ impl<F: Frontend> App<F> {
     fn create_days_text_objects(
         frontend: &mut F,
         cell_width: f32,
-        title_font: &<<F as Frontend>::TextTextureRegistry as TextTextureRegistry>::Font,
     ) -> Result<(), F::Error> {
         let days_registry = frontend.get_days_text_registry();
         let weekdays = [
@@ -236,7 +235,7 @@ impl<F: Frontend> App<F> {
                 w: cell_width,
                 h: 0f32,
             };
-            days_registry.create(day, title_font, Color::WHITE, position)?;
+            days_registry.create(day, Color::WHITE, position)?;
         }
         Ok(())
     }
@@ -244,7 +243,6 @@ impl<F: Frontend> App<F> {
     fn create_dates_text_objects(
         frontend: &mut F,
         cell_width: f32,
-        title_font: &<<F as Frontend>::TextTextureRegistry as TextTextureRegistry>::Font,
         week_start: &calendar::date::Date,
     ) -> Result<(), F::Error> {
         let dates_registry = frontend.get_dates_text_registry();
@@ -263,7 +261,7 @@ impl<F: Frontend> App<F> {
                 w: cell_width,
                 h: 0f32,
             };
-            dates_registry.create(text, title_font, Color::WHITE, position)?;
+            dates_registry.create(text, Color::WHITE, position)?;
         }
 
         Ok(())
@@ -275,17 +273,15 @@ impl<F: Frontend> App<F> {
         window_size: Point,
         long_event_text_registry: &'ttc mut F::TextTextureRegistry,
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
-        title_font: &<F::TextTextureRegistry as TextTextureRegistry>::Font,
     ) -> Result<RenderData<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
         if self.calendar.is_week_switched {
             self.calendar.update_week_data(frontend)?;
             // FIXME the cell width should not affect
-            let cell_width = 100f32;
+            let cell_width = DUMB_CELL_WIDTH;
             frontend.get_dates_text_registry().clear();
             App::create_dates_text_objects(
                 frontend,
                 cell_width,
-                title_font,
                 &self.calendar.week_start,
             )?;
         }
@@ -326,7 +322,6 @@ impl<F: Frontend> App<F> {
                 &mut self.calendar,
                 long_event_text_registry,
                 &view,
-                title_font,
             )?;
         };
 
@@ -335,7 +330,6 @@ impl<F: Frontend> App<F> {
                 &mut self.calendar,
                 short_event_text_registry,
                 &view,
-                title_font,
             )?;
         }
 
@@ -360,7 +354,6 @@ pub fn create_long_events<F: Frontend, TTC: TextTextureRegistry>(
     calendar: &mut Calendar<F>,
     text_registry: &mut TTC,
     view: &View,
-    title_font: &TTC::Font,
 ) -> Result<(), TTC::Error> {
     let replacement = calendar::ui::create_long_event_rectangles(
         &view.event_surface,
@@ -373,7 +366,6 @@ pub fn create_long_events<F: Frontend, TTC: TextTextureRegistry>(
     text_registry.clear();
     register_event_titles(
         text_registry,
-        title_font,
         &calendar.week_data.agenda.long.titles,
         &replacement,
     )?;
@@ -385,7 +377,6 @@ fn create_short_events<F: Frontend, TTC: TextTextureRegistry>(
     calendar: &mut Calendar<F>,
     text_registry: &mut TTC,
     view: &View,
-    title_font: &TTC::Font,
 ) -> Result<(), TTC::Error> {
     let new_rectangles = calendar::ui::create_short_event_rectangles(
         &view.grid_rectangle,
@@ -396,7 +387,6 @@ fn create_short_events<F: Frontend, TTC: TextTextureRegistry>(
     text_registry.clear();
     register_event_titles(
         text_registry,
-        title_font,
         &calendar.week_data.agenda.short.titles,
         &new_rectangles,
     )?;
@@ -406,7 +396,7 @@ fn create_short_events<F: Frontend, TTC: TextTextureRegistry>(
 
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction
 /// is provide the way to test the core.
-pub trait Frontend: calendar::TextCreate<Result = Result<Self::TextObject, Self::Error>> {
+pub trait Frontend {
     type TextObject;
     type Error;
     type TextTextureRegistry: TextTextureRegistry<Error = Self::Error>;
@@ -442,7 +432,6 @@ impl WeekData {
 /// Stores textures of the text objects.
 pub trait TextTextureRegistry {
     type Error;
-    type Font;
 
     /// The method updates the destination rectangles of the textures of the text objects which
     /// were created by [`Self::create`].  The iterator returns as much items as the number of the
@@ -455,7 +444,6 @@ pub trait TextTextureRegistry {
     fn create(
         &mut self,
         text: impl Into<Vec<u8>>,
-        font: &Self::Font,
         color: Color,
         position: FRect,
     ) -> Result<(), Self::Error>;
@@ -463,7 +451,6 @@ pub trait TextTextureRegistry {
 
 fn register_event_titles<Str, TTC: TextTextureRegistry>(
     text_registry: &mut TTC,
-    font: &TTC::Font,
     titles: &[Str],
     rectangles: &[calendar::render::Rectangle],
 ) -> Result<(), TTC::Error>
@@ -482,7 +469,7 @@ where
             h: rectangle.size.y - offset_y * 2f32,
         };
 
-        text_registry.create(title.as_ref(), font, Color::BLACK, dstrect)?;
+        text_registry.create(title.as_ref(), Color::BLACK, dstrect)?;
     }
     Ok(())
 }
