@@ -145,14 +145,14 @@ where
     obtain(agenda_source, json_parser, arguments).map(|events| get_lanes(events, arguments.from))
 }
 
-fn obtain<AS, JP, O>(
-    agenda_source: &AS,
-    json_parser: &JP,
+fn obtain<AgendaSource, OutputParser, O>(
+    agenda_source: &AgendaSource,
+    json_parser: &OutputParser,
     arguments: &ObtainArguments,
-) -> Result<Events, Error<JP::Error>>
+) -> Result<Events, Error<OutputParser::Error>>
 where
-    AS: EventSource<Data = O, Error = std::io::Error>,
-    JP: JsonParser,
+    AgendaSource: EventSource<Data = O, Error = std::io::Error>,
+    OutputParser: JsonParser,
     O: AsRef<[u8]>,
 {
     if arguments.duration_days > MAX_DURATION_DAYS {
@@ -181,14 +181,24 @@ where
         &format!("{}d", arguments.duration_days),
     ];
 
-    let data: AS::Data = agenda_source.obtain(&args).map_err(Error::Io)?;
+    let data: AgendaSource::Data = agenda_source.obtain(&args).map_err(Error::Io)?;
     let bytes: &str = std::str::from_utf8(data.as_ref()).map_err(Error::InvalidUnicode)?;
+    parse_events(json_parser, bytes, arguments.from)
+}
+
+pub fn parse_events<OutputParser>(
+    json_parser: &OutputParser,
+    bytes: &str,
+    date: &Date,
+) -> Result<Events, Error<OutputParser::Error>>
+where
+    OutputParser: JsonParser,
+{
     let mut week_schedule = Events {
         short: Vec::new(),
         long: Vec::new(),
     };
 
-    let date = arguments.from;
     let date_stream = DateStream::new(date.clone()).take(7);
 
     let agendas = bytes
@@ -197,7 +207,7 @@ where
         .take_while(|p| !p.is_empty())
         .zip(date_stream);
 
-    let last_day_in_the_range: Date = arguments.from.add_days(6);
+    let last_day_in_the_range: Date = date.add_days(6);
     for item in agendas {
         let (agenda_json, date): (&str, Date) = item;
         let agenda: EventVec = json_parser.parse(agenda_json).map_err(Error::Parse)?;
