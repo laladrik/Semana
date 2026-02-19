@@ -12,6 +12,7 @@ use sdlext::Ptr;
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 
 use crate::error::{Error, FrontendError};
+use crate::state::AgendaSource;
 use state::{App, Frontend};
 
 /// The registry with the textures of the text objects.
@@ -35,7 +36,6 @@ mod config {
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
     pub const COLOR_BACKGROUND: u32 = 0x0C0D0C;
-    pub const COLOR_EVENT_TITLE: u32 = 0x000000;
     pub const GRID_SCALE_STEP: f32 = 50.;
     pub const GRID_OFFSET_STEP: f32 = 50.;
 }
@@ -193,6 +193,7 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
     type TextObject = sdlext::Text;
     type Error = FrontendError;
     type TextTextureRegistry = TextTextureRegistry<'renderer, 'font>;
+    type AgendaSource = KhalAgendaSource;
 
     fn get_hours_text_registry(&mut self) -> &mut TextTextureRegistry<'renderer, 'font> {
         &mut self.hour_text_texture_regirsty
@@ -212,22 +213,108 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
             .map_err(FrontendError::WeekStartIsNotObtained)
     }
 
-    fn obtain_agenda(
+    fn agenda_source(&self) -> &Self::AgendaSource {
+        &KhalAgendaSource
+    }
+}
+
+/// It provides the data from the program Khal.  It provides the data according the trait
+/// AgendaSource.
+struct KhalAgendaSource;
+
+impl AgendaSource for KhalAgendaSource {
+    type RequestHandle = *mut sdl::SDL_Process;
+
+    type Error = FrontendError;
+
+    fn request(
         &self,
         week_start: &calendar::date::Date,
-    ) -> Result<calendar::obtain::WeekScheduleWithLanes, Self::Error> {
+    ) -> Result<Self::RequestHandle, Self::Error> {
         let mut arguments = calendar::obtain::khal::week_arguments(week_start);
         let bin: Result<String, _> = std::env::var("SEMANA_BACKEND_BIN");
         if let Ok(ref v) = bin {
             arguments.backend_bin_path = v.as_ref();
         }
 
-        calendar::obtain::events_with_lanes(
-            &calendar::obtain::EventSourceStd,
-            &calendar::obtain::NanoSerde,
-            &arguments,
-        )
-        .map_err(FrontendError::AgendaIsNotObtained)
+        let from = arguments.from.iso_8601();
+        unsafe {
+            let args: [&str; 18] = [
+                arguments.backend_bin_path,
+                "list",
+                "--json",
+                "title",
+                "--json",
+                "start-date",
+                "--json",
+                "start-time",
+                "--json",
+                "end-date",
+                "--json",
+                "end-time",
+                "--json",
+                "all-day",
+                "--json",
+                "calendar-color",
+                from.as_str(),
+                &format!("{}d", arguments.duration_days),
+            ];
+            use std::ffi::CString;
+            let args_cstrings: Vec<CString> =
+                args.iter().map(|s| CString::new(*s).unwrap()).collect();
+            let mut args_ptrs: Vec<*const std::ffi::c_char> =
+                args_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+            args_ptrs.push(std::ptr::null());
+
+            let vec_ptr: *const *const std::ffi::c_char = args_ptrs.as_ptr();
+            let args_ptr: *const *const i8 = vec_ptr.cast();
+            let ret: *mut sdl::SDL_Process = sdl::SDL_CreateProcess(args_ptr.cast(), true);
+            if ret.is_null() {
+                Err(FrontendError::AgendaSourceFailed(
+                    sdlext::Error::ProcessIsNotCreated,
+                ))
+            } else {
+                Ok(ret)
+            }
+        }
+    }
+
+    fn cancel(&self, handle: &Self::RequestHandle) {
+        unsafe {
+            let force: bool = true;
+            sdl::SDL_KillProcess(*handle, force);
+        }
+    }
+
+    fn free(&self, handle: Self::RequestHandle) {
+        unsafe {
+            sdl::SDL_DestroyProcess(handle);
+        }
+    }
+
+    fn is_ready(&self, handle: &Self::RequestHandle) -> bool {
+        let block = false;
+        let mut exit_code = 0;
+        unsafe { sdl::SDL_WaitProcess(*handle, block, &mut exit_code) }
+    }
+
+    fn fetch(
+        &self,
+        handle: &Self::RequestHandle,
+        week_start: &calendar::date::Date,
+    ) -> calendar::obtain::WeekScheduleWithLanes {
+        let mut exit_code = 0;
+        let mut size = 0;
+        unsafe {
+            let ret: *const std::ffi::c_void =
+                sdl::SDL_ReadProcess(*handle, &mut size, &mut exit_code);
+            let byte_ptr: *const i8 = ret.cast();
+            let output_cstr = std::ffi::CStr::from_ptr(byte_ptr);
+            let output_str: &str = output_cstr.to_str().expect("can't convert to utf-8");
+            calendar::obtain::parse_events(&calendar::obtain::NanoSerde, output_str, week_start)
+                .map(|events| calendar::obtain::get_lanes(events, week_start))
+                .expect("fail to parse events")
+        }
     }
 }
 
@@ -279,7 +366,7 @@ fn unsafe_main() {
                                 match event.type_ {
                                     sdl::SDL_EVENT_QUIT => break 'outer_loop,
                                     sdl::SDL_EVENT_WINDOW_RESIZED => {
-                                        app.calendar.drop_events();
+                                        app.calendar.request_render();
                                         _ = sdl::SDL_GetWindowSize(
                                             root_window,
                                             &mut window_size.x,
@@ -289,23 +376,23 @@ fn unsafe_main() {
                                     sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
                                         sdl::SDLK_UP => {
                                             app.ui.add_adjustment(-config::GRID_OFFSET_STEP);
-                                            app.calendar.drop_events();
+                                            app.calendar.request_render();
                                         }
                                         sdl::SDLK_DOWN => {
                                             app.ui.add_adjustment(config::GRID_OFFSET_STEP);
-                                            app.calendar.drop_events();
+                                            app.calendar.request_render();
                                         }
                                         sdl::SDLK_MINUS => {
                                             app.ui.adjustment.vertical_scale = 0f32.max(
                                                 app.ui.adjustment.vertical_scale
                                                     - config::GRID_SCALE_STEP,
                                             );
-                                            app.calendar.drop_events();
+                                            app.calendar.request_render();
                                         }
                                         sdl::SDLK_EQUALS => {
                                             app.ui.adjustment.vertical_scale +=
                                                 config::GRID_SCALE_STEP;
-                                            app.calendar.drop_events();
+                                            app.calendar.request_render();
                                         }
                                         _ => (),
                                     },

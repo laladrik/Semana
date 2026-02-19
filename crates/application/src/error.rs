@@ -14,10 +14,10 @@ pub enum Error {
 impl From<FrontendError> for Error {
     fn from(value: FrontendError) -> Self {
         match value {
-            FrontendError::AgendaIsNotObtained(e) => Error::from(e),
             FrontendError::WeekStartIsNotObtained(e) => Error::from(sdlext::Error::from(e)),
             FrontendError::CStringIsNotCreated(_nul_error) => todo!("handle zeroes in UTF-8"),
             FrontendError::TextObjectIsNotRegistered(e) => Error::from(e),
+            FrontendError::AgendaSourceFailed(e) => Error::from(e),
         }
     }
 }
@@ -41,7 +41,8 @@ impl From<AgendaObtainError> for Error {
 }
 
 pub enum FrontendError {
-    AgendaIsNotObtained(AgendaObtainError),
+    // FIXME(alex): figure out how to store the text of the SDL errors.
+    AgendaSourceFailed(sdlext::Error),
     WeekStartIsNotObtained(TimeError),
     CStringIsNotCreated(std::ffi::NulError),
     TextObjectIsNotRegistered(sdlext::Error),

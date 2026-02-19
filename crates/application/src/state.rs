@@ -13,31 +13,94 @@ use sdlext::Color;
 pub struct Calendar<F: Frontend> {
     _frontend: std::marker::PhantomData<F>,
     pub week_start: calendar::date::Date,
-    pub week_data: WeekData,
-    pub short_event_rectangles_opt: Option<calendar::render::Rectangles>,
-    pub long_event_rectangles_opt: Option<calendar::render::Rectangles>,
-    pub long_event_clash_size: calendar::Lane,
     pub is_week_switched: bool,
+    state: CalendarState<<F::AgendaSource as AgendaSource>::RequestHandle>,
+}
+
+enum CalendarState<Handle> {
+    Loading {
+        agenda_source_handle: Handle,
+    },
+    Ready {
+        week_data: WeekData,
+        long_event_clash_size: calendar::Lane,
+        short_event_rectangles_opt: calendar::render::Rectangles,
+        long_event_rectangles_opt: calendar::render::Rectangles,
+    },
+    Rendering {
+        week_data: WeekData,
+        long_event_clash_size: calendar::Lane,
+    },
+}
+
+impl<H> CalendarState<H> {
+    fn obtain_events<'a>(&'a self) -> EventRectangles<'a> {
+        match self {
+            Self::Loading { .. } => EventRectangles {
+                long: &NO_RECT,
+                short: &NO_RECT,
+            },
+            Self::Ready {
+                short_event_rectangles_opt,
+                long_event_rectangles_opt,
+                ..
+            } => EventRectangles {
+                long: long_event_rectangles_opt,
+                short: short_event_rectangles_opt,
+            },
+            Self::Rendering { .. } => {
+                unreachable!("unexpected state of the calendar")
+            }
+        }
+    }
+
+    /// It provides a memory-safe way to switch the state.  The function creates an uninitialized
+    /// state to replace the current one.  Then it tries to switch to the next state provided by
+    /// the function `update`.  The function must return any valid state and an error if any has
+    /// occurred.
+    fn switch<E>(&mut self, mut update: impl FnMut(Self) -> (Self, Option<E>)) -> Result<(), E> {
+        // SAFETY: the bald_state is never read until the function finishes.
+        let bald_state: CalendarState<_> = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        let current_state = std::mem::replace(self, bald_state);
+        let (new_state, error) = update(current_state);
+        *self = new_state;
+        match error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    fn switch_infallible(&mut self, update: impl Fn(Self) -> Self) {
+        // SAFETY: the bald_state is never read until the function finishes.
+        // FIXME(alex): the state is 200 bytes long.
+        let bald_state: CalendarState<_> = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        let current_state = std::mem::replace(self, bald_state);
+        let new_state = update(current_state);
+        *self = new_state;
+    }
+
+    /// a shortcut to switch to the [`CalendarState<H>::Loading`]
+    fn loading<E>(agenda_source_handle: H, e: Option<E>) -> (Self, Option<E>) {
+        (
+            Self::Loading {
+                agenda_source_handle,
+            },
+            e,
+        )
+    }
 }
 
 impl<F: Frontend> Calendar<F> {
     fn new(frontend: &F) -> Result<Self, F::Error> {
         let week_start: calendar::date::Date = frontend.get_current_week_start()?;
-        let week_data = WeekData::try_new(&week_start, frontend)?;
-
-        let short_event_rectangles_opt: Option<calendar::render::Rectangles> = None;
-        let pinned_rectangles_opt: Option<calendar::render::Rectangles> = None;
-
-        // The number of long events making the biggest clash.
-        let long_event_clash_size: calendar::Lane = week_data.agenda.long.calculate_biggest_clash();
         let is_week_switched = false;
+        let agenda_source_handle = frontend.agenda_source().request(&week_start)?;
         Ok(Self {
             _frontend: std::marker::PhantomData,
             week_start,
-            week_data,
-            short_event_rectangles_opt,
-            long_event_rectangles_opt: pinned_rectangles_opt,
-            long_event_clash_size,
+            state: CalendarState::Loading {
+                agenda_source_handle,
+            },
             is_week_switched,
         })
     }
@@ -53,17 +116,121 @@ impl<F: Frontend> Calendar<F> {
     }
 
     fn update_week_data(&mut self, frontend: &F) -> Result<(), F::Error> {
-        self.week_data = WeekData::try_new(&self.week_start, frontend)?;
-        self.long_event_clash_size = self.week_data.agenda.long.calculate_biggest_clash();
+        self.state.switch(|current_state| match current_state {
+            CalendarState::Loading {
+                agenda_source_handle,
+            } => {
+                let src = frontend.agenda_source();
+                src.cancel(&agenda_source_handle);
+                let ret = frontend.agenda_source().request(&self.week_start);
+                match ret {
+                    Ok(x) => {
+                        src.free(agenda_source_handle);
+                        CalendarState::loading(x, None)
+                    }
+                    Err(e) => CalendarState::loading(agenda_source_handle, e.into()),
+                }
+            }
+            CalendarState::Ready { .. } | CalendarState::Rendering { .. } => {
+                let ret = frontend.agenda_source().request(&self.week_start);
+                match ret {
+                    Ok(x) => CalendarState::loading(x, None),
+                    Err(e) => (current_state, Some(e)),
+                }
+            }
+        })?;
+
         self.is_week_switched = false;
-        self.drop_events();
         Ok(())
     }
 
-    pub fn drop_events(&mut self) {
-        self.long_event_rectangles_opt = None;
-        self.short_event_rectangles_opt = None;
+    pub fn request_render(&mut self) {
+        use CalendarState::*;
+        self.state.switch_infallible(|state| match state {
+            x @ (Loading { .. } | Rendering { .. }) => x,
+            Ready {
+                week_data,
+                long_event_clash_size,
+                ..
+            } => Rendering {
+                week_data,
+                long_event_clash_size,
+            },
+        });
     }
+
+    // transition from rendering to ready
+    fn get_ready<'ttc>(
+        &mut self,
+        view: &View,
+        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
+    ) -> Result<(), F::Error> {
+        use CalendarState::*;
+        self.state.switch(|current_state| match current_state {
+            Loading { .. } | Ready { .. } => (current_state, None),
+            Rendering {
+                week_data,
+                long_event_clash_size,
+            } => {
+                let short_event_rectangles_opt = create_short_events(
+                    &week_data.agenda.short,
+                    &self.week_start,
+                    short_event_text_registry,
+                    view,
+                );
+
+                let short_event_rectangles_opt = match short_event_rectangles_opt {
+                    Ok(x) => x,
+                    Err(e) => {
+                        return (
+                            Rendering {
+                                week_data,
+                                long_event_clash_size,
+                            },
+                            Some(e),
+                        );
+                    }
+                };
+
+                let long_event_rectangles_opt = create_long_events(
+                    &week_data.agenda.long,
+                    &self.week_start,
+                    long_event_text_registry,
+                    view,
+                );
+
+                let long_event_rectangles_opt = match long_event_rectangles_opt {
+                    Ok(x) => x,
+                    Err(e) => {
+                        return (
+                            Rendering {
+                                week_data,
+                                long_event_clash_size,
+                            },
+                            Some(e),
+                        );
+                    }
+                };
+
+                (
+                    CalendarState::Ready {
+                        week_data,
+                        long_event_clash_size,
+                        short_event_rectangles_opt,
+                        long_event_rectangles_opt,
+                    },
+                    None,
+                )
+            }
+        })
+    }
+}
+
+static NO_RECT: calendar::render::Rectangles = Vec::new();
+struct EventRectangles<'rect> {
+    long: &'rect calendar::render::Rectangles,
+    short: &'rect calendar::render::Rectangles,
 }
 
 pub struct UserInterface {
@@ -131,6 +298,18 @@ impl<F: Frontend> App<F> {
     }
 
     fn create_view(&mut self, window_size: &Point) -> View {
+        let clash_size: u8 = match self.calendar.state {
+            CalendarState::Loading { .. } => 0,
+            CalendarState::Ready {
+                long_event_clash_size,
+                ..
+            }
+            | CalendarState::Rendering {
+                long_event_clash_size,
+                ..
+            } => long_event_clash_size,
+        };
+
         View::new(
             FPoint {
                 x: window_size.x as f32 - self.ui.event_offset.x,
@@ -138,7 +317,7 @@ impl<F: Frontend> App<F> {
             },
             &mut self.ui.adjustment,
             self.ui.title_font_height,
-            self.calendar.long_event_clash_size,
+            clash_size,
         )
     }
 
@@ -159,10 +338,7 @@ impl<F: Frontend> App<F> {
         hours_registry.update_positions(values);
     }
 
-    fn create_hours_text_objects(
-        frontend: &mut F,
-        panel_width: f32,
-    ) -> Result<(), F::Error> {
+    fn create_hours_text_objects(frontend: &mut F, panel_width: f32) -> Result<(), F::Error> {
         let hours_registry: &mut _ = frontend.get_hours_text_registry();
         hours_registry.clear();
         for i in 0..24 {
@@ -211,10 +387,7 @@ impl<F: Frontend> App<F> {
             .update_positions(positions);
     }
 
-    fn create_days_text_objects(
-        frontend: &mut F,
-        cell_width: f32,
-    ) -> Result<(), F::Error> {
+    fn create_days_text_objects(frontend: &mut F, cell_width: f32) -> Result<(), F::Error> {
         let days_registry = frontend.get_days_text_registry();
         let weekdays = [
             "Monday",
@@ -276,15 +449,37 @@ impl<F: Frontend> App<F> {
     ) -> Result<RenderData<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
         if self.calendar.is_week_switched {
             self.calendar.update_week_data(frontend)?;
-            // FIXME the cell width should not affect
             let cell_width = DUMB_CELL_WIDTH;
             frontend.get_dates_text_registry().clear();
-            App::create_dates_text_objects(
-                frontend,
-                cell_width,
-                &self.calendar.week_start,
-            )?;
+            App::create_dates_text_objects(frontend, cell_width, &self.calendar.week_start)?;
         }
+
+        let bald_state: CalendarState<_> = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        let state = std::mem::replace(&mut self.calendar.state, bald_state);
+        let new_state: &mut _ = &mut self.calendar.state;
+        *new_state = match state {
+            CalendarState::Loading {
+                agenda_source_handle,
+            } => {
+                let src = frontend.agenda_source();
+                if src.is_ready(&agenda_source_handle) {
+                    let agenda: calendar::obtain::WeekScheduleWithLanes =
+                        src.fetch(&agenda_source_handle, &self.calendar.week_start);
+                    let week_data = WeekData { agenda };
+                    let long_event_clash_size = week_data.agenda.long.calculate_biggest_clash();
+                    src.free(agenda_source_handle);
+                    CalendarState::Rendering {
+                        week_data,
+                        long_event_clash_size,
+                    }
+                } else {
+                    CalendarState::Loading {
+                        agenda_source_handle,
+                    }
+                }
+            }
+            x => x,
+        };
 
         let event_viewport: Rect = self.ui.calculate_viewport(&window_size);
         let view = self.create_view(&window_size);
@@ -299,7 +494,6 @@ impl<F: Frontend> App<F> {
         };
 
         self.reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
-
         let horizontal_offset = self.ui.event_offset.x as i32;
         let dates_viewport = Rect {
             x: horizontal_offset,
@@ -309,39 +503,16 @@ impl<F: Frontend> App<F> {
         };
 
         self.reposition_days_text_objects(frontend, 35f32, &view);
-
         self.reposition_dates_text_objects(frontend, 10f32, &view);
-        assert!(
-            self.calendar.long_event_clash_size as usize
-                <= self.calendar.week_data.agenda.long.event_ranges.len(),
-            "the size of long events' clash can't be bigger than the number of the long events",
-        );
-
-        if self.calendar.long_event_rectangles_opt.is_none() {
-            create_long_events(
-                &mut self.calendar,
-                long_event_text_registry,
-                &view,
-            )?;
-        };
-
-        if self.calendar.short_event_rectangles_opt.is_none() {
-            create_short_events(
-                &mut self.calendar,
-                short_event_text_registry,
-                &view,
-            )?;
-        }
-
-        let short_event_rectangles = self.calendar.short_event_rectangles_opt.as_ref().unwrap();
-        let long_event_rectangles = self.calendar.long_event_rectangles_opt.as_ref().unwrap();
-
+        self.calendar
+            .get_ready(&view, long_event_text_registry, short_event_text_registry)?;
+        let rectangles: EventRectangles = self.calendar.state.obtain_events();
         Ok(RenderData {
             view,
-            long_event_rectangles,
+            long_event_rectangles: rectangles.long,
             hours_viewport,
             dates_viewport,
-            short_event_rectangles,
+            short_event_rectangles: rectangles.short,
             long_event_text_registry,
             short_event_text_registry,
             event_viewport,
@@ -350,48 +521,36 @@ impl<F: Frontend> App<F> {
     }
 }
 
-pub fn create_long_events<F: Frontend, TTC: TextTextureRegistry>(
-    calendar: &mut Calendar<F>,
+pub fn create_long_events<TTC: TextTextureRegistry>(
+    event_data: &calendar::EventData,
+    week_start: &calendar::date::Date,
     text_registry: &mut TTC,
     view: &View,
-) -> Result<(), TTC::Error> {
+) -> Result<calendar::render::Rectangles, TTC::Error> {
     let replacement = calendar::ui::create_long_event_rectangles(
         &view.event_surface,
-        &calendar.week_data.agenda.long,
-        &calendar.week_start,
+        event_data,
+        week_start,
         view.cell_width,
         view.calculate_top_panel_height(),
     );
 
     text_registry.clear();
-    register_event_titles(
-        text_registry,
-        &calendar.week_data.agenda.long.titles,
-        &replacement,
-    )?;
-    calendar.long_event_rectangles_opt = Some(replacement);
-    Ok(())
+    register_event_titles(text_registry, &event_data.titles, &replacement).map(|_| replacement)
 }
 
-fn create_short_events<F: Frontend, TTC: TextTextureRegistry>(
-    calendar: &mut Calendar<F>,
+fn create_short_events<TTC: TextTextureRegistry>(
+    event_data: &calendar::EventData,
+    week_start: &calendar::date::Date,
     text_registry: &mut TTC,
     view: &View,
-) -> Result<(), TTC::Error> {
-    let new_rectangles = calendar::ui::create_short_event_rectangles(
-        &view.grid_rectangle,
-        &calendar.week_data.agenda.short,
-        &calendar.week_start,
-    );
+) -> Result<calendar::render::Rectangles, TTC::Error> {
+    let new_rectangles =
+        calendar::ui::create_short_event_rectangles(&view.grid_rectangle, event_data, week_start);
 
     text_registry.clear();
-    register_event_titles(
-        text_registry,
-        &calendar.week_data.agenda.short.titles,
-        &new_rectangles,
-    )?;
-    calendar.short_event_rectangles_opt = Some(new_rectangles);
-    Ok(())
+    register_event_titles(text_registry, &event_data.titles, &new_rectangles)
+        .map(|_| new_rectangles)
 }
 
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction
@@ -400,6 +559,7 @@ pub trait Frontend {
     type TextObject;
     type Error;
     type TextTextureRegistry: TextTextureRegistry<Error = Self::Error>;
+    type AgendaSource: AgendaSource<Error = Self::Error>;
 
     fn get_hours_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
@@ -407,26 +567,47 @@ pub trait Frontend {
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
 
-    fn obtain_agenda(
+    fn agenda_source(&self) -> &Self::AgendaSource;
+}
+
+/// A trait to fetch the data for the calendar.
+///
+/// The data for the calendar is fetched from a "slow" source.  Currently it's conceived to fetch
+/// the data from an external program.  As a program takes time to provide the data, the trait is
+/// designed to fetch the data asynchronously.
+///
+/// Happy path scenario:
+/// The process runs with method [`AgendaSource::request`] which returns a handle to be polled by
+/// the method [`AgendaSource::is_ready`].  When the data is ready it's fetched with method
+/// [`AgendaSource::fetch`].
+///
+/// The process can be canceled with the method [`AgendaSource::cancel`].
+///
+/// The implementation is expected  to store the data behind the provided handles.  The caller
+/// decides when to free the data.  It calls the method [`AgendaSource::free`] when the data is no
+/// longer needed.
+pub trait AgendaSource {
+    type RequestHandle;
+    type Error;
+
+    fn request(
         &self,
         week_start: &calendar::date::Date,
-    ) -> Result<calendar::obtain::WeekScheduleWithLanes, Self::Error>;
+    ) -> Result<Self::RequestHandle, Self::Error>;
+    // TODO(alex): return a guard which reminds about freeing the handle.
+    fn cancel(&self, handle: &Self::RequestHandle);
+    fn is_ready(&self, handle: &Self::RequestHandle) -> bool;
+    fn free(&self, handle: Self::RequestHandle);
+    fn fetch(
+        &self,
+        handle: &Self::RequestHandle,
+        week_start: &calendar::date::Date,
+    ) -> calendar::obtain::WeekScheduleWithLanes;
 }
 
 // FIXME: Flatten the structure
 pub struct WeekData {
     pub agenda: calendar::obtain::WeekScheduleWithLanes,
-}
-
-impl WeekData {
-    fn try_new<F, T, E>(week_start: &calendar::date::Date, frontend: &F) -> Result<Self, E>
-    where
-        F: Frontend<TextObject = T, Error = E>,
-    {
-        frontend
-            .obtain_agenda(week_start)
-            .map(|agenda| Self { agenda })
-    }
 }
 
 /// Stores textures of the text objects.
