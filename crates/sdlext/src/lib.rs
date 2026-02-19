@@ -22,6 +22,7 @@ pub enum Error {
     ViewportIsNotSet,
     RendererIsNull,
     LineIsNotDrawn,
+    ProcessIsNotCreated,
 }
 
 #[derive(Debug)]
