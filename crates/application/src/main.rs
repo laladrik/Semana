@@ -34,7 +34,7 @@ struct TextTextureRegistry<'renderer, 'font> {
 mod config {
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
-    pub static FONT_PATH: &std::ffi::CStr = c"assets/DejaVuSansMonoBook.ttf";
+    pub const FONT_CONTENT: &[u8] = include_bytes!("../../../assets/DejaVuSansMonoBook.ttf");
     pub const COLOR_BACKGROUND: u32 = 0x0C0D0C;
     pub const GRID_SCALE_STEP: f32 = 50.;
     pub const GRID_OFFSET_STEP: f32 = 50.;
@@ -93,6 +93,17 @@ impl Fonts {
         let title_font: RefCell<Font> = Font::open(title_font_path, 16.0).map(RefCell::new)?;
 
         let ui_font: RefCell<Font> = Font::open(ui_font_path, 22.0).map(RefCell::new)?;
+        Ok(Self {
+            title: title_font,
+            ui: ui_font,
+        })
+    }
+
+    fn from_bytes(title_font_buffer: &[u8], ui_font_buffer: &[u8]) -> Result<Self, sdlext::Error> {
+        let title_font: RefCell<Font> =
+            Font::from_buffer(title_font_buffer, 16.0).map(RefCell::new)?;
+
+        let ui_font: RefCell<Font> = Font::from_buffer(ui_font_buffer, 22.0).map(RefCell::new)?;
         Ok(Self {
             title: title_font,
             ui: ui_font,
@@ -333,7 +344,7 @@ fn unsafe_main() {
                 sdl_ttf_init(
                     renderer,
                     move |_engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
-                        let fonts = Fonts::new(config::FONT_PATH, config::FONT_PATH)?;
+                        let fonts = Fonts::from_bytes(config::FONT_CONTENT, config::FONT_CONTENT)?;
                         let title_font_height: std::ffi::c_int =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
 
@@ -367,11 +378,8 @@ fn unsafe_main() {
                                     sdl::SDL_EVENT_QUIT => break 'outer_loop,
                                     sdl::SDL_EVENT_WINDOW_RESIZED => {
                                         app.calendar.request_render();
-                                        _ = sdl::SDL_GetWindowSize(
-                                            root_window,
-                                            &mut window_size.x,
-                                            &mut window_size.y,
-                                        );
+                                        window_size.x = event.window.data1;
+                                        window_size.y = event.window.data2;
                                     }
                                     sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
                                         sdl::SDLK_UP => {

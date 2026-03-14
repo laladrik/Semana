@@ -3,6 +3,10 @@ name = "application"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "semana"
+path = "src/main.rs"
+
 [dependencies]
 sdl3-sys = { git = "https://codeberg.org/laladrik/sdl3-sys", rev = "f86a66e7" }
 sdl3-ttf-sys = { git = "https://codeberg.org/laladrik/sdl3-ttf-sys", rev = "b2ef9dc5" }

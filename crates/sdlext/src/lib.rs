@@ -76,6 +76,17 @@ impl Font {
             .ok_or(TtfError::FontIsNotOpened)
             .map(Self::new)
     }
+
+    pub fn from_buffer(value: &[u8], size: f32) -> std::result::Result<Self, TtfError> {
+        unsafe {
+            let font_byte_stream: *mut sdl::SDL_IOStream =
+                sdl::SDL_IOFromConstMem(value.as_ptr() as *const std::ffi::c_void, value.len());
+            let ptr = sdl_ttf::TTF_OpenFontIO(font_byte_stream.cast(), false, size);
+            NonNull::new(ptr)
+                .ok_or(TtfError::FontIsNotOpened)
+                .map(Self::new)
+        }
+    }
 }
 
 impl Drop for Font {
