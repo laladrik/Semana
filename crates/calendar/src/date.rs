@@ -1,5 +1,5 @@
 use core::str::FromStr;
-use std::num::ParseIntError;
+use core::num::ParseIntError;
 
 pub const MINUTES_PER_HOUR: u8 = 60;
 pub const MINUTES_PER_DAY: u16 = MINUTES_PER_HOUR as u16 * 24;

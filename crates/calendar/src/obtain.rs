@@ -1,14 +1,7 @@
 use crate::EventRange;
 
-use super::date::{Date, DateStream, DateString, MINUTES_PER_DAY, Minutes, Time};
+use super::date::{Date, DateStream, MINUTES_PER_DAY, Minutes, Time};
 use super::{Event, EventData};
-use std::ffi::OsStr;
-pub trait EventSource {
-    type Data;
-    type Error;
-    fn obtain<S: AsRef<OsStr>>(&self, args: &[S]) -> Result<Self::Data, Self::Error>;
-}
-
 pub trait JsonParser {
     type Error;
 
@@ -34,7 +27,6 @@ pub enum Error<PE> {
     DurationIsTooBig,
 }
 
-const MAX_DURATION_DAYS: u8 = 35;
 pub mod khal {
     use super::Date;
     use super::ObtainArguments;
@@ -110,60 +102,6 @@ fn find_free_lane(new_event_begin_minutes: Minutes, clash: &Clash) -> Option<Lan
         .map(|(lane_index, _acc_end)| lane_index);
 
     lane_index.map(|i| unsafe { *clash.lanes.get_unchecked(i) })
-}
-
-pub fn events_with_lanes<AS, JP, O>(
-    agenda_source: &AS,
-    json_parser: &JP,
-    arguments: &ObtainArguments,
-) -> Result<WeekScheduleWithLanes, Error<JP::Error>>
-where
-    AS: EventSource<Data = O, Error = std::io::Error>,
-    JP: JsonParser,
-    O: AsRef<[u8]>,
-{
-    obtain(agenda_source, json_parser, arguments).map(|events| get_lanes(events, arguments.from))
-}
-
-fn obtain<AgendaSource, OutputParser, O>(
-    agenda_source: &AgendaSource,
-    json_parser: &OutputParser,
-    arguments: &ObtainArguments,
-) -> Result<Events, Error<OutputParser::Error>>
-where
-    AgendaSource: EventSource<Data = O, Error = std::io::Error>,
-    OutputParser: JsonParser,
-    O: AsRef<[u8]>,
-{
-    if arguments.duration_days > MAX_DURATION_DAYS {
-        return Err(Error::DurationIsTooBig);
-    }
-
-    let from: DateString = arguments.from.iso_8601();
-    let args = [
-        arguments.backend_bin_path,
-        "list",
-        "--json",
-        "title",
-        "--json",
-        "start-date",
-        "--json",
-        "start-time",
-        "--json",
-        "end-date",
-        "--json",
-        "end-time",
-        "--json",
-        "all-day",
-        "--json",
-        "calendar-color",
-        from.as_str(),
-        &format!("{}d", arguments.duration_days),
-    ];
-
-    let data: AgendaSource::Data = agenda_source.obtain(&args).map_err(Error::Io)?;
-    let bytes: &str = std::str::from_utf8(data.as_ref()).map_err(Error::InvalidUnicode)?;
-    parse_events(json_parser, bytes, arguments.from)
 }
 
 pub fn parse_events<OutputParser>(
