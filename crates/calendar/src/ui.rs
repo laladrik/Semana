@@ -36,7 +36,7 @@ impl<Text> Week<Text> {
 }
 
 pub struct UI<TF, R> {
-    _marker: std::marker::PhantomData<(TF, R)>,
+    _marker: core::marker::PhantomData<(TF, R)>,
 }
 
 pub struct SurfaceAdjustment {

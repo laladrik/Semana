@@ -1,5 +1,5 @@
-use core::str::FromStr;
 use core::num::ParseIntError;
+use core::str::FromStr;
 
 pub const MINUTES_PER_HOUR: u8 = 60;
 pub const MINUTES_PER_DAY: u16 = MINUTES_PER_HOUR as u16 * 24;
@@ -40,7 +40,7 @@ impl Iterator for DateStream {
 
     fn next(&mut self) -> Option<Self::Item> {
         let new_date = increment_date(&self.last_date);
-        let ret = std::mem::replace(&mut self.last_date, new_date);
+        let ret = core::mem::replace(&mut self.last_date, new_date);
         Some(ret)
     }
 }
@@ -55,7 +55,7 @@ pub struct Date {
 }
 
 impl Ord for Date {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         let year_ordering = self.year.cmp(&other.year);
         if year_ordering.is_ne() {
             return year_ordering;
@@ -73,7 +73,7 @@ impl Ord for Date {
 impl nanoserde::DeJson for Date {
     fn de_json(
         state: &mut nanoserde::DeJsonState,
-        input: &mut std::str::Chars,
+        input: &mut core::str::Chars,
     ) -> Result<Self, nanoserde::DeJsonErr> {
         if let nanoserde::DeJsonTok::Str = &mut state.tok {
             let s = core::mem::take(&mut state.strbuf);
@@ -177,7 +177,7 @@ pub struct Time {
 impl nanoserde::DeJson for Time {
     fn de_json(
         state: &mut nanoserde::DeJsonState,
-        input: &mut std::str::Chars,
+        input: &mut core::str::Chars,
     ) -> Result<Self, nanoserde::DeJsonErr> {
         if let nanoserde::DeJsonTok::Str = &mut state.tok {
             let s = core::mem::take(&mut state.strbuf);
@@ -226,7 +226,8 @@ pub struct DateString([u8; 10]);
 
 impl DateString {
     pub fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.0).expect("DateString must be built from numbers only and dashes")
+        core::str::from_utf8(&self.0)
+            .expect("DateString must be built from numbers only and dashes")
     }
 }
 

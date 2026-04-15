@@ -1,8 +1,14 @@
+#![no_std]
+#![cfg_attr(not(test), no_main)]
+
+pub mod date;
 pub mod obtain;
 pub mod render;
-pub mod ui;
 pub mod types;
-pub mod date;
+pub mod ui;
+extern crate alloc;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use nanoserde::DeJson;
 #[derive(Debug)]
@@ -11,7 +17,7 @@ pub enum Error<'s> {
     InvalidTime(&'s str),
 }
 
-#[derive(DeJson, Debug)]
+#[derive(DeJson)]
 pub struct Event {
     title: String,
     #[nserde(rename = "start-date")]
@@ -43,18 +49,10 @@ impl From<Color> for u32 {
     }
 }
 
-impl std::fmt::Debug for Color {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Color")
-            .field(&format_args!("#{:#x}", self.0))
-            .finish()
-    }
-}
-
 impl nanoserde::DeJson for Color {
     fn de_json(
         state: &mut nanoserde::DeJsonState,
-        input: &mut std::str::Chars,
+        input: &mut core::str::Chars,
     ) -> Result<Self, nanoserde::DeJsonErr> {
         if let nanoserde::DeJsonTok::Str = &mut state.tok {
             let s = core::mem::take(&mut state.strbuf);

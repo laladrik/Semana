@@ -1,8 +1,9 @@
 use crate::EventRange;
+use alloc::vec::Vec;
 
+use super::date::{Date, MINUTES_PER_DAY, MINUTES_PER_HOUR, Time};
 use super::types::{Point, Size};
 use super::{Color, EventData, Lane};
-use super::date::{Date, Time, MINUTES_PER_DAY, MINUTES_PER_HOUR};
 
 pub struct Arguments {
     pub column_width: f32,
@@ -317,7 +318,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use alloc::{string::String, vec::Vec};
+    use core::str::FromStr;
 
     use super::*;
     use crate::render::short_event_rectangles;
@@ -378,15 +380,15 @@ mod tests {
 
     #[test]
     fn test_top_left_event() {
-        let events = vec![EventRange {
+        let events = Vec::from_iter([EventRange {
             calendar_color: Color::BLACK,
             start_date: create_date("2025-09-29"),
             start_time: create_time("00:00"),
             end_date: create_date("2025-09-29"),
             end_time: create_time("01:00"),
-        }];
+        }]);
 
-        let titles = vec![String::from("first")];
+        let titles = Vec::from_iter([String::from("first")]);
 
         let arguments = Arguments {
             column_width: 125.0,
@@ -402,7 +404,11 @@ mod tests {
         };
 
         let lanes = Vec::from([(0, 1)]);
-        let events_with_lanes = EventData { event_ranges: events, titles, lanes };
+        let events_with_lanes = EventData {
+            event_ranges: events,
+            titles,
+            lanes,
+        };
 
         let ret: Rectangles =
             short_event_rectangles(&events_with_lanes, &start_date, &arguments).collect();

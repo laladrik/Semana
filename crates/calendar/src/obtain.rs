@@ -1,4 +1,6 @@
 use crate::EventRange;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use super::date::{Date, DateStream, MINUTES_PER_DAY, Minutes, Time};
 use super::{Event, EventData};
@@ -21,7 +23,6 @@ pub type EventVec = Vec<Event>;
 
 #[derive(Debug)]
 pub enum Error<PE> {
-    Io(std::io::Error),
     InvalidUnicode(core::str::Utf8Error),
     Parse(PE),
     DurationIsTooBig,
@@ -408,6 +409,7 @@ pub struct WeekData {
 
 #[cfg(test)]
 mod tests {
+    use alloc::borrow::ToOwned;
     use super::*;
     use core::str::FromStr;
     #[track_caller]
