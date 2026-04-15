@@ -225,6 +225,17 @@ impl<F: Frontend> Calendar<F> {
             }
         })
     }
+
+    #[allow(unused)]
+    pub fn is_new_week_data_received(&self, frontend: &F) -> bool {
+        match &self.state {
+            CalendarState::Loading {
+                agenda_source_handle,
+            } => frontend.agenda_source().is_ready(agenda_source_handle),
+            CalendarState::Ready { .. } | CalendarState::Rendering { .. } => false,
+        }
+    }
+
 }
 
 static NO_RECT: calendar::render::Rectangles = Vec::new();
