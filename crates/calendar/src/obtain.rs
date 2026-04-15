@@ -9,26 +9,6 @@ pub trait EventSource {
     fn obtain<S: AsRef<OsStr>>(&self, args: &[S]) -> Result<Self::Data, Self::Error>;
 }
 
-pub struct EventSourceStd;
-
-impl EventSource for EventSourceStd {
-    type Data = Vec<u8>;
-    type Error = std::io::Error;
-
-    fn obtain<S: AsRef<OsStr>>(&self, args: &[S]) -> Result<Self::Data, Self::Error> {
-        use std::process;
-        let mut cmd = process::Command::new(&args[0]);
-        cmd.args(args[1..].iter());
-        cmd.stdout(process::Stdio::piped());
-        let child: process::Child = cmd.spawn()?;
-        let output: process::Output = child.wait_with_output()?;
-        if !output.status.success() {
-            panic!("the command failed");
-        }
-        Ok(output.stdout)
-    }
-}
-
 pub trait JsonParser {
     type Error;
 
