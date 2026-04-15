@@ -638,4 +638,3 @@ pub fn get_mouse_position(_renderer: &Renderer) -> (f32, f32) {
         (x, y)
     }
 }
-//pub type Result<T> = Result<T, Error>;

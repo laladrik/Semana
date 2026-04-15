@@ -2,3 +2,4 @@
 /Session.vim
 /.cargo
 /Cargo.lock
+.gdb_history

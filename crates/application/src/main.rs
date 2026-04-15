@@ -86,6 +86,7 @@ struct Fonts {
 }
 
 impl Fonts {
+    #[allow(unused)]
     fn new(
         title_font_path: &std::ffi::CStr,
         ui_font_path: &std::ffi::CStr,
@@ -303,6 +304,9 @@ impl AgendaSource for KhalAgendaSource {
         }
     }
 
+    // FIXME(alex): it's potentially a bomb.  The documentation of SDL_WaitProcess says that all of
+    // the output has to be read before calling the function.  Otherwise it can never return true.
+    // Currently, it works but it's luck I guess.
     fn is_ready(&self, handle: &Self::RequestHandle) -> bool {
         let block = false;
         let mut exit_code = 0;
