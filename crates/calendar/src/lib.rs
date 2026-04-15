@@ -72,11 +72,6 @@ impl nanoserde::DeJson for Color {
     }
 }
 
-pub trait TextCreate {
-    type Result;
-    fn text_create(&self, s: impl Into<Vec<u8>>) -> Self::Result;
-}
-
 pub struct EventRange {
     pub start_date: date::Date,
     pub start_time: date::Time,

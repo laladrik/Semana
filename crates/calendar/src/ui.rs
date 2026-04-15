@@ -3,7 +3,6 @@ use crate::Lane;
 use crate::date::Date;
 use crate::render;
 
-use super::TextCreate;
 use super::render::RenderWeekCaptionsArgs;
 use super::render::TextRender;
 use super::render::{render_hours, render_weekdays};
@@ -36,92 +35,8 @@ impl<Text> Week<Text> {
     }
 }
 
-/// The trait is effectively a module with compile-time arguments.  It converts the input strings
-/// into the text objects to be rendered.  The creation of a text object is defined by Backend.
-pub trait TextObjectFactory {
-    /// The result of Backend work.  It's conceived that it contains the text object to be
-    /// rendered.
-    type BackendResult;
-    /// The implementation of creation of a text object.
-    type Backend: TextCreate<Result = Self::BackendResult>;
-
-    /// Create the texts for the week calendar.  See [`Week`].
-    ///
-    /// # Panics
-    ///
-    /// if `date_stream` does not provide 7 elements.
-    fn create_texts<I, D>(text_factory: &Self::Backend, date_stream: I) -> Week<Self::BackendResult>
-    where
-        I: Iterator<Item = D>,
-        D: std::borrow::Borrow<super::date::Date>,
-    {
-        let mut dates_iter = Self::create_date_texts(text_factory, date_stream);
-        let dates: [Self::BackendResult; 7] = core::array::from_fn(|_| {
-            dates_iter
-                .next()
-                .expect("date_stream didn't sufficient amount of elements")
-        });
-
-        Week {
-            days: Self::create_weekday_texts(text_factory),
-            hours: Self::create_hours_texts(text_factory),
-            dates,
-        }
-    }
-
-    fn create_hours_texts(text_factory: &Self::Backend) -> [Self::BackendResult; 24] {
-        core::array::from_fn(|i| {
-            let s = format!("{:02}:00", i);
-            text_factory.text_create(s.as_str())
-        })
-    }
-
-    fn create_weekday_texts(text_factory: &Self::Backend) -> [Self::BackendResult; 7] {
-        let weekdays = [
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-            "Sunday",
-        ];
-        core::array::from_fn(|i| text_factory.text_create(weekdays[i]))
-    }
-
-    fn create_date_texts<I, D>(
-        text_factory: &Self::Backend,
-        dates: I,
-    ) -> impl Iterator<Item = Self::BackendResult>
-    where
-        I: Iterator<Item = D>,
-        D: std::borrow::Borrow<super::date::Date>,
-    {
-        dates.map(|date| {
-            let date: &super::date::Date = date.borrow();
-            let text = format!("{:04}-{:02}-{:02}", date.year, date.month, date.day);
-            text_factory.text_create(text.as_str())
-        })
-    }
-
-    fn create_event_title_texts<'text, 'tf>(
-        text_factory: &'tf Self::Backend,
-        items: impl Iterator<Item = &'text str>,
-    ) -> impl Iterator<Item = Self::BackendResult> {
-        items.map(|text| text_factory.text_create(text))
-    }
-}
-
 pub struct UI<TF, R> {
     _marker: std::marker::PhantomData<(TF, R)>,
-}
-
-impl<TF, R> TextObjectFactory for UI<TF, R>
-where
-    TF: TextCreate<Result = R>,
-{
-    type BackendResult = R;
-    type Backend = TF;
 }
 
 pub struct SurfaceAdjustment {
