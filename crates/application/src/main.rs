@@ -352,6 +352,7 @@ fn unsafe_main() {
                         let title_font_height: std::ffi::c_int =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
 
+                        let mouse = sdl::SDL_FPoint { x: 0., y: 0. };
                         let mut short_event_text_registry =
                             TextTextureRegistry::new(renderer, &fonts.title);
                         let mut long_event_text_registry =
@@ -373,46 +374,56 @@ fn unsafe_main() {
                             dates_text_texture_regirsty,
                         };
 
-                        let mut app = App::new(&mut frontend, title_font_height, event_offset)?;
+                        let mut app =
+                            App::new(&mut frontend, title_font_height, event_offset, mouse)?;
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
+                            let mut events: Vec<state::Action> = Vec::new();
                             // stage: event handle
                             while sdl::SDL_PollEvent(&mut event as _) {
                                 match event.type_ {
                                     sdl::SDL_EVENT_QUIT => break 'outer_loop,
                                     sdl::SDL_EVENT_WINDOW_RESIZED => {
-                                        app.calendar.request_render();
+                                        events.push(state::Action::WindowResize);
                                         window_size.x = event.window.data1;
                                         window_size.y = event.window.data2;
                                     }
                                     sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
                                         sdl::SDLK_UP => {
-                                            app.ui.add_adjustment(-config::GRID_OFFSET_STEP);
-                                            app.calendar.request_render();
+                                            events.push(state::Action::Scroll(
+                                                -config::GRID_OFFSET_STEP,
+                                            ));
                                         }
                                         sdl::SDLK_DOWN => {
-                                            app.ui.add_adjustment(config::GRID_OFFSET_STEP);
-                                            app.calendar.request_render();
+                                            events.push(state::Action::Scroll(
+                                                config::GRID_OFFSET_STEP,
+                                            ));
                                         }
                                         sdl::SDLK_MINUS => {
-                                            app.ui.adjustment.vertical_scale = 0f32.max(
-                                                app.ui.adjustment.vertical_scale
-                                                    - config::GRID_SCALE_STEP,
-                                            );
-                                            app.calendar.request_render();
+                                            events.push(state::Action::Zoom(
+                                                -config::GRID_SCALE_STEP,
+                                            ));
                                         }
                                         sdl::SDLK_EQUALS => {
-                                            app.ui.adjustment.vertical_scale +=
-                                                config::GRID_SCALE_STEP;
+                                            events
+                                                .push(state::Action::Zoom(config::GRID_SCALE_STEP));
                                             app.calendar.request_render();
                                         }
                                         _ => (),
                                     },
                                     sdl::SDL_EVENT_KEY_UP => match event.key.key {
-                                        sdl::SDLK_PAGEUP => app.calendar.subtract_week(),
-                                        sdl::SDLK_PAGEDOWN => app.calendar.add_week(),
+                                        sdl::SDLK_PAGEUP => {
+                                            events.push(state::Action::SubtractWeek)
+                                        }
+                                        sdl::SDLK_PAGEDOWN => events.push(state::Action::AddWeek),
                                         _ => (),
                                     },
+                                    sdl::SDL_EVENT_MOUSE_MOTION => {
+                                        events.push(state::Action::MouseMove {
+                                            x: event.motion.x,
+                                            y: event.motion.y,
+                                        })
+                                    }
                                     _ => (),
                                 }
                             }
@@ -422,6 +433,7 @@ fn unsafe_main() {
                                 window_size,
                                 &mut long_event_text_registry,
                                 &mut short_event_text_registry,
+                                events.into_iter(),
                             )?;
 
                             /* stage: render */

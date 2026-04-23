@@ -165,6 +165,7 @@ impl<F: Frontend> Calendar<F> {
         view: &View,
         long_event_text_registry: &'ttc mut F::TextTextureRegistry,
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        event_offset: &FPoint,
     ) -> Result<(), F::Error> {
         use CalendarState::*;
         self.state.switch(|current_state| match current_state {
@@ -193,11 +194,14 @@ impl<F: Frontend> Calendar<F> {
                     }
                 };
 
+                let top_panel_heigth: f32 = view.calculate_top_panel_height();
                 let long_event_rectangles_opt = create_long_events(
                     &week_data.agenda.long,
                     &self.week_start,
                     long_event_text_registry,
-                    view,
+                    event_offset,
+                    view.cell_width,
+                    top_panel_heigth,
                 );
 
                 let long_event_rectangles_opt = match long_event_rectangles_opt {
@@ -235,7 +239,6 @@ impl<F: Frontend> Calendar<F> {
             CalendarState::Ready { .. } | CalendarState::Rendering { .. } => false,
         }
     }
-
 }
 
 static NO_RECT: calendar::render::Rectangles = Vec::new();
@@ -247,11 +250,17 @@ struct EventRectangles<'rect> {
 pub struct UserInterface {
     pub adjustment: SurfaceAdjustment,
     pub title_font_height: std::ffi::c_int,
+    /// From where the all of the events are drawn.
     pub event_offset: FPoint,
+    pub mouse_position: FPoint,
 }
 
 impl UserInterface {
-    fn new(title_font_height: std::ffi::c_int, event_offset: FPoint) -> Self {
+    fn new(
+        title_font_height: std::ffi::c_int,
+        event_offset: FPoint,
+        mouse_position: FPoint,
+    ) -> Self {
         // the values to scale and scroll the events grid (short events).
         let adjustment = SurfaceAdjustment {
             vertical_scale: 0.,
@@ -262,27 +271,29 @@ impl UserInterface {
             adjustment,
             title_font_height,
             event_offset,
+            mouse_position,
         }
     }
 
     pub fn add_adjustment(&mut self, value: f32) {
-        self.adjustment.vertical_offset -= value;
-        self.adjustment.vertical_offset = self
-            .adjustment
-            .vertical_offset
-            .clamp(-self.adjustment.vertical_scale, 0f32);
-    }
-
-    fn calculate_viewport(&self, window_size: &Point) -> Rect {
-        Rect {
-            x: self.event_offset.x as i32,
-            y: self.event_offset.y as i32,
-            w: window_size.x - self.event_offset.x as i32,
-            h: window_size.y - self.event_offset.y as i32,
-        }
+        let new_value = self.adjustment.vertical_offset - value;
+        self.adjustment.vertical_offset = new_value.clamp(-self.adjustment.vertical_scale, 0f32);
     }
 }
 
+fn calculate_viewport(
+    event_offset: &FPoint,
+    window_size: &Point,
+    long_event_surface_height: f32,
+) -> Rect {
+    let yoffset = event_offset.y + long_event_surface_height;
+    Rect {
+        x: event_offset.x as i32,
+        y: yoffset as i32,
+        w: window_size.x - event_offset.x as i32,
+        h: window_size.y - yoffset as i32,
+    }
+}
 // The state of the application
 pub struct App<F: Frontend> {
     pub calendar: Calendar<F>,
@@ -292,12 +303,27 @@ pub struct App<F: Frontend> {
 const DUMB_CELL_WIDTH: f32 = 130f32;
 
 impl<F: Frontend> App<F> {
+    fn get_clash_size(calendar: &Calendar<F>) -> calendar::Lane {
+        match calendar.state {
+            CalendarState::Loading { .. } => 0,
+            CalendarState::Ready {
+                long_event_clash_size,
+                ..
+            }
+            | CalendarState::Rendering {
+                long_event_clash_size,
+                ..
+            } => long_event_clash_size,
+        }
+    }
+
     pub fn new(
         frontend: &mut F,
         title_font_height: std::ffi::c_int,
         event_offset: FPoint,
+        mouse_position: FPoint,
     ) -> Result<Self, F::Error> {
-        let ui = UserInterface::new(title_font_height, event_offset);
+        let ui = UserInterface::new(title_font_height, event_offset, mouse_position);
         let calendar = Calendar::new(frontend)?;
         App::create_hours_text_objects(frontend, ui.event_offset.x)?;
 
@@ -308,25 +334,30 @@ impl<F: Frontend> App<F> {
         Ok(Self { calendar, ui })
     }
 
-    fn create_view(&mut self, window_size: &Point) -> View {
-        let clash_size: u8 = match self.calendar.state {
-            CalendarState::Loading { .. } => 0,
-            CalendarState::Ready {
-                long_event_clash_size,
-                ..
-            }
-            | CalendarState::Rendering {
-                long_event_clash_size,
-                ..
-            } => long_event_clash_size,
-        };
+    #[inline]
+    fn viewport_size(
+        event_offset: &FPoint,
+        window_size: &Point,
+        long_event_surface_height: f32,
+    ) -> FPoint {
+        let yoffset = event_offset.y + long_event_surface_height;
+        FPoint {
+            x: window_size.x as f32 - event_offset.x,
+            y: window_size.y as f32 - yoffset,
+        }
+    }
 
+    fn create_view(&mut self, window_size: &Point) -> View {
+        let clash_size: u8 = Self::get_clash_size(&self.calendar);
+        let long_event_surface_height =
+            View::compute_top_panel_height(self.ui.title_font_height, clash_size);
         View::new(
-            FPoint {
-                x: window_size.x as f32 - self.ui.event_offset.x,
-                y: window_size.y as f32 - self.ui.event_offset.y,
-            },
-            &mut self.ui.adjustment,
+            Self::viewport_size(
+                &self.ui.event_offset,
+                window_size,
+                long_event_surface_height,
+            ),
+            &self.ui.adjustment,
             self.ui.title_font_height,
             clash_size,
         )
@@ -334,7 +365,7 @@ impl<F: Frontend> App<F> {
 
     fn reposition_hours_text_objects(&self, frontend: &mut F, width: f32, view: &View) {
         let cell_height = view.cell_height;
-        let offset_y = view.grid_rectangle.y - view.calculate_top_panel_height();
+        let offset_y = view.short_event_surface.y;
         let hours_registry: &mut _ = frontend.get_hours_text_registry();
         let values = (0..24).map(|hour| {
             let y = offset_y + (hour as f32) * cell_height;
@@ -457,7 +488,42 @@ impl<F: Frontend> App<F> {
         window_size: Point,
         long_event_text_registry: &'ttc mut F::TextTextureRegistry,
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        events: impl IntoIterator<Item = Action>,
     ) -> Result<RenderData<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        for event in events {
+            use Action::*;
+            match event {
+                WindowResize => self.calendar.request_render(),
+                Scroll(value) => {
+                    self.ui.add_adjustment(value);
+                    self.calendar.request_render();
+                }
+                Zoom(value) => {
+                    let viewport_size = {
+                        let long_event_surface_height = View::compute_top_panel_height(
+                            self.ui.title_font_height,
+                            Self::get_clash_size(&self.calendar),
+                        );
+                        Self::viewport_size(
+                            &self.ui.event_offset,
+                            &window_size,
+                            long_event_surface_height,
+                        )
+                    };
+
+                    self.ui.adjustment =
+                        scale_short_events(&self.ui.adjustment, &viewport_size, value);
+                    self.calendar.request_render();
+                }
+                MouseMove { x, y } => {
+                    self.ui.mouse_position.x = x;
+                    self.ui.mouse_position.y = y;
+                }
+                SubtractWeek => self.calendar.subtract_week(),
+                AddWeek => self.calendar.add_week(),
+            }
+        }
+
         if self.calendar.is_week_switched {
             self.calendar.update_week_data(frontend)?;
             let cell_width = DUMB_CELL_WIDTH;
@@ -492,10 +558,19 @@ impl<F: Frontend> App<F> {
             x => x,
         };
 
-        let event_viewport: Rect = self.ui.calculate_viewport(&window_size);
-        let view = self.create_view(&window_size);
+        let long_event_surface_height = View::compute_top_panel_height(
+            self.ui.title_font_height,
+            Self::get_clash_size(&self.calendar),
+        );
+
+        let short_event_viewport: Rect = calculate_viewport(
+            &self.ui.event_offset,
+            &window_size,
+            long_event_surface_height,
+        );
+        let view: calendar::ui::View = self.create_view(&window_size);
         let hours_viewport: Rect = {
-            let y = event_viewport.y + view.calculate_top_panel_height() as i32;
+            let y = short_event_viewport.y as i32;
             Rect {
                 y,
                 x: 10,
@@ -515,8 +590,12 @@ impl<F: Frontend> App<F> {
 
         self.reposition_days_text_objects(frontend, 35f32, &view);
         self.reposition_dates_text_objects(frontend, 10f32, &view);
-        self.calendar
-            .get_ready(&view, long_event_text_registry, short_event_text_registry)?;
+        self.calendar.get_ready(
+            &view,
+            long_event_text_registry,
+            short_event_text_registry,
+            &self.ui.event_offset,
+        )?;
         let rectangles: EventRectangles = self.calendar.state.obtain_events();
         Ok(RenderData {
             view,
@@ -526,24 +605,60 @@ impl<F: Frontend> App<F> {
             short_event_rectangles: rectangles.short,
             long_event_text_registry,
             short_event_text_registry,
-            event_viewport,
+            event_viewport: short_event_viewport,
             frontend,
         })
     }
+}
+
+/// Sensibly changes the scale of the short event surface.  When the surface is scaled out (it
+/// get smaller), a gap appears between the bottom of the surface and the bottom of the viewport.
+/// Given that, the vertical offset of the surface is adjusted.
+fn scale_short_events(
+    current: &SurfaceAdjustment,
+    short_event_viewport: &FPoint,
+    scale: f32,
+) -> SurfaceAdjustment {
+    let new_vertical_scale = 0f32.max(current.vertical_scale + scale);
+    let scaled_short_event_surface = calendar::ui::compute_event_surface(
+        short_event_viewport,
+        new_vertical_scale,
+        current.vertical_offset,
+    );
+
+    let bottom = short_event_viewport.y;
+    let scaled_short_events_surface_bottom =
+        scaled_short_event_surface.y + scaled_short_event_surface.h;
+    let bottom_gap = bottom - scaled_short_events_surface_bottom;
+    SurfaceAdjustment {
+        vertical_offset: current.vertical_offset + bottom_gap.max(0f32),
+        vertical_scale: new_vertical_scale,
+    }
+}
+
+pub enum Action {
+    WindowResize,
+    Scroll(f32),
+    Zoom(f32),
+    MouseMove { x: f32, y: f32 },
+    SubtractWeek,
+    AddWeek,
 }
 
 pub fn create_long_events<TTC: TextTextureRegistry>(
     event_data: &calendar::EventData,
     week_start: &calendar::date::Date,
     text_registry: &mut TTC,
-    view: &View,
+    offset: &FPoint,
+    cell_width: f32,
+    top_panel_height: f32,
 ) -> Result<calendar::render::Rectangles, TTC::Error> {
     let replacement = calendar::ui::create_long_event_rectangles(
-        &view.event_surface,
+        offset,
         event_data,
         week_start,
-        view.cell_width,
-        view.calculate_top_panel_height(),
+        cell_width,
+        top_panel_height,
     );
 
     text_registry.clear();
@@ -556,8 +671,11 @@ fn create_short_events<TTC: TextTextureRegistry>(
     text_registry: &mut TTC,
     view: &View,
 ) -> Result<calendar::render::Rectangles, TTC::Error> {
-    let new_rectangles =
-        calendar::ui::create_short_event_rectangles(&view.grid_rectangle, event_data, week_start);
+    let new_rectangles = calendar::ui::create_short_event_rectangles(
+        &view.short_event_surface,
+        event_data,
+        week_start,
+    );
 
     text_registry.clear();
     register_event_titles(text_registry, &event_data.titles, &new_rectangles)

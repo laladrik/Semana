@@ -40,96 +40,92 @@ pub struct UI<TF, R> {
 }
 
 pub struct SurfaceAdjustment {
+    /// The absolute value in pixels.  The value is _added_ to the height of the grid with the short events.
     pub vertical_scale: f32,
     pub vertical_offset: f32,
 }
 
 pub struct View {
-    /// The rectangle which displays the short events and long events.
-    pub event_surface: FRect,
     /// The rectangle which displays the short events.
-    pub grid_rectangle: FRect,
-    /// The width of cell on the grid containing the events.
+    pub short_event_surface: FRect,
+    /// The width of cell on the grid containing the events.  Other words is the width of a long
+    /// and a short event.
     pub cell_width: f32,
+    /// The height of a short event.
     pub cell_height: f32,
-    pub top_panel_height: f32,
+    /// The height of the surface with the long events.
+    pub long_event_surface_height: f32,
+}
+
+#[inline]
+pub fn compute_event_surface(
+    viewport_size: &FPoint,
+    vertical_scale: f32,
+    vertical_offset: f32,
+) -> FRect {
+    FRect {
+        x: 0f32,
+        y: vertical_offset,
+        w: viewport_size.x,
+        h: viewport_size.y + vertical_scale,
+    }
 }
 
 impl View {
+    #[inline]
+    pub fn compute_top_panel_height(title_font_height: i32, long_event_clash_size: Lane) -> f32 {
+        (title_font_height + Self::LINE_HEIGHT as i32) as f32 * long_event_clash_size as f32
+    }
+
     const LINE_HEIGHT: u8 = 15;
     pub fn new(
         viewport_size: FPoint,
-        // mutable for the case when we zoom out enough to make a gap between the bottom of the
-        // viewport of the grid and the bottom of the grid.  Other words, the adjustment changes if
-        // there empty space as a result of zooming out.
-        adjustment: &mut SurfaceAdjustment,
+        adjustment: &SurfaceAdjustment,
         title_font_height: i32,
         long_event_clash_size: Lane,
     ) -> Self {
-        let event_surface: FRect = {
-            FRect {
-                x: 0f32,
-                y: 0f32,
-                w: viewport_size.x,
-                h: viewport_size.y + adjustment.vertical_scale,
-            }
-        };
-
+        let event_surface: FRect = compute_event_surface(
+            &viewport_size,
+            adjustment.vertical_scale,
+            adjustment.vertical_offset,
+        );
         // The panel above the grid with the short events and beyond the days.
         let top_panel_height =
-            (title_font_height + Self::LINE_HEIGHT as i32) as f32 * long_event_clash_size as f32;
+            Self::compute_top_panel_height(title_font_height, long_event_clash_size);
         let cell_width: f32 = event_surface.w / 7.;
-        let grid_rectangle: FRect = {
-            let create = |offset| FRect {
-                x: event_surface.x,
-                y: event_surface.y + top_panel_height + offset,
-                w: event_surface.w,
-                h: event_surface.h - top_panel_height,
-            };
 
-            let mut ret = create(adjustment.vertical_offset);
-            let bottom = ret.y + ret.h;
-            let bottom_gap = viewport_size.y - bottom;
-            if bottom_gap.is_sign_positive() {
-                adjustment.vertical_offset += bottom_gap;
-                ret = create(adjustment.vertical_offset);
-            }
-            ret
-        };
-
-        let cell_height = grid_rectangle.h / 24.;
+        let cell_height = event_surface.h / 24.;
         Self {
-            top_panel_height,
+            long_event_surface_height: top_panel_height,
             cell_height,
             cell_width,
-            grid_rectangle,
-            event_surface,
+            short_event_surface: event_surface,
         }
     }
 
     #[inline(always)]
     pub fn calculate_top_panel_height(&self) -> f32 {
-        self.top_panel_height
+        self.long_event_surface_height
     }
 }
 
 pub fn create_short_event_rectangles(
-    grid_rectangle: &FRect,
+    short_event_surface: &FRect,
     short_events: &EventData,
     week_start: &Date,
 ) -> render::Rectangles {
     let arguments = render::Arguments {
-        column_width: grid_rectangle.w / 7.,
-        column_height: grid_rectangle.h,
-        offset_x: grid_rectangle.x,
-        offset_y: grid_rectangle.y,
+        column_width: short_event_surface.w / 7.,
+        column_height: short_event_surface.h,
+        offset_x: short_event_surface.x,
+        offset_y: short_event_surface.y,
     };
 
     render::short_event_rectangles(short_events, week_start, &arguments).collect()
 }
 
 pub fn create_long_event_rectangles(
-    event_surface_rectangle: &FRect,
+    offset: &FPoint,
     long_events: &EventData,
     week_start: &Date,
     cell_width: f32,
@@ -138,8 +134,8 @@ pub fn create_long_event_rectangles(
     let arguments = render::Arguments {
         column_width: cell_width,
         column_height: top_panel_height,
-        offset_x: event_surface_rectangle.x,
-        offset_y: event_surface_rectangle.y,
+        offset_x: offset.x,
+        offset_y: offset.y,
     };
 
     let pinned_rectangles_res = render::long_event_rectangles(long_events, week_start, &arguments);

@@ -42,41 +42,43 @@ pub fn render(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
 }
 
 fn render_events(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
+    let event_render = RectangleRender { renderer };
+    calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
+    data.long_event_text_registry.render()?;
+
     let event_viewport = data.event_viewport;
     set_render_viewport_context(renderer, &event_viewport, || {
-        render_grid(renderer, &data.view.grid_rectangle)?;
+        render_short_events(renderer, &data.view.short_event_surface)?;
         let event_render = RectangleRender { renderer };
         calendar::render::render_rectangles(data.short_event_rectangles.iter(), &event_render)?;
-        data.short_event_text_registry.render()?;
-        calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
-        data.long_event_text_registry.render()
+        data.short_event_text_registry.render()
     })
 }
 
-fn render_grid(
+fn render_short_events(
     renderer: &sdlext::Renderer,
-    grid_rectangle: &sdl::SDL_FRect,
+    short_event_surface: &sdl::SDL_FRect,
 ) -> Result<(), sdlext::Error> {
     renderer.set_render_draw_color(Color::from_rgb(0x333333))?;
-    let row_ratio: f32 = grid_rectangle.h / 24.0;
+    let row_ratio: f32 = short_event_surface.h / 24.0;
     for i in 0..24 {
-        let ordinate = i as f32 * row_ratio + grid_rectangle.y;
+        let ordinate = i as f32 * row_ratio + short_event_surface.y;
         renderer.render_line(
-            grid_rectangle.x,
+            short_event_surface.x,
             ordinate,
-            grid_rectangle.w + grid_rectangle.x,
+            short_event_surface.w + short_event_surface.x,
             ordinate,
         )?;
     }
 
-    let col_ratio: f32 = grid_rectangle.w / 7.;
+    let col_ratio: f32 = short_event_surface.w / 7.;
     for i in 0..7 {
-        let absciss: f32 = i as f32 * col_ratio + grid_rectangle.x;
+        let absciss: f32 = i as f32 * col_ratio + short_event_surface.x;
         renderer.render_line(
             absciss,
-            grid_rectangle.y,
+            short_event_surface.y,
             absciss,
-            grid_rectangle.h + grid_rectangle.y,
+            short_event_surface.h + short_event_surface.y,
         )?;
     }
     Ok(())
