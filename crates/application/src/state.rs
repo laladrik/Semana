@@ -279,6 +279,55 @@ impl UserInterface {
         let new_value = self.adjustment.vertical_offset - value;
         self.adjustment.vertical_offset = new_value.clamp(-self.adjustment.vertical_scale, 0f32);
     }
+
+    /// To scale the surface with the short events, its vertical offset is to be adjusted as well
+    /// for two reasons:
+    /// 1. The event under the cursor must stay under the cursor.
+    /// 2. Given the surface scrolled to the end, shrinking the surface must not cause a gap
+    ///    between the bottom of the surface and its viewport.
+    ///
+    /// - See [`compute_cursor_adjustment`]
+    /// - See [`scale_short_events`]
+    fn compute_short_event_surface_adjustment(
+        &self,
+        long_event_surface_height: f32,
+        scale_value: f32,
+        window_size: &Point,
+    ) -> SurfaceAdjustment {
+        let short_event_viewport_offset = {
+            FPoint {
+                x: self.event_offset.x,
+                y: self.event_offset.y + long_event_surface_height,
+            }
+        };
+
+        let short_event_viewport_size = FPoint {
+            x: window_size.x as f32 - short_event_viewport_offset.x,
+            y: window_size.y as f32 - short_event_viewport_offset.y,
+        };
+
+        let current_adjustment = &self.adjustment;
+        let new_vertical_scale =
+            NonNegativeF32::clip_from(current_adjustment.vertical_scale + scale_value);
+        let diff: f32 = compute_cursor_adjustment(
+            &self.mouse_position,
+            new_vertical_scale,
+            &short_event_viewport_offset,
+            &short_event_viewport_size,
+            current_adjustment,
+        );
+
+        let mouse_adjustment = SurfaceAdjustment {
+            vertical_scale: current_adjustment.vertical_scale,
+            vertical_offset: current_adjustment.vertical_offset - diff,
+        };
+
+        scale_short_events(
+            &mouse_adjustment,
+            &short_event_viewport_size,
+            new_vertical_scale,
+        )
+    }
 }
 
 fn calculate_viewport(
@@ -499,20 +548,15 @@ impl<F: Frontend> App<F> {
                     self.calendar.request_render();
                 }
                 Zoom(value) => {
-                    let viewport_size = {
-                        let long_event_surface_height = View::compute_top_panel_height(
-                            self.ui.title_font_height,
-                            Self::get_clash_size(&self.calendar),
-                        );
-                        Self::viewport_size(
-                            &self.ui.event_offset,
-                            &window_size,
-                            long_event_surface_height,
-                        )
-                    };
-
-                    self.ui.adjustment =
-                        scale_short_events(&self.ui.adjustment, &viewport_size, value);
+                    let long_event_surface_height: f32 = View::compute_top_panel_height(
+                        self.ui.title_font_height,
+                        Self::get_clash_size(&self.calendar),
+                    );
+                    self.ui.adjustment = self.ui.compute_short_event_surface_adjustment(
+                        long_event_surface_height,
+                        value,
+                        &window_size,
+                    );
                     self.calendar.request_render();
                 }
                 MouseMove { x, y } => {
@@ -611,28 +655,101 @@ impl<F: Frontend> App<F> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct NonNegativeF32(f32);
+
+impl NonNegativeF32 {
+    fn clip_from(value: f32) -> Self {
+        Self(0f32.max(value))
+    }
+}
+
+impl From<NonNegativeF32> for f32 {
+    fn from(value: NonNegativeF32) -> Self {
+        value.0
+    }
+}
+
+/// When the surface with the short events is scaled, technically it means that only its size
+/// changes.  Given that, the events slip away from under the mouse.  Therefore, the vertical
+/// offset of the surface is to be adjusted.
+///
+/// # Arguments
+///
+/// `mouse` is the mouse cursor position
+///
+/// `new_vertical_scale` the amout of pixels to add to the height of the surface with the short
+/// events.
+///
+/// `short_event_viewport_offset` the position of the viewport of the surface with the short
+/// events.  The position is relative to the window.
+///
+/// `short_event_viewport_size` the size of the viewport mentioned above.
+///
+/// `current_adjustment` the adjustment of the surface within its viewport.
+fn compute_cursor_adjustment(
+    mouse: &FPoint,
+    new_vertical_scale: NonNegativeF32,
+    short_event_viewport_offset: &FPoint,
+    short_event_viewport_size: &FPoint,
+    current_adjustment: &SurfaceAdjustment,
+) -> f32 {
+    // The size of the surface with the short events _after_ the scaling is applied.
+    let scaled_short_event_surface = calendar::ui::compute_event_surface(
+        short_event_viewport_size,
+        f32::from(new_vertical_scale),
+        current_adjustment.vertical_offset,
+    );
+
+    let yrange = short_event_viewport_offset.y..short_event_viewport_offset.y + short_event_viewport_size.y;
+    let xrange = short_event_viewport_offset.x..short_event_viewport_offset.x + short_event_viewport_size.x;
+    // if the mouse cursor is within the viewport
+    if yrange.contains(&mouse.y) && xrange.contains(&mouse.x) {
+        // The size of the surface with the short events _before_ the scaling is applied.
+        let current_short_event_surface = calendar::ui::compute_event_surface(
+            short_event_viewport_size,
+            current_adjustment.vertical_scale,
+            current_adjustment.vertical_offset,
+        );
+
+        let current_abs_mouse: f32 = mouse.y - short_event_viewport_offset.y - current_short_event_surface.y;
+        // Given the height of the surface 100px and the position of the cursor 10px, the `old_rel_mouse` is 10% (0.1).
+        let old_rel_mouse: f32 = current_abs_mouse / current_short_event_surface.h;
+
+        // Given the `old_rel_mouse` is 10% and the height of the surface after the scaling is
+        // 120px, the mouse cursor position is to stay at 12px to be above the same event.
+        let new_abs_position = scaled_short_event_surface.h * old_rel_mouse;
+        // Given the values from above, the mouse cursor position is to be changed by 2px.
+        // Therefore, we return -2px as the difference for vertial offset of the surface.
+        new_abs_position - current_abs_mouse
+    } else {
+        0.
+    }
+}
+
 /// Sensibly changes the scale of the short event surface.  When the surface is scaled out (it
-/// get smaller), a gap appears between the bottom of the surface and the bottom of the viewport.
-/// Given that, the vertical offset of the surface is adjusted.
+/// gets smaller), a gap appears between the bottom of the surface and the bottom of its viewport.
+/// Given that, the vertical offset of the surface is to be adjusted to prevent the gap.
 fn scale_short_events(
     current: &SurfaceAdjustment,
-    short_event_viewport: &FPoint,
-    scale: f32,
+    short_event_viewport_size: &FPoint,
+    new_vertical_scale: NonNegativeF32,
 ) -> SurfaceAdjustment {
-    let new_vertical_scale = 0f32.max(current.vertical_scale + scale);
+    // The size of the surface with the short events _after_ the scaling is applied.
     let scaled_short_event_surface = calendar::ui::compute_event_surface(
-        short_event_viewport,
-        new_vertical_scale,
+        short_event_viewport_size,
+        f32::from(new_vertical_scale),
         current.vertical_offset,
     );
 
-    let bottom = short_event_viewport.y;
+    let bottom = short_event_viewport_size.y;
+    // This value can be smaller than the bottom edge of the viewport.
     let scaled_short_events_surface_bottom =
         scaled_short_event_surface.y + scaled_short_event_surface.h;
     let bottom_gap = bottom - scaled_short_events_surface_bottom;
     SurfaceAdjustment {
         vertical_offset: current.vertical_offset + bottom_gap.max(0f32),
-        vertical_scale: new_vertical_scale,
+        vertical_scale: f32::from(new_vertical_scale),
     }
 }
 
