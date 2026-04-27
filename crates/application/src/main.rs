@@ -425,6 +425,29 @@ fn unsafe_main() {
                                             y: event.motion.y,
                                         })
                                     }
+
+                                    sdl::SDL_EVENT_MOUSE_BUTTON_DOWN => {
+                                        use state::MouseButton::*;
+                                        let button: Option<state::MouseButton> =
+                                            match event.button.button {
+                                                1 => Some(Left),
+                                                2 => Some(Right),
+                                                3 => Some(Middle),
+                                                4 => Some(Back),
+                                                5 => Some(Forth),
+                                                _ => None,
+                                            };
+
+                                        if let Some(button) = button {
+                                            events.push(state::Action::MouseButtonDown {
+                                                position: sdl::SDL_FPoint {
+                                                    x: event.button.x,
+                                                    y: event.button.y,
+                                                },
+                                                button,
+                                            });
+                                        }
+                                    }
                                     _ => (),
                                 }
                             }

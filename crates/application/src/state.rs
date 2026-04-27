@@ -255,6 +255,66 @@ pub struct UserInterface {
     pub mouse_position: FPoint,
 }
 
+struct LongEventSurface {
+    offset: FPoint,
+    size: FPoint,
+}
+
+impl LongEventSurface {
+    fn new(event_offset: &FPoint, window_size: &Point, long_event_surface_height: f32) -> Self {
+        let long_event_viewport_offset = *event_offset;
+        let long_event_viewport_size = FPoint {
+            x: window_size.x as f32 - event_offset.x,
+            y: long_event_surface_height,
+        };
+
+        Self {
+            offset: long_event_viewport_offset,
+            size: long_event_viewport_size,
+        }
+    }
+}
+
+/// The viewport through which the short event surface is seen.
+struct ShortEventViewport {
+    offset: FPoint,
+    size: FPoint,
+}
+
+impl ShortEventViewport {
+    fn new(event_offset: &FPoint, window_size: &Point, long_event_surface_height: f32) -> Self {
+        let short_event_viewport_offset = FPoint {
+            x: event_offset.x,
+            y: event_offset.y + long_event_surface_height,
+        };
+
+        let short_event_viewport_size: FPoint = window_size
+            .as_fpoint()
+            .sub_fpoint(short_event_viewport_offset);
+        Self {
+            offset: short_event_viewport_offset,
+            size: short_event_viewport_size,
+        }
+    }
+
+    fn from_long_event_surface(long_event_surface: &LongEventSurface, window_size: &Point) -> Self {
+        Self::new(
+            &long_event_surface.offset,
+            window_size,
+            long_event_surface.offset.y + long_event_surface.size.y,
+        )
+    }
+
+    fn into_rect(self) -> Rect {
+        Rect {
+            x: self.offset.x as i32,
+            y: self.offset.y as i32,
+            w: self.size.x as i32,
+            h: self.size.y as i32,
+        }
+    }
+}
+
 impl UserInterface {
     fn new(
         title_font_height: std::ffi::c_int,
@@ -294,17 +354,8 @@ impl UserInterface {
         scale_value: f32,
         window_size: &Point,
     ) -> SurfaceAdjustment {
-        let short_event_viewport_offset = {
-            FPoint {
-                x: self.event_offset.x,
-                y: self.event_offset.y + long_event_surface_height,
-            }
-        };
-
-        let short_event_viewport_size = FPoint {
-            x: window_size.x as f32 - short_event_viewport_offset.x,
-            y: window_size.y as f32 - short_event_viewport_offset.y,
-        };
+        let short_event_viewport =
+            ShortEventViewport::new(&self.event_offset, window_size, long_event_surface_height);
 
         let current_adjustment = &self.adjustment;
         let new_vertical_scale =
@@ -312,8 +363,8 @@ impl UserInterface {
         let diff: f32 = compute_cursor_adjustment(
             &self.mouse_position,
             new_vertical_scale,
-            &short_event_viewport_offset,
-            &short_event_viewport_size,
+            &short_event_viewport.offset,
+            &short_event_viewport.size,
             current_adjustment,
         );
 
@@ -324,25 +375,12 @@ impl UserInterface {
 
         scale_short_events(
             &mouse_adjustment,
-            &short_event_viewport_size,
+            &short_event_viewport.size,
             new_vertical_scale,
         )
     }
 }
 
-fn calculate_viewport(
-    event_offset: &FPoint,
-    window_size: &Point,
-    long_event_surface_height: f32,
-) -> Rect {
-    let yoffset = event_offset.y + long_event_surface_height;
-    Rect {
-        x: event_offset.x as i32,
-        y: yoffset as i32,
-        w: window_size.x - event_offset.x as i32,
-        h: window_size.y - yoffset as i32,
-    }
-}
 // The state of the application
 pub struct App<F: Frontend> {
     pub calendar: Calendar<F>,
@@ -399,7 +437,7 @@ impl<F: Frontend> App<F> {
     fn create_view(&mut self, window_size: &Point) -> View {
         let clash_size: u8 = Self::get_clash_size(&self.calendar);
         let long_event_surface_height =
-            View::compute_top_panel_height(self.ui.title_font_height, clash_size);
+            View::compute_long_event_surface_height(self.ui.title_font_height, clash_size);
         View::new(
             Self::compute_viewport_size(
                 &self.ui.event_offset,
@@ -531,6 +569,21 @@ impl<F: Frontend> App<F> {
         Ok(())
     }
 
+    fn compute_long_event_height(&self) -> f32 {
+        View::compute_long_event_surface_height(
+            self.ui.title_font_height,
+            Self::get_clash_size(&self.calendar),
+        )
+    }
+
+    fn compute_long_event_surface(&self, window_size: &Point) -> LongEventSurface {
+        LongEventSurface::new(
+            &self.ui.event_offset,
+            window_size,
+            self.compute_long_event_height(),
+        )
+    }
+
     pub fn create_render_data<'wdrect, 'ttc>(
         &'wdrect mut self,
         frontend: &'ttc mut F,
@@ -549,10 +602,7 @@ impl<F: Frontend> App<F> {
                     self.calendar.request_render();
                 }
                 Zoom(value) => {
-                    let long_event_surface_height: f32 = View::compute_top_panel_height(
-                        self.ui.title_font_height,
-                        Self::get_clash_size(&self.calendar),
-                    );
+                    let long_event_surface_height: f32 = self.compute_long_event_height();
                     self.ui.adjustment = self.ui.compute_short_event_surface_adjustment(
                         long_event_surface_height,
                         value,
@@ -566,6 +616,40 @@ impl<F: Frontend> App<F> {
                 }
                 SubtractWeek => self.calendar.subtract_week(),
                 AddWeek => self.calendar.add_week(),
+                MouseButtonDown {
+                    position: mouse_position,
+                    button,
+                } => {
+                    if let MouseButton::Left = button {
+                        let long_event_surface = self.compute_long_event_surface(&window_size);
+                        let short_event_viewport = ShortEventViewport::from_long_event_surface(
+                            &long_event_surface,
+                            &window_size,
+                        );
+
+                        let is_long_event_click = is_point_between_points(
+                            mouse_position,
+                            long_event_surface.offset,
+                            long_event_surface
+                                .offset
+                                .add_fpoint(long_event_surface.size),
+                        );
+
+                        let is_short_event_click = is_point_between_points(
+                            mouse_position,
+                            short_event_viewport.offset,
+                            short_event_viewport
+                                .offset
+                                .add_fpoint(short_event_viewport.size),
+                        );
+
+                        if is_long_event_click {
+                            println!("long event click")
+                        } else if is_short_event_click {
+                            println!("short event click")
+                        }
+                    }
+                }
             }
         }
 
@@ -602,25 +686,24 @@ impl<F: Frontend> App<F> {
                 x => x,
             });
 
-        let long_event_surface_height = View::compute_top_panel_height(
+        let long_event_surface_height = View::compute_long_event_surface_height(
             self.ui.title_font_height,
             Self::get_clash_size(&self.calendar),
         );
 
-        let short_event_viewport: Rect = calculate_viewport(
+        let short_event_viewport: Rect = ShortEventViewport::new(
             &self.ui.event_offset,
             &window_size,
             long_event_surface_height,
-        );
+        )
+        .into_rect();
+
         let view: calendar::ui::View = self.create_view(&window_size);
-        let hours_viewport: Rect = {
-            let y = short_event_viewport.y as i32;
-            Rect {
-                y,
-                x: 10,
-                w: self.ui.event_offset.x as i32,
-                h: window_size.y,
-            }
+        let hours_viewport = Rect {
+            y: short_event_viewport.y,
+            x: 10,
+            w: self.ui.event_offset.x as i32,
+            h: window_size.y,
         };
 
         Self::reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
@@ -670,6 +753,75 @@ impl From<NonNegativeF32> for f32 {
     }
 }
 
+#[inline]
+fn is_point_between_points(
+    point: impl std::borrow::Borrow<FPoint>,
+    left_top: impl std::borrow::Borrow<FPoint>,
+    bottom_right: impl std::borrow::Borrow<FPoint>,
+) -> bool {
+    let FPoint { x, y } = point.borrow();
+    let FPoint { x: lx, y: ly } = left_top.borrow();
+    let FPoint { x: rx, y: ry } = bottom_right.borrow();
+    x > lx && y > ly && x < rx && y < ry
+}
+
+fn fpoint_add(
+    left: impl std::borrow::Borrow<FPoint>,
+    right: impl std::borrow::Borrow<FPoint>,
+) -> FPoint {
+    let left: &FPoint = left.borrow();
+    let right: &FPoint = right.borrow();
+    FPoint {
+        x: left.x + right.x,
+        y: left.y + right.y,
+    }
+}
+
+fn fpoint_sub(
+    left: impl std::borrow::Borrow<FPoint>,
+    right: impl std::borrow::Borrow<FPoint>,
+) -> FPoint {
+    let left: &FPoint = left.borrow();
+    let right: &FPoint = right.borrow();
+    FPoint {
+        x: left.x - right.x,
+        y: left.y - right.y,
+    }
+}
+
+trait AddFPoint {
+    fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint;
+}
+
+impl<T: std::borrow::Borrow<FPoint>> AddFPoint for T {
+    fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
+        fpoint_add(self, right)
+    }
+}
+
+trait SubFPoint {
+    fn sub_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint;
+}
+
+impl<T: std::borrow::Borrow<FPoint>> SubFPoint for T {
+    fn sub_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
+        fpoint_sub(self, right)
+    }
+}
+
+trait AsFPoint {
+    fn as_fpoint(&self) -> FPoint;
+}
+
+impl AsFPoint for Point {
+    fn as_fpoint(&self) -> FPoint {
+        FPoint {
+            x: self.x as f32,
+            y: self.y as f32,
+        }
+    }
+}
+
 /// When the surface with the short events is scaled, technically it means that only its size
 /// changes.  Given that, the events slip away from under the mouse.  Therefore, the vertical
 /// offset of the surface is to be adjusted.
@@ -701,12 +853,13 @@ fn compute_cursor_adjustment(
         current_adjustment.vertical_offset,
     );
 
-    let yrange =
-        short_event_viewport_offset.y..short_event_viewport_offset.y + short_event_viewport_size.y;
-    let xrange =
-        short_event_viewport_offset.x..short_event_viewport_offset.x + short_event_viewport_size.x;
+    let is_within = is_point_between_points(
+        mouse,
+        short_event_viewport_offset,
+        short_event_viewport_offset.add_fpoint(short_event_viewport_size),
+    );
     // if the mouse cursor is within the viewport
-    if yrange.contains(&mouse.y) && xrange.contains(&mouse.x) {
+    if is_within {
         // The size of the surface with the short events _before_ the scaling is applied.
         let current_short_event_surface = calendar::ui::compute_event_surface(
             short_event_viewport_size,
@@ -758,11 +911,35 @@ fn scale_short_events(
 
 pub enum Action {
     WindowResize,
-    Scroll(f32),
-    Zoom(f32),
-    MouseMove { x: f32, y: f32 },
     SubtractWeek,
     AddWeek,
+    // NOTE(alex): the following actions depends on the layout of the window.  This causes a quite
+    // a couple of questions:
+    //
+    // 1. Should it be two kinds of Action?  Something like layout dependent and layout independent
+    //    action?
+    // 2. If an action causes layout change should it be within the frame in which the action
+    //    handled or on the following?
+    // 3. Probably, the entire layout is not needed for these events.  Given that, only the
+    //    required can be calculated and the new layout is calculated based on the action
+    Scroll(f32),
+    Zoom(f32),
+    MouseMove {
+        x: f32,
+        y: f32,
+    },
+    MouseButtonDown {
+        position: FPoint,
+        button: MouseButton,
+    },
+}
+
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Back,
+    Forth,
 }
 
 pub fn create_long_events<TTC: TextTextureRegistry>(
