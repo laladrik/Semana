@@ -352,20 +352,6 @@ pub struct App<F: Frontend> {
 const DUMB_CELL_WIDTH: f32 = 130f32;
 
 impl<F: Frontend> App<F> {
-    fn get_clash_size(calendar: &Calendar<F>) -> calendar::Lane {
-        match calendar.state {
-            CalendarState::Loading { .. } => 0,
-            CalendarState::Ready {
-                long_event_clash_size,
-                ..
-            }
-            | CalendarState::Rendering {
-                long_event_clash_size,
-                ..
-            } => long_event_clash_size,
-        }
-    }
-
     pub fn new(
         frontend: &mut F,
         title_font_height: std::ffi::c_int,
@@ -383,8 +369,22 @@ impl<F: Frontend> App<F> {
         Ok(Self { calendar, ui })
     }
 
+    fn get_clash_size(calendar: &Calendar<F>) -> calendar::Lane {
+        match calendar.state {
+            CalendarState::Loading { .. } => 0,
+            CalendarState::Ready {
+                long_event_clash_size,
+                ..
+            }
+            | CalendarState::Rendering {
+                long_event_clash_size,
+                ..
+            } => long_event_clash_size,
+        }
+    }
+
     #[inline]
-    fn viewport_size(
+    fn compute_viewport_size(
         event_offset: &FPoint,
         window_size: &Point,
         long_event_surface_height: f32,
@@ -401,7 +401,7 @@ impl<F: Frontend> App<F> {
         let long_event_surface_height =
             View::compute_top_panel_height(self.ui.title_font_height, clash_size);
         View::new(
-            Self::viewport_size(
+            Self::compute_viewport_size(
                 &self.ui.event_offset,
                 window_size,
                 long_event_surface_height,
@@ -412,7 +412,7 @@ impl<F: Frontend> App<F> {
         )
     }
 
-    fn reposition_hours_text_objects(&self, frontend: &mut F, width: f32, view: &View) {
+    fn reposition_hours_text_objects(frontend: &mut F, width: f32, view: &View) {
         let cell_height = view.cell_height;
         let offset_y = view.short_event_surface.y;
         let hours_registry: &mut _ = frontend.get_hours_text_registry();
@@ -448,7 +448,7 @@ impl<F: Frontend> App<F> {
         Ok(())
     }
 
-    fn reposition_days_text_objects(&self, frontend: &mut F, offset: f32, view: &View) {
+    fn reposition_days_text_objects(frontend: &mut F, offset: f32, view: &View) {
         let cell_width = view.cell_width;
         let cell_height = view.cell_height;
         let positions = (0..7).map(|day| FRect {
@@ -463,7 +463,7 @@ impl<F: Frontend> App<F> {
             .update_positions(positions);
     }
 
-    fn reposition_dates_text_objects(&self, frontend: &mut F, offset: f32, view: &View) {
+    fn reposition_dates_text_objects(frontend: &mut F, offset: f32, view: &View) {
         let cell_width = view.cell_width;
         let cell_height = view.cell_height;
         let positions = (0..7).map(|day| FRect {
@@ -623,7 +623,7 @@ impl<F: Frontend> App<F> {
             }
         };
 
-        self.reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
+        Self::reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
         let horizontal_offset = self.ui.event_offset.x as i32;
         let dates_viewport = Rect {
             x: horizontal_offset,
@@ -632,8 +632,8 @@ impl<F: Frontend> App<F> {
             h: 200,
         };
 
-        self.reposition_days_text_objects(frontend, 35f32, &view);
-        self.reposition_dates_text_objects(frontend, 10f32, &view);
+        Self::reposition_days_text_objects(frontend, 35f32, &view);
+        Self::reposition_dates_text_objects(frontend, 10f32, &view);
         self.calendar.get_ready(
             &view,
             long_event_text_registry,
@@ -701,8 +701,10 @@ fn compute_cursor_adjustment(
         current_adjustment.vertical_offset,
     );
 
-    let yrange = short_event_viewport_offset.y..short_event_viewport_offset.y + short_event_viewport_size.y;
-    let xrange = short_event_viewport_offset.x..short_event_viewport_offset.x + short_event_viewport_size.x;
+    let yrange =
+        short_event_viewport_offset.y..short_event_viewport_offset.y + short_event_viewport_size.y;
+    let xrange =
+        short_event_viewport_offset.x..short_event_viewport_offset.x + short_event_viewport_size.x;
     // if the mouse cursor is within the viewport
     if yrange.contains(&mouse.y) && xrange.contains(&mouse.x) {
         // The size of the surface with the short events _before_ the scaling is applied.
@@ -712,7 +714,8 @@ fn compute_cursor_adjustment(
             current_adjustment.vertical_offset,
         );
 
-        let current_abs_mouse: f32 = mouse.y - short_event_viewport_offset.y - current_short_event_surface.y;
+        let current_abs_mouse: f32 =
+            mouse.y - short_event_viewport_offset.y - current_short_event_surface.y;
         // Given the height of the surface 100px and the position of the cursor 10px, the `old_rel_mouse` is 10% (0.1).
         let old_rel_mouse: f32 = current_abs_mouse / current_short_event_surface.h;
 
