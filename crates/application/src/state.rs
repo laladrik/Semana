@@ -539,6 +539,7 @@ impl<F: Frontend> App<F> {
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
     ) -> Result<RenderData<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        // :userInputHandling
         for event in events {
             use Action::*;
             match event {
@@ -575,32 +576,31 @@ impl<F: Frontend> App<F> {
             App::create_dates_text_objects(frontend, cell_width, &self.calendar.week_start)?;
         }
 
-        let bald_state: CalendarState<_> = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
-        let state = std::mem::replace(&mut self.calendar.state, bald_state);
-        let new_state: &mut _ = &mut self.calendar.state;
-        *new_state = match state {
-            CalendarState::Loading {
-                agenda_source_handle,
-            } => {
-                let src = frontend.agenda_source();
-                if src.is_ready(&agenda_source_handle) {
-                    let agenda: calendar::obtain::WeekScheduleWithLanes =
-                        src.fetch(&agenda_source_handle, &self.calendar.week_start);
-                    let week_data = WeekData { agenda };
-                    let long_event_clash_size = week_data.agenda.long.calculate_biggest_clash();
-                    src.free(agenda_source_handle);
-                    CalendarState::Rendering {
-                        week_data,
-                        long_event_clash_size,
-                    }
-                } else {
-                    CalendarState::Loading {
-                        agenda_source_handle,
+        self.calendar
+            .state
+            .switch_infallible(|current_state| match current_state {
+                CalendarState::Loading {
+                    agenda_source_handle,
+                } => {
+                    let src = frontend.agenda_source();
+                    if src.is_ready(&agenda_source_handle) {
+                        let agenda: calendar::obtain::WeekScheduleWithLanes =
+                            src.fetch(&agenda_source_handle, &self.calendar.week_start);
+                        let week_data = WeekData { agenda };
+                        let long_event_clash_size = week_data.agenda.long.calculate_biggest_clash();
+                        src.free(agenda_source_handle);
+                        CalendarState::Rendering {
+                            week_data,
+                            long_event_clash_size,
+                        }
+                    } else {
+                        CalendarState::Loading {
+                            agenda_source_handle,
+                        }
                     }
                 }
-            }
-            x => x,
-        };
+                x => x,
+            });
 
         let long_event_surface_height = View::compute_top_panel_height(
             self.ui.title_font_height,

@@ -328,6 +328,7 @@ impl AgendaSource for KhalAgendaSource {
             let output_str: &str = output_cstr.to_str().expect("can't convert to utf-8");
             calendar::obtain::parse_events(&calendar::obtain::NanoSerde, output_str, week_start)
                 .map(|events| calendar::obtain::get_lanes(events, week_start))
+                // FIXME(alex): this panics if the process provides unsupported input
                 .expect("fail to parse events")
         }
     }

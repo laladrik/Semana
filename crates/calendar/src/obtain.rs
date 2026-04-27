@@ -136,6 +136,8 @@ where
 
         for item in event_items {
             let (is_short, mut event): (bool, Event) = item;
+            // The end date of event is shortened down to the last day of the week for the case
+            // when a long event DOES NOT end by the end of the current week.
             event.end_date = event.end_date.min(last_day_in_the_range.clone());
             if is_short {
                 week_schedule.short.push(event)
@@ -159,7 +161,9 @@ impl EventData {
 }
 
 pub struct Events {
+    /// The array of events which span across multiple days.
     long: EventVec,
+    /// The array of events which are within a day.
     short: EventVec,
 }
 
@@ -296,6 +300,16 @@ fn find_clashes(
     ret
 }
 
+/// Given the 3 types of events:
+/// 1. Long event: spans across multiple days (greater than or equal 24h).
+/// 2. Short event: stays within a day. (less than 24h)
+/// 3. CrossNight event: a short event but which start one day and finishes on the following (less than 24h).
+///
+/// The canonicalize them into 2 types (long and short).  The CrossNight event is turned into a
+/// short event cropping its head or tail. The head is cropped if the starting date of `event`
+/// equals to `date`.  The tail is cropped if the ending date of `event` equal to `date`.  This
+/// algorithm is based on the _assumption_ that the function `short_event_filter` is called for an
+/// event of this kind _twice_.
 fn short_event_filter(mut event: Event, date: &Date) -> Option<(bool, Event)> {
     let is_all_day: bool = match event.all_day.as_str() {
         "True" => true,
