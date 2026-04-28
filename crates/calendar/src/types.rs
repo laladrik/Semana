@@ -1,3 +1,4 @@
+#[cfg(not(feature = "sdl3-geometry"))]
 #[cfg_attr(test, derive(PartialEq, Debug))]
 #[repr(C)]
 pub struct Point {
@@ -5,6 +6,7 @@ pub struct Point {
     pub y: f32,
 }
 
+#[cfg(not(feature = "sdl3-geometry"))]
 impl Point {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
@@ -32,5 +34,9 @@ pub type FPoint = sdl3_sys::SDL_FPoint;
 
 #[cfg(feature = "sdl3-geometry")]
 pub type FRect = sdl3_sys::SDL_FRect;
+
+#[cfg(feature = "sdl3-geometry")]
+// TODO(alex): remove this confusion ASAP.
+pub type Point = sdl3_sys::SDL_FPoint;
 
 pub type Size = Point;
