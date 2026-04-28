@@ -54,6 +54,22 @@ impl<H> CalendarState<H> {
         }
     }
 
+    fn obtain_long_events_titles(&self) -> &[impl AsRef<str>] {
+        if let Self::Ready { week_data, .. } = self {
+            week_data.agenda.long.titles.as_slice()
+        } else {
+            NO_TITLES.as_slice()
+        }
+    }
+
+    fn obtain_short_events_titles(&self) -> &[impl AsRef<str>] {
+        if let Self::Ready { week_data, .. } = self {
+            week_data.agenda.short.titles.as_slice()
+        } else {
+            NO_TITLES.as_slice()
+        }
+    }
+
     /// It provides a memory-safe way to switch the state.  The function creates an uninitialized
     /// state to replace the current one.  Then it tries to switch to the next state provided by
     /// the function `update`.  The function must return any valid state and an error if any has
@@ -242,6 +258,8 @@ impl<F: Frontend> Calendar<F> {
 }
 
 static NO_RECT: calendar::render::Rectangles = Vec::new();
+static NO_TITLES: Vec<String> = Vec::new();
+
 struct EventRectangles<'rect> {
     long: &'rect calendar::render::Rectangles,
     short: &'rect calendar::render::Rectangles,
@@ -301,7 +319,7 @@ impl ShortEventViewport {
         Self::new(
             &long_event_surface.offset,
             window_size,
-            long_event_surface.offset.y + long_event_surface.size.y,
+            long_event_surface.size.y,
         )
     }
 
@@ -592,6 +610,7 @@ impl<F: Frontend> App<F> {
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
     ) -> Result<RenderData<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        let mut event_mouse_click: Option<MouseEventClick> = None;
         // :userInputHandling
         for event in events {
             use Action::*;
@@ -627,7 +646,7 @@ impl<F: Frontend> App<F> {
                             &window_size,
                         );
 
-                        let is_long_event_click = is_point_between_points(
+                        let is_long_event_click = is_fpoint_between_points(
                             mouse_position,
                             long_event_surface.offset,
                             long_event_surface
@@ -635,7 +654,7 @@ impl<F: Frontend> App<F> {
                                 .add_fpoint(long_event_surface.size),
                         );
 
-                        let is_short_event_click = is_point_between_points(
+                        let is_short_event_click = is_fpoint_between_points(
                             mouse_position,
                             short_event_viewport.offset,
                             short_event_viewport
@@ -644,9 +663,16 @@ impl<F: Frontend> App<F> {
                         );
 
                         if is_long_event_click {
-                            println!("long event click")
+                            event_mouse_click = Some(MouseEventClick {
+                                event_kind: EventKind::Long,
+                                position: mouse_position,
+                            });
                         } else if is_short_event_click {
-                            println!("short event click")
+                            let position = mouse_position.sub_fpoint(short_event_viewport.offset);
+                            event_mouse_click = Some(MouseEventClick {
+                                event_kind: EventKind::Short,
+                                position,
+                            });
                         }
                     }
                 }
@@ -724,6 +750,46 @@ impl<F: Frontend> App<F> {
             &self.ui.event_offset,
         )?;
         let rectangles: EventRectangles = self.calendar.state.obtain_events();
+        if let Some(MouseEventClick {
+            event_kind,
+            position,
+        }) = event_mouse_click
+        {
+            match event_kind {
+                EventKind::Long => {
+                    let titles = self.calendar.state.obtain_long_events_titles();
+                    for (i, rect) in rectangles.long.iter().enumerate() {
+                        let left_top = rect.at;
+                        let bottom_right = rect.at.add_fpoint(rect.size);
+                        let is_in = is_fpoint_between_points(position, left_top, bottom_right);
+                        if is_in {
+                            if let Some(title) = titles.get(i).as_ref() {
+                                println!("click on {}", title.as_ref());
+                            } else {
+                                println!("short clicked");
+                            }
+                            break;
+                        }
+                    }
+                }
+                EventKind::Short => {
+                    let titles = self.calendar.state.obtain_short_events_titles();
+                    for (i, rect) in rectangles.short.iter().enumerate() {
+                        let left_top = rect.at;
+                        let right_bottom = rect.at.add_fpoint(rect.size);
+                        let is_in = is_fpoint_between_points(position, left_top, right_bottom);
+                        if is_in {
+                            if let Some(title) = titles.get(i).as_ref() {
+                                println!("click on {}", title.as_ref());
+                            } else {
+                                println!("short clicked");
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         Ok(RenderData {
             view,
             long_event_rectangles: rectangles.long,
@@ -736,6 +802,18 @@ impl<F: Frontend> App<F> {
             frontend,
         })
     }
+}
+
+enum EventKind {
+    // the position is relative to the long event surface
+    Long,
+    // the position is relative to the short event viewport
+    Short,
+}
+
+struct MouseEventClick {
+    event_kind: EventKind,
+    position: FPoint,
 }
 
 #[derive(Clone, Copy)]
@@ -754,7 +832,7 @@ impl From<NonNegativeF32> for f32 {
 }
 
 #[inline]
-fn is_point_between_points(
+fn is_fpoint_between_points(
     point: impl std::borrow::Borrow<FPoint>,
     left_top: impl std::borrow::Borrow<FPoint>,
     bottom_right: impl std::borrow::Borrow<FPoint>,
@@ -853,7 +931,7 @@ fn compute_cursor_adjustment(
         current_adjustment.vertical_offset,
     );
 
-    let is_within = is_point_between_points(
+    let is_within = is_fpoint_between_points(
         mouse,
         short_event_viewport_offset,
         short_event_viewport_offset.add_fpoint(short_event_viewport_size),
