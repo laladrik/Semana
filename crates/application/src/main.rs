@@ -375,8 +375,18 @@ fn unsafe_main() {
                             dates_text_texture_regirsty,
                         };
 
-                        let mut app =
-                            App::new(&mut frontend, title_font_height, event_offset, mouse)?;
+                        let event_title_offset = sdl::SDL_FPoint {
+                            x: config::EVENT_TITLE_OFFSET_X,
+                            y: config::EVENT_TITLE_OFFSET_Y,
+                        };
+
+                        let mut app = App::new(
+                            &mut frontend,
+                            title_font_height,
+                            event_offset,
+                            mouse,
+                            event_title_offset,
+                        )?;
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
                             let mut events: Vec<state::Action> = Vec::new();

@@ -1,5 +1,3 @@
-use crate::config;
-
 use crate::render::RenderData;
 
 use calendar::{
@@ -74,7 +72,7 @@ impl<H> CalendarState<H> {
     /// state to replace the current one.  Then it tries to switch to the next state provided by
     /// the function `update`.  The function must return any valid state and an error if any has
     /// occurred.
-    fn switch<E>(&mut self, mut update: impl FnMut(Self) -> (Self, Option<E>)) -> Result<(), E> {
+    fn switch<E>(&mut self, update: impl FnOnce(Self) -> (Self, Option<E>)) -> Result<(), E> {
         // SAFETY: the bald_state is never read until the function finishes.
         let bald_state: CalendarState<_> = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
         let current_state = std::mem::replace(self, bald_state);
@@ -179,12 +177,13 @@ impl<F: Frontend> Calendar<F> {
     fn get_ready<'ttc>(
         &mut self,
         view: &View,
-        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
-        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        long_event_text_registration: EventTitleRegistration<'ttc, F::TextTextureRegistry>,
+        short_event_text_registration: EventTitleRegistration<'ttc, F::TextTextureRegistry>,
         event_offset: &FPoint,
     ) -> Result<(), F::Error> {
         use CalendarState::*;
-        self.state.switch(|current_state| match current_state {
+        let week_start = &self.week_start;
+        self.state.switch(move |current_state| match current_state {
             Loading { .. } | Ready { .. } => (current_state, None),
             Rendering {
                 week_data,
@@ -192,8 +191,8 @@ impl<F: Frontend> Calendar<F> {
             } => {
                 let short_event_rectangles_opt = create_short_events(
                     &week_data.agenda.short,
-                    &self.week_start,
-                    short_event_text_registry,
+                    week_start,
+                    short_event_text_registration,
                     view,
                 );
 
@@ -213,8 +212,8 @@ impl<F: Frontend> Calendar<F> {
                 let top_panel_heigth: f32 = view.calculate_top_panel_height();
                 let long_event_rectangles_opt = create_long_events(
                     &week_data.agenda.long,
-                    &self.week_start,
-                    long_event_text_registry,
+                    week_start,
+                    long_event_text_registration,
                     event_offset,
                     view.cell_width,
                     top_panel_heigth,
@@ -271,6 +270,7 @@ pub struct UserInterface {
     /// From where the all of the events are drawn.
     pub event_offset: FPoint,
     pub mouse_position: FPoint,
+    pub event_title_offset: FPoint,
 }
 
 struct LongEventSurface {
@@ -337,6 +337,7 @@ impl UserInterface {
     fn new(
         title_font_height: std::ffi::c_int,
         event_offset: FPoint,
+        event_title_offset: FPoint,
         mouse_position: FPoint,
     ) -> Self {
         // the values to scale and scroll the events grid (short events).
@@ -350,6 +351,7 @@ impl UserInterface {
             title_font_height,
             event_offset,
             mouse_position,
+            event_title_offset,
         }
     }
 
@@ -413,8 +415,9 @@ impl<F: Frontend> App<F> {
         title_font_height: std::ffi::c_int,
         event_offset: FPoint,
         mouse_position: FPoint,
+        event_title_offset: FPoint,
     ) -> Result<Self, F::Error> {
-        let ui = UserInterface::new(title_font_height, event_offset, mouse_position);
+        let ui = UserInterface::new(title_font_height, event_offset, event_title_offset, mouse_position);
         let calendar = Calendar::new(frontend)?;
         App::create_hours_text_objects(frontend, ui.event_offset.x)?;
 
@@ -743,12 +746,21 @@ impl<F: Frontend> App<F> {
 
         Self::reposition_days_text_objects(frontend, 35f32, &view);
         Self::reposition_dates_text_objects(frontend, 10f32, &view);
+
+        let create_registration = |text_registry|  {
+            EventTitleRegistration {
+                text_registry,
+                event_title_offset: &self.ui.event_title_offset,
+            }
+        };
+
         self.calendar.get_ready(
             &view,
-            long_event_text_registry,
-            short_event_text_registry,
+            create_registration(long_event_text_registry),
+            create_registration(short_event_text_registry),
             &self.ui.event_offset,
         )?;
+
         let rectangles: EventRectangles = self.calendar.state.obtain_events();
         if let Some(MouseEventClick {
             event_kind,
@@ -1020,30 +1032,30 @@ pub enum MouseButton {
     Forth,
 }
 
-pub fn create_long_events<TTC: TextTextureRegistry>(
+fn create_long_events<'a, TTC: TextTextureRegistry>(
     event_data: &calendar::EventData,
     week_start: &calendar::date::Date,
-    text_registry: &mut TTC,
-    offset: &FPoint,
+    mut registration: EventTitleRegistration<'a, TTC>,
+    event_offset: &FPoint,
     cell_width: f32,
     top_panel_height: f32,
 ) -> Result<calendar::render::Rectangles, TTC::Error> {
     let replacement = calendar::ui::create_long_event_rectangles(
-        offset,
+        event_offset,
         event_data,
         week_start,
         cell_width,
         top_panel_height,
     );
 
-    text_registry.clear();
-    register_event_titles(text_registry, &event_data.titles, &replacement).map(|_| replacement)
+    registration.text_registry.clear();
+    register_event_titles(&mut registration, &event_data.titles, &replacement).map(|_| replacement)
 }
 
-fn create_short_events<TTC: TextTextureRegistry>(
+fn create_short_events<'a, TTC: TextTextureRegistry>(
     event_data: &calendar::EventData,
     week_start: &calendar::date::Date,
-    text_registry: &mut TTC,
+    mut registration: EventTitleRegistration<'a, TTC>,
     view: &View,
 ) -> Result<calendar::render::Rectangles, TTC::Error> {
     let new_rectangles = calendar::ui::create_short_event_rectangles(
@@ -1052,8 +1064,8 @@ fn create_short_events<TTC: TextTextureRegistry>(
         week_start,
     );
 
-    text_registry.clear();
-    register_event_titles(text_registry, &event_data.titles, &new_rectangles)
+    registration.text_registry.clear();
+    register_event_titles(&mut registration, &event_data.titles, &new_rectangles)
         .map(|_| new_rectangles)
 }
 
@@ -1134,24 +1146,29 @@ pub trait TextTextureRegistry {
     ) -> Result<(), Self::Error>;
 }
 
-fn register_event_titles<Str, TTC: TextTextureRegistry>(
-    text_registry: &mut TTC,
+struct EventTitleRegistration<'a, TTC: TextTextureRegistry> {
+    event_title_offset: &'a FPoint,
+    text_registry: &'a mut TTC,
+}
+
+fn register_event_titles<'a, Str, TTC: TextTextureRegistry> (
+    registration: &mut EventTitleRegistration<'a, TTC>,
     titles: &[Str],
     rectangles: &[calendar::render::Rectangle],
 ) -> Result<(), TTC::Error>
 where
     Str: AsRef<str>,
 {
+    let offset = registration.event_title_offset;
+    let text_registry: &mut _ = registration.text_registry;
     assert_eq!(titles.len(), rectangles.len());
     for item in titles.iter().zip(rectangles.iter()) {
         let (title, rectangle): (&Str, &calendar::render::Rectangle) = item;
-        let offset_x = config::EVENT_TITLE_OFFSET_X;
-        let offset_y = config::EVENT_TITLE_OFFSET_Y;
         let dstrect = FRect {
-            x: rectangle.at.x + offset_x,
-            y: rectangle.at.y + offset_y,
-            w: rectangle.size.x - offset_x * 2f32,
-            h: rectangle.size.y - offset_y * 2f32,
+            x: rectangle.at.x + offset.x,
+            y: rectangle.at.y + offset.y,
+            w: rectangle.size.x - offset.x * 2f32,
+            h: rectangle.size.y - offset.y * 2f32,
         };
 
         text_registry.create(title.as_ref(), Color::BLACK, dstrect)?;
