@@ -9,8 +9,15 @@ use sdlext::Color;
 
 pub enum RenderData<'rect, 'ttc, TTC, F> {
     WeekView(WeekViewRenderData<'rect, 'ttc, TTC, F>),
-    EventView,
+    EventView(EventViewRenderData<'ttc, TTC>),
 }
+
+pub struct EventViewRenderData<'ttc, TTC> {
+    pub text_registry: &'ttc TTC,
+}
+
+type ERD<'renderer, 'ttc, 'font> =
+    EventViewRenderData<'ttc, crate::TextTextureRegistry<'renderer, 'font>>;
 
 type RDA<'renderer, 'rect, 'ttc, 'font> = RenderData<
     'rect,
@@ -38,15 +45,23 @@ type RD<'renderer, 'rect, 'ttc, 'font> = WeekViewRenderData<
     DumbFrontend<'renderer, 'font>,
 >;
 
-
 pub fn render(renderer: &sdlext::Renderer, data: &RDA) -> sdlext::Result<()> {
     match data {
-        RenderData::WeekView(week_view_render_data) => render_week_data(renderer, week_view_render_data),
-        RenderData::EventView => todo!(),
+        RenderData::WeekView(week_view_render_data) => {
+            render_week_view(renderer, week_view_render_data)
+        }
+        RenderData::EventView(v) => render_event_view(renderer, v),
     }
 }
 
-fn render_week_data(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
+fn render_event_view(renderer: &sdlext::Renderer, data: &ERD) -> sdlext::Result<()> {
+    renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
+    renderer.clear()?;
+    data.text_registry.render()?;
+    renderer.present()
+}
+
+fn render_week_view(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
     render_events(renderer, data)?;

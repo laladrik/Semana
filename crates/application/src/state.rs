@@ -1,4 +1,4 @@
-use crate::render::{RenderData, WeekViewRenderData};
+use crate::render::{EventViewRenderData, RenderData, WeekViewRenderData};
 
 use calendar::{
     date::DateStream,
@@ -617,12 +617,14 @@ impl<F: Frontend> App<F> {
         long_event_text_registry: &'ttc mut F::TextTextureRegistry,
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<WeekViewNewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        event_details_text_texture_regirsty: &'ttc mut F::TextTextureRegistry,
+    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
         let mut event_mouse_click: Option<MouseEventClick> = None;
         // :userInputHandling
         for event in events {
             use Action::*;
             match event {
+                Escape => (),
                 WindowResize => self.calendar.request_render(),
                 Scroll(value) => {
                     self.ui.add_adjustment(value);
@@ -765,42 +767,30 @@ impl<F: Frontend> App<F> {
         )?;
 
         let rectangles: EventRectangles = self.calendar.state.obtain_events();
-        if let Some(MouseEventClick {
-            event_kind,
-            position,
-        }) = event_mouse_click
-        {
+        if let Some(mouse_click) = event_mouse_click {
+            let MouseEventClick {
+                event_kind,
+                position,
+            } = mouse_click;
             match event_kind {
                 EventKind::Long => {
                     let titles = self.calendar.state.obtain_long_events_titles();
-                    for (i, rect) in rectangles.long.iter().enumerate() {
-                        let left_top = rect.at;
-                        let bottom_right = rect.at.add_fpoint(rect.size);
-                        let is_in = is_fpoint_between_points(position, left_top, bottom_right);
-                        if is_in {
-                            if let Some(title) = titles.get(i).as_ref() {
-                                println!("click on {}", title.as_ref());
-                            } else {
-                                println!("short clicked");
-                            }
-                            break;
-                        }
+                    if let Some(event) = find_clicked_event(&position, rectangles.long) {
+                        return Self::transit_to_event_view(
+                            titles[event].as_ref(),
+                            &window_size,
+                            event_details_text_texture_regirsty,
+                        );
                     }
                 }
                 EventKind::Short => {
                     let titles = self.calendar.state.obtain_short_events_titles();
-                    for (i, rect) in rectangles.short.iter().enumerate() {
-                        let left_top = rect.at;
-                        let right_bottom = rect.at.add_fpoint(rect.size);
-                        let is_in = is_fpoint_between_points(position, left_top, right_bottom);
-                        if is_in {
-                            if let Some(title) = titles.get(i).as_ref() {
-                                println!("click on {}", title.as_ref());
-                            } else {
-                                println!("short clicked");
-                            }
-                            break;
-                        }
+                    if let Some(event) = find_clicked_event(&position, rectangles.short) {
+                        return Self::transit_to_event_view(
+                            titles[event].as_ref(),
+                            &window_size,
+                            event_details_text_texture_regirsty,
+                        );
                     }
                 }
             }
@@ -817,11 +807,34 @@ impl<F: Frontend> App<F> {
             frontend,
         };
 
-        let ret = WeekViewNewState {
-            render_data,
+        Ok(NewState {
             activity: Activity::WeekView,
-        };
-        Ok(ret)
+            render_data: RenderData::WeekView(render_data),
+        })
+    }
+
+    fn transit_to_event_view<'wdrect, 'ttc>(
+        title: impl AsRef<str>,
+        window_size: &Point,
+        event_details_text_texture_regirsty: &'ttc mut F::TextTextureRegistry,
+    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        event_details_text_texture_regirsty.clear();
+        event_details_text_texture_regirsty.create(
+            title.as_ref(),
+            Color::WHITE,
+            FRect {
+                x: 100.0,
+                y: 100.0,
+                w: window_size.x as f32 - 200.0,
+                h: window_size.y as f32 - 200.0,
+            },
+        )?;
+        Ok(NewState {
+            activity: Activity::EventView,
+            render_data: RenderData::EventView(EventViewRenderData {
+                text_registry: event_details_text_texture_regirsty,
+            }),
+        })
     }
 
     pub fn get_root_activity(&self) -> Activity {
@@ -836,27 +849,57 @@ impl<F: Frontend> App<F> {
         long_event_text_registry: &'ttc mut F::TextTextureRegistry,
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
+        event_details_text_texture_regirsty: &'ttc mut F::TextTextureRegistry,
     ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
         match activity {
-            Activity::WeekView => self
-                .create_week_view_render_data(
+            Activity::WeekView => self.create_week_view_render_data(
+                frontend,
+                window_size,
+                long_event_text_registry,
+                short_event_text_registry,
+                events,
+                event_details_text_texture_regirsty,
+            ),
+            Activity::EventView => self.create_event_view_render_data(
+                frontend,
+                window_size,
+                long_event_text_registry,
+                short_event_text_registry,
+                events,
+                event_details_text_texture_regirsty,
+            ),
+        }
+    }
+
+    fn create_event_view_render_data<'wdrect, 'ttc>(
+        &'wdrect mut self,
+        frontend: &'ttc mut F,
+        window_size: Point,
+        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        events: impl IntoIterator<Item = Action>,
+        event_details_text_texture_regirsty: &'ttc mut <F as Frontend>::TextTextureRegistry,
+    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        for event in events {
+            match event {
+                Action::Escape => return self.create_week_view_render_data(
                     frontend,
                     window_size,
                     long_event_text_registry,
                     short_event_text_registry,
-                    events,
-                )
-                .map(
-                    |WeekViewNewState {
-                         activity,
-                         render_data,
-                     }| NewState {
-                        activity,
-                        render_data: RenderData::WeekView(render_data),
-                    },
+                    Vec::new().into_iter(),
+                    event_details_text_texture_regirsty,
                 ),
-            Activity::EventView => todo!(),
+                Action::WindowResize => todo!("fix the resize for the event view"),
+                _ => (),
+            }
         }
+        Ok(NewState {
+            activity: Activity::EventView,
+            render_data: RenderData::EventView(EventViewRenderData {
+                text_registry: event_details_text_texture_regirsty,
+            }),
+        })
     }
 }
 
@@ -868,6 +911,18 @@ pub struct WeekViewNewState<'rect, 'ttc, TTC, F> {
 pub struct NewState<'rect, 'ttc, TTC, F> {
     pub activity: Activity,
     pub render_data: RenderData<'rect, 'ttc, TTC, F>,
+}
+
+fn find_clicked_event<'rect>(
+    position: &FPoint,
+    rectangles: &'rect calendar::render::Rectangles,
+) -> Option<usize> {
+    rectangles.iter().position(|rect| {
+        let left_top = rect.at;
+        let bottom_right = rect.at.add_fpoint(rect.size);
+        let is_in = is_fpoint_between_points(position, left_top, bottom_right);
+        is_in
+    })
 }
 
 pub enum Activity {
@@ -1062,6 +1117,7 @@ pub enum Action {
     WindowResize,
     SubtractWeek,
     AddWeek,
+    Escape,
     // NOTE(alex): the following actions depends on the layout of the window.  This causes a quite
     // a couple of questions:
     //

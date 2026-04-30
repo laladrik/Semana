@@ -153,19 +153,8 @@ impl<'renderer, 'font> state::TextTextureRegistry for TextTextureRegistry<'rende
                 p as i32
             };
 
-            let cstring =
-                std::ffi::CString::new(text).map_err(FrontendError::CStringIsNotCreated)?;
-            let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
-                &mut self.font.borrow_mut(),
-                cstring.as_c_str(),
-                color.into(),
-                wrap_length,
-            )
-            .map_err(FrontendError::TextObjectIsNotRegistered)?;
-
-            let texture: sdlext::Texture =
-                sdlext::create_texture_from_surface(self.renderer, &surf)
-                    .map_err(FrontendError::TextObjectIsNotRegistered)?;
+            let RenderedText { surf, texture } =
+                RenderedText::try_new(self.renderer, color, text, self.font, wrap_length)?;
 
             let (texture_width, texture_height): (f32, f32) = {
                 let mut width = 0f32;
@@ -192,6 +181,35 @@ impl<'renderer, 'font> state::TextTextureRegistry for TextTextureRegistry<'rende
             self.text_positions.push(pos);
         }
         Ok(())
+    }
+}
+
+struct RenderedText {
+    surf: sdlext::Surface,
+    texture: sdlext::Texture,
+}
+
+impl RenderedText {
+    fn try_new<'renderer>(
+        renderer: &'renderer sdlext::Renderer,
+        color: Color,
+        text: impl Into<Vec<u8>>,
+        font: &RefCell<Font>,
+        wrap_length: i32,
+    ) -> Result<Self, FrontendError> {
+        let cstring = std::ffi::CString::new(text).map_err(FrontendError::CStringIsNotCreated)?;
+        let surf: sdlext::Surface = sdlext::ttf_render_text_blended_wrapped(
+            &mut font.borrow_mut(),
+            cstring.as_c_str(),
+            color.into(),
+            wrap_length,
+        )
+        .map_err(FrontendError::TextObjectIsNotRegistered)?;
+
+        let texture: sdlext::Texture = sdlext::create_texture_from_surface(renderer, &surf)
+            .map_err(FrontendError::TextObjectIsNotRegistered)?;
+
+        Ok(Self { surf, texture })
     }
 }
 
@@ -358,6 +376,8 @@ fn unsafe_main() {
                             TextTextureRegistry::new(renderer, &fonts.title);
                         let mut long_event_text_registry =
                             TextTextureRegistry::new(renderer, &fonts.title);
+                        let mut event_details_text_texture_regirsty =
+                            TextTextureRegistry::new(renderer, &fonts.ui);
 
                         // hours (00:00, 01:00 etc)
                         let hour_text_texture_regirsty =
@@ -425,6 +445,9 @@ fn unsafe_main() {
                                         _ => (),
                                     },
                                     sdl::SDL_EVENT_KEY_UP => match event.key.key {
+                                        sdl::SDLK_ESCAPE => {
+                                            events.push(state::Action::Escape)
+                                        }
                                         sdl::SDLK_PAGEUP => {
                                             events.push(state::Action::SubtractWeek)
                                         }
@@ -471,7 +494,9 @@ fn unsafe_main() {
                                 &mut long_event_text_registry,
                                 &mut short_event_text_registry,
                                 events.into_iter(),
+                                &mut event_details_text_texture_regirsty,
                             )?;
+
                             let data = new_state.render_data;
                             activity = new_state.activity;
 
