@@ -2,7 +2,7 @@ use crate::EventRange;
 use alloc::vec::Vec;
 
 use super::date::{Date, MINUTES_PER_DAY, MINUTES_PER_HOUR, Time};
-use super::types::{Point, Size};
+use super::types::{FPoint, FSize};
 use super::{Color, EventData, Lane};
 
 pub struct Arguments {
@@ -14,14 +14,14 @@ pub struct Arguments {
 
 pub struct EventText<'text, T> {
     pub text: &'text T,
-    pub at: Point,
+    pub at: FPoint,
 }
 
 impl<'rect, 'text, T> From<(&'rect Rectangle, &'text T)> for EventText<'text, T> {
     fn from((rectangle, title): (&'rect Rectangle, &'text T)) -> Self {
         Self {
             text: title,
-            at: Point {
+            at: FPoint {
                 x: rectangle.at.x + 2.0,
                 y: rectangle.at.y + 2.0,
             },
@@ -138,10 +138,9 @@ impl RenderWeekCaptionsArgs {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq))]
 pub struct Rectangle {
-    pub at: Point,
-    pub size: Size,
+    pub at: FPoint,
+    pub size: FSize,
     //pub text: &'s str,
     pub color: Color,
 }
@@ -166,7 +165,7 @@ fn create_point(
     start_date: &Date,
     start_time: &Time,
     arguments: &Arguments,
-) -> Point {
+) -> FPoint {
     let Arguments {
         column_width,
         column_height,
@@ -176,7 +175,7 @@ fn create_point(
     let x = calculate_event_point_x(first_date, start_date, *column_width, *offset_x);
     let y = (start_time.minutes_from_midnight() as f32 / MINUTES_PER_DAY as f32) * column_height
         + offset_y;
-    Point { x, y }
+    FPoint { x, y }
 }
 
 pub type Rectangles = Vec<Rectangle>;
@@ -204,14 +203,14 @@ fn create_long_event_rectangle(
     };
 
     let start_x = calc_x(&long_event.start_date, &long_event.start_time);
-    let start_point = Point {
+    let start_point = FPoint {
         x: start_x,
         y: *offset_y,
     };
 
-    let size: Size = {
+    let size: FSize = {
         let end_x = calc_x(&long_event.end_date, &long_event.end_time);
-        Size {
+        FSize {
             x: end_x - start_x,
             y: *column_height,
         }
@@ -230,12 +229,12 @@ fn create_short_event_rectangle(
     arguments: &Arguments,
 ) -> Rectangle {
     assert_eq!(event.start_date, event.end_date);
-    let start_point: Point =
+    let start_point: FPoint =
         create_point(first_date, &event.start_date, &event.start_time, arguments);
-    let size: Size = {
-        let end_point: Point =
+    let size: FSize = {
+        let end_point: FPoint =
             create_point(first_date, &event.end_date, &event.end_time, arguments);
-        Size {
+        FSize {
             x: arguments.column_width,
             y: end_point.y - start_point.y,
         }
@@ -420,8 +419,8 @@ mod tests {
             matches!(
                 x,
                 Rectangle {
-                    at: Point { x: 0.0, y: 0.0 },
-                    size: Point {
+                    at: FPoint { x: 0.0, y: 0.0 },
+                    size: FPoint {
                         x: 125.0,
                         y: ONE_HOUR
                     },
