@@ -1,4 +1,4 @@
-use crate::render::RenderData;
+use crate::render::{RenderData, WeekViewRenderData};
 
 use calendar::{
     date::DateStream,
@@ -417,7 +417,12 @@ impl<F: Frontend> App<F> {
         mouse_position: FPoint,
         event_title_offset: FPoint,
     ) -> Result<Self, F::Error> {
-        let ui = UserInterface::new(title_font_height, event_offset, event_title_offset, mouse_position);
+        let ui = UserInterface::new(
+            title_font_height,
+            event_offset,
+            event_title_offset,
+            mouse_position,
+        );
         let calendar = Calendar::new(frontend)?;
         App::create_hours_text_objects(frontend, ui.event_offset.x)?;
 
@@ -605,14 +610,14 @@ impl<F: Frontend> App<F> {
         )
     }
 
-    pub fn create_render_data<'wdrect, 'ttc>(
+    pub fn create_week_view_render_data<'wdrect, 'ttc>(
         &'wdrect mut self,
         frontend: &'ttc mut F,
         window_size: Point,
         long_event_text_registry: &'ttc mut F::TextTextureRegistry,
         short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<RenderData<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<WeekViewNewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
         let mut event_mouse_click: Option<MouseEventClick> = None;
         // :userInputHandling
         for event in events {
@@ -747,11 +752,9 @@ impl<F: Frontend> App<F> {
         Self::reposition_days_text_objects(frontend, 35f32, &view);
         Self::reposition_dates_text_objects(frontend, 10f32, &view);
 
-        let create_registration = |text_registry|  {
-            EventTitleRegistration {
-                text_registry,
-                event_title_offset: &self.ui.event_title_offset,
-            }
+        let create_registration = |text_registry| EventTitleRegistration {
+            text_registry,
+            event_title_offset: &self.ui.event_title_offset,
         };
 
         self.calendar.get_ready(
@@ -802,7 +805,7 @@ impl<F: Frontend> App<F> {
                 }
             }
         }
-        Ok(RenderData {
+        let render_data = WeekViewRenderData {
             view,
             long_event_rectangles: rectangles.long,
             hours_viewport,
@@ -812,8 +815,64 @@ impl<F: Frontend> App<F> {
             short_event_text_registry,
             event_viewport: short_event_viewport,
             frontend,
-        })
+        };
+
+        let ret = WeekViewNewState {
+            render_data,
+            activity: Activity::WeekView,
+        };
+        Ok(ret)
     }
+
+    pub fn get_root_activity(&self) -> Activity {
+        Activity::WeekView
+    }
+
+    pub fn create_render_data<'wdrect, 'ttc>(
+        &'wdrect mut self,
+        activity: Activity,
+        frontend: &'ttc mut F,
+        window_size: Point,
+        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
+        events: impl IntoIterator<Item = Action>,
+    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        match activity {
+            Activity::WeekView => self
+                .create_week_view_render_data(
+                    frontend,
+                    window_size,
+                    long_event_text_registry,
+                    short_event_text_registry,
+                    events,
+                )
+                .map(
+                    |WeekViewNewState {
+                         activity,
+                         render_data,
+                     }| NewState {
+                        activity,
+                        render_data: RenderData::WeekView(render_data),
+                    },
+                ),
+            Activity::EventView => todo!(),
+        }
+    }
+}
+
+pub struct WeekViewNewState<'rect, 'ttc, TTC, F> {
+    activity: Activity,
+    render_data: WeekViewRenderData<'rect, 'ttc, TTC, F>,
+}
+
+pub struct NewState<'rect, 'ttc, TTC, F> {
+    pub activity: Activity,
+    pub render_data: RenderData<'rect, 'ttc, TTC, F>,
+}
+
+pub enum Activity {
+    WeekView,
+    EventView,
 }
 
 enum EventKind {
@@ -1151,7 +1210,7 @@ struct EventTitleRegistration<'a, TTC: TextTextureRegistry> {
     text_registry: &'a mut TTC,
 }
 
-fn register_event_titles<'a, Str, TTC: TextTextureRegistry> (
+fn register_event_titles<'a, Str, TTC: TextTextureRegistry>(
     registration: &mut EventTitleRegistration<'a, TTC>,
     titles: &[Str],
     rectangles: &[calendar::render::Rectangle],

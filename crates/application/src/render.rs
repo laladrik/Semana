@@ -7,7 +7,19 @@ use crate::RectangleRender;
 use super::config;
 use sdlext::Color;
 
-pub struct RenderData<'rect, 'ttc, TTC, F> {
+pub enum RenderData<'rect, 'ttc, TTC, F> {
+    WeekView(WeekViewRenderData<'rect, 'ttc, TTC, F>),
+    EventView,
+}
+
+type RDA<'renderer, 'rect, 'ttc, 'font> = RenderData<
+    'rect,
+    'ttc,
+    crate::TextTextureRegistry<'renderer, 'font>,
+    DumbFrontend<'renderer, 'font>,
+>;
+
+pub struct WeekViewRenderData<'rect, 'ttc, TTC, F> {
     pub event_viewport: sdl::SDL_Rect,
     pub view: View,
     pub long_event_rectangles: &'rect calendar::render::Rectangles,
@@ -19,14 +31,22 @@ pub struct RenderData<'rect, 'ttc, TTC, F> {
     pub dates_viewport: sdl::SDL_Rect,
 }
 
-type RD<'renderer, 'rect, 'ttc, 'font> = RenderData<
+type RD<'renderer, 'rect, 'ttc, 'font> = WeekViewRenderData<
     'rect,
     'ttc,
     crate::TextTextureRegistry<'renderer, 'font>,
     DumbFrontend<'renderer, 'font>,
 >;
 
-pub fn render(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
+
+pub fn render(renderer: &sdlext::Renderer, data: &RDA) -> sdlext::Result<()> {
+    match data {
+        RenderData::WeekView(week_view_render_data) => render_week_data(renderer, week_view_render_data),
+        RenderData::EventView => todo!(),
+    }
+}
+
+fn render_week_data(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
     render_events(renderer, data)?;

@@ -387,6 +387,8 @@ fn unsafe_main() {
                             mouse,
                             event_title_offset,
                         )?;
+
+                        let mut activity: state::Activity = app.get_root_activity();
                         let mut event: sdl::SDL_Event = std::mem::zeroed();
                         'outer_loop: loop {
                             let mut events: Vec<state::Action> = Vec::new();
@@ -462,13 +464,16 @@ fn unsafe_main() {
                                 }
                             }
 
-                            let data = app.create_render_data(
+                            let new_state = app.create_render_data(
+                                activity,
                                 &mut frontend,
                                 window_size,
                                 &mut long_event_text_registry,
                                 &mut short_event_text_registry,
                                 events.into_iter(),
                             )?;
+                            let data = new_state.render_data;
+                            activity = new_state.activity;
 
                             /* stage: render */
                             render::render(renderer, &data)?;
