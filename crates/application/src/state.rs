@@ -1,8 +1,8 @@
 use crate::render::{EventViewRenderData, RenderData, WeekViewRenderData};
 mod calendar_state;
 use calendar_state::CalendarState;
-use calendar_state::WeekData;
 use calendar_state::EventRectangles;
+use calendar_state::WeekData;
 
 use calendar::{
     date::DateStream,
@@ -168,6 +168,33 @@ impl<F: Frontend> Calendar<F> {
             } => frontend.agenda_source().is_ready(agenda_source_handle),
             CalendarState::Ready { .. } | CalendarState::Rendering { .. } => false,
         }
+    }
+
+    fn get_rendering(&mut self, frontend: &F) {
+        self.state
+            .switch_infallible(|current_state| match current_state {
+                CalendarState::Loading {
+                    agenda_source_handle,
+                } => {
+                    let src = frontend.agenda_source();
+                    if src.is_ready(&agenda_source_handle) {
+                        let agenda: calendar::obtain::WeekScheduleWithLanes =
+                            src.fetch(&agenda_source_handle, &self.week_start);
+                        let week_data = WeekData { agenda };
+                        let long_event_clash_size = week_data.agenda.long.calculate_biggest_clash();
+                        src.free(agenda_source_handle);
+                        CalendarState::Rendering {
+                            week_data,
+                            long_event_clash_size,
+                        }
+                    } else {
+                        CalendarState::Loading {
+                            agenda_source_handle,
+                        }
+                    }
+                }
+                x => x,
+            });
     }
 }
 
@@ -558,44 +585,17 @@ impl<F: Frontend> App<F> {
                 } => {
                     if let MouseButton::Left = button {
                         let long_event_surface = self.compute_long_event_surface(&window_size);
-                        let short_event_viewport = ShortEventViewport::from_long_event_surface(
+                        event_mouse_click = try_register_mouse_click(
+                            mouse_position,
                             &long_event_surface,
                             &window_size,
                         );
-
-                        let is_long_event_click = is_fpoint_between_points(
-                            mouse_position,
-                            long_event_surface.offset,
-                            long_event_surface
-                                .offset
-                                .add_fpoint(long_event_surface.size),
-                        );
-
-                        let is_short_event_click = is_fpoint_between_points(
-                            mouse_position,
-                            short_event_viewport.offset,
-                            short_event_viewport
-                                .offset
-                                .add_fpoint(short_event_viewport.size),
-                        );
-
-                        if is_long_event_click {
-                            event_mouse_click = Some(MouseEventClick {
-                                event_kind: EventKind::Long,
-                                position: mouse_position,
-                            });
-                        } else if is_short_event_click {
-                            let position = mouse_position.sub_fpoint(short_event_viewport.offset);
-                            event_mouse_click = Some(MouseEventClick {
-                                event_kind: EventKind::Short,
-                                position,
-                            });
-                        }
                     }
                 }
             }
         }
 
+        // If the user switches the week, the events for the week are requested from Khal.
         if self.calendar.is_week_switched {
             self.calendar.update_week_data(frontend)?;
             let cell_width = DUMB_CELL_WIDTH;
@@ -603,44 +603,24 @@ impl<F: Frontend> App<F> {
             App::create_dates_text_objects(frontend, cell_width, &self.calendar.week_start)?;
         }
 
-        self.calendar
-            .state
-            .switch_infallible(|current_state| match current_state {
-                CalendarState::Loading {
-                    agenda_source_handle,
-                } => {
-                    let src = frontend.agenda_source();
-                    if src.is_ready(&agenda_source_handle) {
-                        let agenda: calendar::obtain::WeekScheduleWithLanes =
-                            src.fetch(&agenda_source_handle, &self.calendar.week_start);
-                        let week_data = WeekData { agenda };
-                        let long_event_clash_size = week_data.agenda.long.calculate_biggest_clash();
-                        src.free(agenda_source_handle);
-                        CalendarState::Rendering {
-                            week_data,
-                            long_event_clash_size,
-                        }
-                    } else {
-                        CalendarState::Loading {
-                            agenda_source_handle,
-                        }
-                    }
-                }
-                x => x,
-            });
+        // The events has been delivered, get ready to render them!
+        self.calendar.get_rendering(frontend);
 
-        let long_event_surface_height = View::compute_long_event_surface_height(
-            self.ui.title_font_height,
-            Self::get_clash_size(&self.calendar),
-        );
+        // The viewport through which we watch the surface with the short events.
+        let short_event_viewport: Rect = {
+            let long_event_surface_height = View::compute_long_event_surface_height(
+                self.ui.title_font_height,
+                Self::get_clash_size(&self.calendar),
+            );
+            ShortEventViewport::new(
+                &self.ui.event_offset,
+                &window_size,
+                long_event_surface_height,
+            )
+            .into_rect()
+        };
 
-        let short_event_viewport: Rect = ShortEventViewport::new(
-            &self.ui.event_offset,
-            &window_size,
-            long_event_surface_height,
-        )
-        .into_rect();
-
+        // Create the view with the short events.
         let view: calendar::ui::View = self.create_view(&window_size);
         let hours_viewport = Rect {
             y: short_event_viewport.y,
@@ -649,16 +629,15 @@ impl<F: Frontend> App<F> {
             h: window_size.y,
         };
 
+        // reposition the hours text objects based on
+        // - short event cell height.
+        // - vertical offset of the surface with the short events.
         Self::reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
-        let horizontal_offset = self.ui.event_offset.x as i32;
-        let dates_viewport = Rect {
-            x: horizontal_offset,
-            y: 0,
-            w: window_size.x - horizontal_offset,
-            h: 200,
-        };
-
+        // reposition the day names objects based on
+        // - short event cell height and width.
         Self::reposition_days_text_objects(frontend, 35f32, &view);
+        // reposition the dates text objects based on
+        // - short event cell height and width.
         Self::reposition_dates_text_objects(frontend, 10f32, &view);
 
         let create_registration = |text_registry| EventTitleRegistration {
@@ -666,6 +645,11 @@ impl<F: Frontend> App<F> {
             event_title_offset: &self.ui.event_title_offset,
         };
 
+        // The heaviest part of creation of the render data.  The computation is based on the data
+        // received from Khal.  Given the data, the underlying program does the following:
+        // 1. Computes the positions and the sizes of the rectangles for the events (both long and
+        //    short).  This takes into account the clashes of the events.
+        // 2. Based on the sizes of the rectangles it renders the texts.
         self.calendar.get_ready(
             &view,
             create_registration(long_event_text_registry),
@@ -680,7 +664,7 @@ impl<F: Frontend> App<F> {
                 position,
             } = mouse_click;
             match event_kind {
-                EventKind::Long => {
+                CalendarEventKind::Long => {
                     let titles = self.calendar.state.obtain_long_events_titles();
                     if let Some(event) = find_clicked_event(&position, rectangles.long) {
                         return Self::transit_to_event_view(
@@ -690,7 +674,7 @@ impl<F: Frontend> App<F> {
                         );
                     }
                 }
-                EventKind::Short => {
+                CalendarEventKind::Short => {
                     let titles = self.calendar.state.obtain_short_events_titles();
                     if let Some(event) = find_clicked_event(&position, rectangles.short) {
                         return Self::transit_to_event_view(
@@ -702,6 +686,15 @@ impl<F: Frontend> App<F> {
                 }
             }
         }
+
+        let horizontal_offset = self.ui.event_offset.x as i32;
+        let dates_viewport = Rect {
+            x: horizontal_offset,
+            y: 0,
+            w: window_size.x - horizontal_offset,
+            h: 200,
+        };
+
         let render_data = WeekViewRenderData {
             view,
             long_event_rectangles: rectangles.long,
@@ -812,6 +805,48 @@ impl<F: Frontend> App<F> {
     }
 }
 
+// If mouse_position is within the surface of the long events or the short events then
+// [`MouseEventClick`] is created.
+fn try_register_mouse_click(
+    mouse_position: FPoint,
+    long_event_surface: &LongEventSurface,
+    window_size: &Point,
+) -> Option<MouseEventClick> {
+    let short_event_viewport =
+        ShortEventViewport::from_long_event_surface(&long_event_surface, &window_size);
+
+    let is_long_event_click = is_fpoint_between_points(
+        mouse_position,
+        long_event_surface.offset,
+        long_event_surface
+            .offset
+            .add_fpoint(long_event_surface.size),
+    );
+
+    let is_short_event_click = is_fpoint_between_points(
+        mouse_position,
+        short_event_viewport.offset,
+        short_event_viewport
+            .offset
+            .add_fpoint(short_event_viewport.size),
+    );
+
+    if is_long_event_click {
+        Some(MouseEventClick {
+            event_kind: CalendarEventKind::Long,
+            position: mouse_position,
+        })
+    } else if is_short_event_click {
+        let position = mouse_position.sub_fpoint(short_event_viewport.offset);
+        Some(MouseEventClick {
+            event_kind: CalendarEventKind::Short,
+            position,
+        })
+    } else {
+        None
+    }
+}
+
 pub struct NewState<'rect, 'ttc, TTC, F> {
     pub activity: Activity,
     pub render_data: RenderData<'rect, 'ttc, TTC, F>,
@@ -833,7 +868,7 @@ pub enum Activity {
     EventView,
 }
 
-enum EventKind {
+enum CalendarEventKind {
     // the position is relative to the long event surface
     Long,
     // the position is relative to the short event viewport
@@ -841,7 +876,7 @@ enum EventKind {
 }
 
 struct MouseEventClick {
-    event_kind: EventKind,
+    event_kind: CalendarEventKind,
     position: FPoint,
 }
 
