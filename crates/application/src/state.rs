@@ -882,14 +882,16 @@ impl<F: Frontend> App<F> {
     ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
         for event in events {
             match event {
-                Action::Escape => return self.create_week_view_render_data(
-                    frontend,
-                    window_size,
-                    long_event_text_registry,
-                    short_event_text_registry,
-                    Vec::new().into_iter(),
-                    event_details_text_texture_regirsty,
-                ),
+                Action::Escape => {
+                    return self.create_week_view_render_data(
+                        frontend,
+                        window_size,
+                        long_event_text_registry,
+                        short_event_text_registry,
+                        Vec::new().into_iter(),
+                        event_details_text_texture_regirsty,
+                    );
+                }
                 Action::WindowResize => todo!("fix the resize for the event view"),
                 _ => (),
             }
@@ -903,25 +905,19 @@ impl<F: Frontend> App<F> {
     }
 }
 
-pub struct WeekViewNewState<'rect, 'ttc, TTC, F> {
-    activity: Activity,
-    render_data: WeekViewRenderData<'rect, 'ttc, TTC, F>,
-}
-
 pub struct NewState<'rect, 'ttc, TTC, F> {
     pub activity: Activity,
     pub render_data: RenderData<'rect, 'ttc, TTC, F>,
 }
 
-fn find_clicked_event<'rect>(
+fn find_clicked_event(
     position: &FPoint,
-    rectangles: &'rect calendar::render::Rectangles,
+    rectangles: &calendar::render::Rectangles,
 ) -> Option<usize> {
     rectangles.iter().position(|rect| {
         let left_top = rect.at;
         let bottom_right = rect.at.add_fpoint(rect.size);
-        let is_in = is_fpoint_between_points(position, left_top, bottom_right);
-        is_in
+        is_fpoint_between_points(position, left_top, bottom_right)
     })
 }
 
