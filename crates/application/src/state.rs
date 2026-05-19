@@ -595,6 +595,41 @@ impl<F: Frontend> App<F> {
             }
         }
 
+        // The handling of the mouse click is before the calculation of the layout.  This safe
+        // based on the two assumptions:
+        //
+        // 1. The user does not resize and click at the same time.
+        // 2. The user clicks on the events only when they're visible.
+        if let Some(mouse_click) = event_mouse_click {
+            let MouseEventClick {
+                event_kind,
+                position,
+            } = mouse_click;
+            let rectangles: EventRectangles = self.calendar.state.obtain_events();
+            match event_kind {
+                CalendarEventKind::Long => {
+                    let titles = self.calendar.state.obtain_long_events_titles();
+                    if let Some(event) = find_clicked_event(&position, rectangles.long) {
+                        return Self::transit_to_event_view(
+                            titles[event].as_ref(),
+                            &window_size,
+                            event_details_text_texture_regirsty,
+                        );
+                    }
+                }
+                CalendarEventKind::Short => {
+                    let titles = self.calendar.state.obtain_short_events_titles();
+                    if let Some(event) = find_clicked_event(&position, rectangles.short) {
+                        return Self::transit_to_event_view(
+                            titles[event].as_ref(),
+                            &window_size,
+                            event_details_text_texture_regirsty,
+                        );
+                    }
+                }
+            }
+        }
+
         // If the user switches the week, the events for the week are requested from Khal.
         if self.calendar.is_week_switched {
             self.calendar.update_week_data(frontend)?;
@@ -658,34 +693,6 @@ impl<F: Frontend> App<F> {
         )?;
 
         let rectangles: EventRectangles = self.calendar.state.obtain_events();
-        if let Some(mouse_click) = event_mouse_click {
-            let MouseEventClick {
-                event_kind,
-                position,
-            } = mouse_click;
-            match event_kind {
-                CalendarEventKind::Long => {
-                    let titles = self.calendar.state.obtain_long_events_titles();
-                    if let Some(event) = find_clicked_event(&position, rectangles.long) {
-                        return Self::transit_to_event_view(
-                            titles[event].as_ref(),
-                            &window_size,
-                            event_details_text_texture_regirsty,
-                        );
-                    }
-                }
-                CalendarEventKind::Short => {
-                    let titles = self.calendar.state.obtain_short_events_titles();
-                    if let Some(event) = find_clicked_event(&position, rectangles.short) {
-                        return Self::transit_to_event_view(
-                            titles[event].as_ref(),
-                            &window_size,
-                            event_details_text_texture_regirsty,
-                        );
-                    }
-                }
-            }
-        }
 
         let horizontal_offset = self.ui.event_offset.x as i32;
         let dates_viewport = Rect {
