@@ -12,3 +12,6 @@ sdl3-sys = { git = "https://codeberg.org/laladrik/sdl3-sys", rev = "f86a66e7" }
 sdl3-ttf-sys = { git = "https://codeberg.org/laladrik/sdl3-ttf-sys", rev = "b2ef9dc5" }
 sdlext = { path = "../sdlext" }
 calendar = { path = "../calendar", features = ["sdl3-geometry"] }
+
+[lints.clippy]
+needless_lifetimes = "allow"

@@ -9,3 +9,6 @@ sdl3-sys = { git = "https://codeberg.org/laladrik/sdl3-sys",  rev = "f86a66e7", 
 
 [features]
 sdl3-geometry = ["dep:sdl3-sys"]
+
+[lints.clippy]
+needless_lifetimes = "allow"
