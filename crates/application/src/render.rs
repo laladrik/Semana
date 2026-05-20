@@ -7,9 +7,9 @@ use crate::RectangleRender;
 use super::config;
 use sdlext::Color;
 
-pub enum RenderData<'rect, 'ttc, TTC, F> {
-    WeekView(WeekViewRenderData<'rect, 'ttc, TTC, F>),
-    EventView(EventViewRenderData<'ttc, TTC>),
+pub enum RenderData<'rect, 'frontend, TTC, F> {
+    WeekView(WeekViewRenderData<'rect, 'frontend, F>),
+    EventView(EventViewRenderData<'frontend, TTC>),
 }
 
 pub struct EventViewRenderData<'ttc, TTC> {
@@ -26,22 +26,19 @@ type RDA<'renderer, 'rect, 'ttc, 'font> = RenderData<
     DumbFrontend<'renderer, 'font>,
 >;
 
-pub struct WeekViewRenderData<'rect, 'ttc, TTC, F> {
+pub struct WeekViewRenderData<'rect, 'frontend, F> {
     pub event_viewport: sdl::SDL_Rect,
     pub view: View,
     pub long_event_rectangles: &'rect calendar::render::Rectangles,
     pub short_event_rectangles: &'rect calendar::render::Rectangles,
     pub hours_viewport: sdl::SDL_Rect,
-    pub long_event_text_registry: &'ttc TTC,
-    pub short_event_text_registry: &'ttc TTC,
-    pub frontend: &'ttc F,
+    pub frontend: &'frontend F,
     pub dates_viewport: sdl::SDL_Rect,
 }
 
 type RD<'renderer, 'rect, 'ttc, 'font> = WeekViewRenderData<
     'rect,
     'ttc,
-    crate::TextTextureRegistry<'renderer, 'font>,
     DumbFrontend<'renderer, 'font>,
 >;
 
@@ -79,14 +76,14 @@ fn render_week_view(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()
 fn render_events(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
     let event_render = RectangleRender { renderer };
     calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
-    data.long_event_text_registry.render()?;
+    data.frontend.long_event_text_registry.render()?;
 
     let event_viewport = data.event_viewport;
     set_render_viewport_context(renderer, &event_viewport, || {
         render_short_events(renderer, &data.view.short_event_surface)?;
         let event_render = RectangleRender { renderer };
         calendar::render::render_rectangles(data.short_event_rectangles.iter(), &event_render)?;
-        data.short_event_text_registry.render()
+        data.frontend.short_event_text_registry.render()
     })
 }
 

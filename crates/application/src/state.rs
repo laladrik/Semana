@@ -89,13 +89,17 @@ impl<F: Frontend> Calendar<F> {
     }
 
     // transition from the state "rendering" to the state "ready"
-    fn get_ready<'ttc>(
+    fn get_ready<'frontend, 'view, 'a, EventTextObjectDB>(
         &mut self,
-        view: &View,
-        long_event_text_registration: EventTitleRegistration<'ttc, F::TextTextureRegistry>,
-        short_event_text_registration: EventTitleRegistration<'ttc, F::TextTextureRegistry>,
+        view: &'view View,
+        frontend: &'frontend mut EventTextObjectDB,
+        event_title_offset: &'a FPoint,
         event_offset: &FPoint,
-    ) -> Result<(), F::Error> {
+    ) -> Result<(), F::Error>
+    where
+        EventTextObjectDB: GetLongEventTextRegistry<Registry = F::TextTextureRegistry>
+            + GetShortEventTextRegistry<Registry = F::TextTextureRegistry>,
+    {
         use CalendarState::*;
         let week_start = &self.week_start;
         self.state.switch(move |current_state| match current_state {
@@ -104,12 +108,13 @@ impl<F: Frontend> Calendar<F> {
                 week_data,
                 long_event_clash_size,
             } => {
-                let short_event_rectangles_opt = create_short_events(
-                    &week_data.agenda.short,
-                    week_start,
-                    short_event_text_registration,
-                    view,
-                );
+                let reg = EventTitleRegistration {
+                    event_title_offset,
+                    text_registry: frontend.get_short_event_text_registry(),
+                };
+
+                let short_event_rectangles_opt =
+                    create_short_events(&week_data.agenda.short, week_start, reg, view);
 
                 let short_event_rectangles_opt = match short_event_rectangles_opt {
                     Ok(x) => x,
@@ -124,11 +129,15 @@ impl<F: Frontend> Calendar<F> {
                     }
                 };
 
+                let reg = EventTitleRegistration {
+                    event_title_offset,
+                    text_registry: frontend.get_long_event_text_registry(),
+                };
                 let top_panel_heigth: f32 = view.calculate_top_panel_height();
                 let long_event_rectangles_opt = create_long_events(
                     &week_data.agenda.long,
                     week_start,
-                    long_event_text_registration,
+                    reg,
                     event_offset,
                     view.cell_width,
                     top_panel_heigth,
@@ -544,15 +553,12 @@ impl<F: Frontend> App<F> {
         )
     }
 
-    pub fn create_week_view_render_data<'wdrect, 'ttc>(
+    pub fn create_week_view_render_data<'wdrect, 'frontend>(
         &'wdrect mut self,
-        frontend: &'ttc mut F,
+        frontend: &'frontend mut F,
         window_size: Point,
-        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
-        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
-        event_details_text_texture_regirsty: &'ttc mut F::TextTextureRegistry,
-    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
         let mut event_mouse_click: Option<MouseEventClick> = None;
         // :userInputHandling
         for event in events {
@@ -600,7 +606,7 @@ impl<F: Frontend> App<F> {
         //
         // 1. The user does not resize and click at the same time.
         // 2. The user clicks on the events only when they're visible.
-        if let Some(mouse_click) = event_mouse_click {
+        let maybe_clicked_event: Option<Option<&str>> = event_mouse_click.map(|mouse_click| {
             let MouseEventClick {
                 event_kind,
                 position,
@@ -608,123 +614,125 @@ impl<F: Frontend> App<F> {
             let rectangles: EventRectangles = self.calendar.state.obtain_events();
             match event_kind {
                 CalendarEventKind::Long => {
-                    let titles = self.calendar.state.obtain_long_events_titles();
-                    if let Some(event) = find_clicked_event(&position, rectangles.long) {
-                        return Self::transit_to_event_view(
-                            titles[event].as_ref(),
-                            &window_size,
-                            event_details_text_texture_regirsty,
-                        );
-                    }
+                    find_clicked_event(&position, rectangles.long).map(|event| {
+                        let titles = self.calendar.state.obtain_long_events_titles();
+                        titles[event].as_ref()
+                    })
                 }
                 CalendarEventKind::Short => {
-                    let titles = self.calendar.state.obtain_short_events_titles();
-                    if let Some(event) = find_clicked_event(&position, rectangles.short) {
-                        return Self::transit_to_event_view(
-                            titles[event].as_ref(),
-                            &window_size,
-                            event_details_text_texture_regirsty,
-                        );
-                    }
+                    find_clicked_event(&position, rectangles.short).map(|event| {
+                        let titles = self.calendar.state.obtain_short_events_titles();
+                        titles[event].as_ref()
+                    })
                 }
             }
+        });
+
+        match maybe_clicked_event {
+            Some(Some(event_short_description)) => {
+                let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
+                    frontend.get_event_details_text_texture_regirsty();
+                Self::transit_to_event_view(
+                    event_short_description,
+                    &window_size,
+                    event_details_text_texture_regirsty,
+                )
+            }
+            _ => {
+                // If the user switches the week, the events for the week are requested from Khal.
+                if self.calendar.is_week_switched {
+                    self.calendar.update_week_data(frontend)?;
+                    let cell_width = DUMB_CELL_WIDTH;
+                    frontend.get_dates_text_registry().clear();
+                    App::create_dates_text_objects(
+                        frontend,
+                        cell_width,
+                        &self.calendar.week_start,
+                    )?;
+                }
+
+                // The events has been delivered, get ready to render them!
+                self.calendar.get_rendering(frontend);
+
+                // The viewport through which we watch the surface with the short events.
+                let short_event_viewport: Rect = {
+                    let long_event_surface_height = View::compute_long_event_surface_height(
+                        self.ui.title_font_height,
+                        Self::get_clash_size(&self.calendar),
+                    );
+                    ShortEventViewport::new(
+                        &self.ui.event_offset,
+                        &window_size,
+                        long_event_surface_height,
+                    )
+                    .into_rect()
+                };
+
+                // Create the view with the short events.
+                let view: calendar::ui::View = self.create_view(&window_size);
+                let hours_viewport = Rect {
+                    y: short_event_viewport.y,
+                    x: 10,
+                    w: self.ui.event_offset.x as i32,
+                    h: window_size.y,
+                };
+
+                // reposition the hours text objects based on
+                // - short event cell height.
+                // - vertical offset of the surface with the short events.
+                Self::reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
+                // reposition the day names objects based on
+                // - short event cell height and width.
+                Self::reposition_days_text_objects(frontend, 35f32, &view);
+                // reposition the dates text objects based on
+                // - short event cell height and width.
+                Self::reposition_dates_text_objects(frontend, 10f32, &view);
+
+                // The heaviest part of creation of the render data.  The computation is based on the data
+                // received from Khal.  Given the data, the underlying program does the following:
+                // 1. Computes the positions and the sizes of the rectangles for the events (both long and
+                //    short).  This takes into account the clashes of the events.
+                // 2. Based on the sizes of the rectangles it renders the texts.
+                self.calendar.get_ready(
+                    &view,
+                    frontend,
+                    &self.ui.event_title_offset,
+                    &self.ui.event_offset,
+                )?;
+
+                let rectangles: EventRectangles = self.calendar.state.obtain_events();
+
+                let horizontal_offset = self.ui.event_offset.x as i32;
+                let dates_viewport = Rect {
+                    x: horizontal_offset,
+                    y: 0,
+                    w: window_size.x - horizontal_offset,
+                    h: 200,
+                };
+
+                let render_data = WeekViewRenderData {
+                    view,
+                    long_event_rectangles: rectangles.long,
+                    hours_viewport,
+                    dates_viewport,
+                    short_event_rectangles: rectangles.short,
+                    event_viewport: short_event_viewport,
+                    frontend,
+                };
+
+                Ok(NewState {
+                    activity: Activity::WeekView,
+                    render_data: RenderData::WeekView(render_data),
+                })
+            }
         }
-
-        // If the user switches the week, the events for the week are requested from Khal.
-        if self.calendar.is_week_switched {
-            self.calendar.update_week_data(frontend)?;
-            let cell_width = DUMB_CELL_WIDTH;
-            frontend.get_dates_text_registry().clear();
-            App::create_dates_text_objects(frontend, cell_width, &self.calendar.week_start)?;
-        }
-
-        // The events has been delivered, get ready to render them!
-        self.calendar.get_rendering(frontend);
-
-        // The viewport through which we watch the surface with the short events.
-        let short_event_viewport: Rect = {
-            let long_event_surface_height = View::compute_long_event_surface_height(
-                self.ui.title_font_height,
-                Self::get_clash_size(&self.calendar),
-            );
-            ShortEventViewport::new(
-                &self.ui.event_offset,
-                &window_size,
-                long_event_surface_height,
-            )
-            .into_rect()
-        };
-
-        // Create the view with the short events.
-        let view: calendar::ui::View = self.create_view(&window_size);
-        let hours_viewport = Rect {
-            y: short_event_viewport.y,
-            x: 10,
-            w: self.ui.event_offset.x as i32,
-            h: window_size.y,
-        };
-
-        // reposition the hours text objects based on
-        // - short event cell height.
-        // - vertical offset of the surface with the short events.
-        Self::reposition_hours_text_objects(frontend, hours_viewport.w as f32, &view);
-        // reposition the day names objects based on
-        // - short event cell height and width.
-        Self::reposition_days_text_objects(frontend, 35f32, &view);
-        // reposition the dates text objects based on
-        // - short event cell height and width.
-        Self::reposition_dates_text_objects(frontend, 10f32, &view);
-
-        let create_registration = |text_registry| EventTitleRegistration {
-            text_registry,
-            event_title_offset: &self.ui.event_title_offset,
-        };
-
-        // The heaviest part of creation of the render data.  The computation is based on the data
-        // received from Khal.  Given the data, the underlying program does the following:
-        // 1. Computes the positions and the sizes of the rectangles for the events (both long and
-        //    short).  This takes into account the clashes of the events.
-        // 2. Based on the sizes of the rectangles it renders the texts.
-        self.calendar.get_ready(
-            &view,
-            create_registration(long_event_text_registry),
-            create_registration(short_event_text_registry),
-            &self.ui.event_offset,
-        )?;
-
-        let rectangles: EventRectangles = self.calendar.state.obtain_events();
-
-        let horizontal_offset = self.ui.event_offset.x as i32;
-        let dates_viewport = Rect {
-            x: horizontal_offset,
-            y: 0,
-            w: window_size.x - horizontal_offset,
-            h: 200,
-        };
-
-        let render_data = WeekViewRenderData {
-            view,
-            long_event_rectangles: rectangles.long,
-            hours_viewport,
-            dates_viewport,
-            short_event_rectangles: rectangles.short,
-            long_event_text_registry,
-            short_event_text_registry,
-            event_viewport: short_event_viewport,
-            frontend,
-        };
-
-        Ok(NewState {
-            activity: Activity::WeekView,
-            render_data: RenderData::WeekView(render_data),
-        })
     }
 
-    fn transit_to_event_view<'wdrect, 'ttc>(
+    fn transit_to_event_view<'wdrect, 'frontend>(
         title: impl AsRef<str>,
         window_size: &Point,
-        event_details_text_texture_regirsty: &'ttc mut F::TextTextureRegistry,
-    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+        event_details_text_texture_regirsty: &'frontend mut F::TextTextureRegistry,
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
         event_details_text_texture_regirsty.clear();
         event_details_text_texture_regirsty.create(
             title.as_ref(),
@@ -748,61 +756,43 @@ impl<F: Frontend> App<F> {
         Activity::WeekView
     }
 
-    pub fn create_render_data<'wdrect, 'ttc>(
+    // main function
+    pub fn create_render_data<'wdrect, 'frontend>(
         &'wdrect mut self,
         activity: Activity,
-        frontend: &'ttc mut F,
+        frontend: &'frontend mut F,
         window_size: Point,
-        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
-        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
-        event_details_text_texture_regirsty: &'ttc mut F::TextTextureRegistry,
-    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
         match activity {
-            Activity::WeekView => self.create_week_view_render_data(
-                frontend,
-                window_size,
-                long_event_text_registry,
-                short_event_text_registry,
-                events,
-                event_details_text_texture_regirsty,
-            ),
-            Activity::EventView => self.create_event_view_render_data(
-                frontend,
-                window_size,
-                long_event_text_registry,
-                short_event_text_registry,
-                events,
-                event_details_text_texture_regirsty,
-            ),
+            Activity::WeekView => self.create_week_view_render_data(frontend, window_size, events),
+            Activity::EventView => {
+                self.create_event_view_render_data(frontend, window_size, events)
+            }
         }
     }
 
-    fn create_event_view_render_data<'wdrect, 'ttc>(
+    fn create_event_view_render_data<'wdrect, 'frontend>(
         &'wdrect mut self,
-        frontend: &'ttc mut F,
+        frontend: &'frontend mut F,
         window_size: Point,
-        long_event_text_registry: &'ttc mut F::TextTextureRegistry,
-        short_event_text_registry: &'ttc mut F::TextTextureRegistry,
         events: impl IntoIterator<Item = Action>,
-        event_details_text_texture_regirsty: &'ttc mut <F as Frontend>::TextTextureRegistry,
-    ) -> Result<NewState<'wdrect, 'ttc, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
         for event in events {
             match event {
                 Action::Escape => {
                     return self.create_week_view_render_data(
                         frontend,
                         window_size,
-                        long_event_text_registry,
-                        short_event_text_registry,
                         Vec::new().into_iter(),
-                        event_details_text_texture_regirsty,
                     );
                 }
                 Action::WindowResize => todo!("fix the resize for the event view"),
                 _ => (),
             }
         }
+        let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
+            frontend.get_event_details_text_texture_regirsty();
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
@@ -854,9 +844,9 @@ fn try_register_mouse_click(
     }
 }
 
-pub struct NewState<'rect, 'ttc, TTC, F> {
+pub struct NewState<'rect, 'frontend, TTC, F> {
     pub activity: Activity,
-    pub render_data: RenderData<'rect, 'ttc, TTC, F>,
+    pub render_data: RenderData<'rect, 'frontend, TTC, F>,
 }
 
 fn find_clicked_event(
@@ -1129,9 +1119,22 @@ fn create_short_events<'a, TTC: TextTextureRegistry>(
         .map(|_| new_rectangles)
 }
 
+pub trait GetLongEventTextRegistry {
+    type Registry;
+    fn get_long_event_text_registry(&mut self) -> &mut Self::Registry;
+}
+
+pub trait GetShortEventTextRegistry {
+    type Registry;
+    fn get_short_event_text_registry(&mut self) -> &mut Self::Registry;
+}
+
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction
 /// is provide the way to test the core.
-pub trait Frontend {
+pub trait Frontend:
+    GetLongEventTextRegistry<Registry = Self::TextTextureRegistry>
+    + GetShortEventTextRegistry<Registry = Self::TextTextureRegistry>
+{
     type TextObject;
     type Error;
     type TextTextureRegistry: TextTextureRegistry<Error = Self::Error>;
@@ -1140,6 +1143,7 @@ pub trait Frontend {
     fn get_hours_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_dates_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
+    fn get_event_details_text_texture_regirsty(&mut self) -> &mut Self::TextTextureRegistry;
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
 

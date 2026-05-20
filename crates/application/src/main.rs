@@ -12,7 +12,7 @@ use sdlext::Ptr;
 use sdlext::{Color, Font, TimeError, sdl_init, sdl_ttf_init};
 
 use crate::error::{Error, FrontendError};
-use crate::state::AgendaSource;
+use crate::state::{AgendaSource, GetLongEventTextRegistry, GetShortEventTextRegistry};
 use state::{App, Frontend};
 
 /// The registry with the textures of the text objects.
@@ -217,6 +217,26 @@ struct DumbFrontend<'renderer, 'font> {
     hour_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     days_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     dates_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
+
+    long_event_text_registry: TextTextureRegistry<'renderer, 'font>,
+    short_event_text_registry: TextTextureRegistry<'renderer, 'font>,
+    event_details_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
+}
+
+impl<'renderer, 'font> GetLongEventTextRegistry for DumbFrontend<'renderer, 'font> {
+    type Registry = TextTextureRegistry<'renderer, 'font>;
+
+    fn get_long_event_text_registry(&mut self) -> &mut Self::Registry {
+        &mut self.long_event_text_registry
+    }
+}
+
+impl<'renderer, 'font> GetShortEventTextRegistry for DumbFrontend<'renderer, 'font> {
+    type Registry = TextTextureRegistry<'renderer, 'font>;
+
+    fn get_short_event_text_registry(&mut self) -> &mut Self::Registry {
+        &mut self.short_event_text_registry
+    }
 }
 
 impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
@@ -241,6 +261,10 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
         sdlext::get_current_time()
             .and_then(date::get_week_start)
             .map_err(FrontendError::WeekStartIsNotObtained)
+    }
+
+    fn get_event_details_text_texture_regirsty(&mut self) -> &mut Self::TextTextureRegistry {
+        &mut self.event_details_text_texture_regirsty
     }
 
     fn agenda_source(&self) -> &Self::AgendaSource {
@@ -372,11 +396,11 @@ fn unsafe_main() {
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
 
                         let mouse = sdl::SDL_FPoint { x: 0., y: 0. };
-                        let mut short_event_text_registry =
+                        let short_event_text_registry =
                             TextTextureRegistry::new(renderer, &fonts.title);
-                        let mut long_event_text_registry =
+                        let long_event_text_registry =
                             TextTextureRegistry::new(renderer, &fonts.title);
-                        let mut event_details_text_texture_regirsty =
+                        let event_details_text_texture_regirsty =
                             TextTextureRegistry::new(renderer, &fonts.ui);
 
                         // hours (00:00, 01:00 etc)
@@ -393,6 +417,9 @@ fn unsafe_main() {
                             hour_text_texture_regirsty,
                             days_text_texture_regirsty,
                             dates_text_texture_regirsty,
+                            short_event_text_registry,
+                            long_event_text_registry,
+                            event_details_text_texture_regirsty,
                         };
 
                         let event_title_offset = sdl::SDL_FPoint {
@@ -445,9 +472,7 @@ fn unsafe_main() {
                                         _ => (),
                                     },
                                     sdl::SDL_EVENT_KEY_UP => match event.key.key {
-                                        sdl::SDLK_ESCAPE => {
-                                            events.push(state::Action::Escape)
-                                        }
+                                        sdl::SDLK_ESCAPE => events.push(state::Action::Escape),
                                         sdl::SDLK_PAGEUP => {
                                             events.push(state::Action::SubtractWeek)
                                         }
@@ -491,10 +516,7 @@ fn unsafe_main() {
                                 activity,
                                 &mut frontend,
                                 window_size,
-                                &mut long_event_text_registry,
-                                &mut short_event_text_registry,
                                 events.into_iter(),
-                                &mut event_details_text_texture_regirsty,
                             )?;
 
                             let data = new_state.render_data;
