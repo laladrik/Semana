@@ -293,7 +293,7 @@ impl AgendaSource for KhalAgendaSource {
 
         let from = arguments.from.iso_8601();
         unsafe {
-            let args: [&str; 18] = [
+            let args: [&str; _] = [
                 arguments.backend_bin_path,
                 "list",
                 "--json",
@@ -310,6 +310,8 @@ impl AgendaSource for KhalAgendaSource {
                 "all-day",
                 "--json",
                 "calendar-color",
+                "--json",
+                "description",
                 from.as_str(),
                 &format!("{}d", arguments.duration_days),
             ];

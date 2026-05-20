@@ -606,7 +606,7 @@ impl<F: Frontend> App<F> {
         //
         // 1. The user does not resize and click at the same time.
         // 2. The user clicks on the events only when they're visible.
-        let maybe_clicked_event: Option<Option<&str>> = event_mouse_click.map(|mouse_click| {
+        let maybe_clicked_event: Option<Option<EventDetails>> = event_mouse_click.map(|mouse_click| {
             let MouseEventClick {
                 event_kind,
                 position,
@@ -614,26 +614,33 @@ impl<F: Frontend> App<F> {
             let rectangles: EventRectangles = self.calendar.state.obtain_events();
             match event_kind {
                 CalendarEventKind::Long => {
-                    find_clicked_event(&position, rectangles.long).map(|event| {
+                    find_clicked_event(&position, rectangles.long).and_then(|event: usize| {
                         let titles = self.calendar.state.obtain_long_events_titles();
-                        titles[event].as_ref()
+                        self.calendar.state.obtain_long_event_description(event).map(|description| EventDetails {
+                            title: titles[event].as_ref(),
+                            description,
+                        })
                     })
                 }
                 CalendarEventKind::Short => {
-                    find_clicked_event(&position, rectangles.short).map(|event| {
+                    find_clicked_event(&position, rectangles.short).and_then(|event| {
                         let titles = self.calendar.state.obtain_short_events_titles();
-                        titles[event].as_ref()
+                        self.calendar.state.obtain_short_event_description(event).map(|description| EventDetails {
+                            title: titles[event].as_ref(),
+                            description,
+                        })
                     })
                 }
             }
         });
 
         match maybe_clicked_event {
-            Some(Some(event_short_description)) => {
+            Some(Some(event_details)) => {
                 let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
                     frontend.get_event_details_text_texture_regirsty();
+                println!("event description: {}", event_details.description);
                 Self::transit_to_event_view(
-                    event_short_description,
+                    event_details.title,
                     &window_size,
                     event_details_text_texture_regirsty,
                 )
@@ -800,6 +807,11 @@ impl<F: Frontend> App<F> {
             }),
         })
     }
+}
+
+struct EventDetails<'event> {
+    title: &'event str,
+    description: &'event str,
 }
 
 // If mouse_position is within the surface of the long events or the short events then
@@ -1150,7 +1162,7 @@ pub trait Frontend:
     fn agenda_source(&self) -> &Self::AgendaSource;
 }
 
-/// A trait to fetch the data for the calendar.
+/// The trait to fetch the data for the calendar.
 ///
 /// The data for the calendar is fetched from a "slow" source.  Currently it's conceived to fetch
 /// the data from an external program.  As a program takes time to provide the data, the trait is

@@ -3,18 +3,24 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::date::{Date, DateStream, MINUTES_PER_DAY, Minutes, Time};
-use super::{Event, EventData};
+use super::{Event, EventData, JsonInputEvent};
 pub trait JsonParser {
     type Error;
 
-    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<EventVec, Self::Error>;
+    fn parse<'data, 'me: 'data>(
+        &'me self,
+        bytes: &'data str,
+    ) -> Result<Vec<JsonInputEvent>, Self::Error>;
 }
 
 pub struct NanoSerde;
 impl JsonParser for NanoSerde {
     type Error = nanoserde::DeJsonErr;
 
-    fn parse<'data, 'me: 'data>(&'me self, bytes: &'data str) -> Result<EventVec, Self::Error> {
+    fn parse<'data, 'me: 'data>(
+        &'me self,
+        bytes: &'data str,
+    ) -> Result<Vec<JsonInputEvent>, Self::Error> {
         nanoserde::DeJson::deserialize_json(bytes)
     }
 }
@@ -105,6 +111,15 @@ fn find_free_lane(new_event_begin_minutes: Minutes, clash: &Clash) -> Option<Lan
     lane_index.map(|i| unsafe { *clash.lanes.get_unchecked(i) })
 }
 
+fn add_description(item: String, storage: &mut Vec<String>) -> u32 {
+    assert!(storage.len() < u32::MAX as usize);
+    if storage.last().filter(|last| last == &&item).is_none() {
+        storage.push(item);
+    }
+
+    storage.len() as u32 - 1
+}
+
 pub fn parse_events<OutputParser>(
     json_parser: &OutputParser,
     bytes: &str,
@@ -116,6 +131,8 @@ where
     let mut week_schedule = Events {
         short: Vec::new(),
         long: Vec::new(),
+        long_event_descriptions: Vec::new(),
+        short_event_descriptions: Vec::new(),
     };
 
     let date_stream = DateStream::new(date.clone()).take(7);
@@ -129,16 +146,35 @@ where
     let last_day_in_the_range: Date = date.add_days(6);
     for item in agendas {
         let (agenda_json, date): (&str, Date) = item;
-        let agenda: EventVec = json_parser.parse(agenda_json).map_err(Error::Parse)?;
+        let agenda: Vec<JsonInputEvent> = json_parser.parse(agenda_json).map_err(Error::Parse)?;
         let event_items = agenda
             .into_iter()
-            .filter_map(|event: Event| short_event_filter(event, &date));
+            .filter_map(|event: JsonInputEvent| short_event_filter(event, &date));
 
         for item in event_items {
-            let (is_short, mut event): (bool, Event) = item;
+            let (is_short, mut json_event): (bool, JsonInputEvent) = item;
             // The end date of event is shortened down to the last day of the week for the case
             // when a long event DOES NOT end by the end of the current week.
-            event.end_date = event.end_date.min(last_day_in_the_range.clone());
+            json_event.end_date = json_event.end_date.min(last_day_in_the_range.clone());
+
+            let description = core::mem::take(&mut json_event.description);
+            let description_handle: u32 = if is_short {
+                add_description(description, &mut week_schedule.short_event_descriptions)
+            } else {
+                add_description(description, &mut week_schedule.long_event_descriptions)
+            };
+
+            let event = Event {
+                description: description_handle,
+                title: json_event.title,
+                start_date: json_event.start_date,
+                start_time: json_event.start_time,
+                end_date: json_event.end_date,
+                end_time: json_event.end_time,
+                all_day: json_event.all_day,
+                calendar_color: json_event.calendar_color,
+            };
+
             if is_short {
                 week_schedule.short.push(event)
             } else {
@@ -165,6 +201,8 @@ pub struct Events {
     long: EventVec,
     /// The array of events which are within a day.
     short: EventVec,
+    long_event_descriptions: Vec<String>,
+    short_event_descriptions: Vec<String>,
 }
 
 pub struct WeekScheduleWithLanes {
@@ -189,8 +227,9 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
     let short_lanes: Vec<(Lane, Lane)> =
         find_clashes(&events.short, start_date, short_event_clash_condition);
 
-    let create = |event: Event| -> (EventRange, String) {
+    let create = |event: Event| -> (EventRange, String, u32) {
         let Event {
+            description,
             title,
             start_date,
             start_time,
@@ -206,26 +245,46 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
             end_time,
             calendar_color,
         };
-        (range, title)
+        (range, title, description)
     };
 
-    let (long_event_ranges, long_event_titles): (Vec<EventRange>, Vec<String>) =
-        events.long.into_iter().map(create).unzip();
+    let n = events.long.len();
+    let mut long_event_ranges: Vec<EventRange> = Vec::with_capacity(n);
+    let mut long_event_titles: Vec<String> = Vec::with_capacity(n);
+    let mut long_descriptions: Vec<u32> = Vec::with_capacity(n);
+    for long_event in events.long.into_iter() {
+        let (range, title, description) = create(long_event);
+        long_event_ranges.push(range);
+        long_event_titles.push(title);
+        long_descriptions.push(description);
+    }
 
-    let (short_event_ranges, short_event_titles): (Vec<EventRange>, Vec<String>) =
-        events.short.into_iter().map(create).unzip();
+    let n = events.short.len();
+    let mut short_event_ranges: Vec<EventRange> = Vec::with_capacity(n);
+    let mut short_event_titles: Vec<String> = Vec::with_capacity(n);
+    let mut short_descriptions: Vec<u32> = Vec::with_capacity(n);
+    for short_event in events.short.into_iter() {
+        let (range, title, description) = create(short_event);
+        short_event_ranges.push(range);
+        short_event_titles.push(title);
+        short_descriptions.push(description);
+    }
 
     WeekScheduleWithLanes {
         long: EventData {
             event_ranges: long_event_ranges,
             titles: long_event_titles,
             lanes: long_lanes,
+            description_handles: long_descriptions,
+            description_strings: events.long_event_descriptions,
         },
 
         short: EventData {
             event_ranges: short_event_ranges,
             titles: short_event_titles,
             lanes: short_lanes,
+            description_handles: short_descriptions,
+            description_strings: events.short_event_descriptions,
         },
     }
 }
@@ -305,12 +364,12 @@ fn find_clashes(
 /// 2. Short event: stays within a day. (less than 24h)
 /// 3. CrossNight event: a short event but which start one day and finishes on the following (less than 24h).
 ///
-/// The canonicalize them into 2 types (long and short).  The CrossNight event is turned into a
+/// We canonicalize them into 2 types (long and short).  The CrossNight event is turned into a
 /// short event cropping its head or tail. The head is cropped if the starting date of `event`
 /// equals to `date`.  The tail is cropped if the ending date of `event` equal to `date`.  This
 /// algorithm is based on the _assumption_ that the function `short_event_filter` is called for an
 /// event of this kind _twice_.
-fn short_event_filter(mut event: Event, date: &Date) -> Option<(bool, Event)> {
+fn short_event_filter(mut event: JsonInputEvent, date: &Date) -> Option<(bool, JsonInputEvent)> {
     let is_all_day: bool = match event.all_day.as_str() {
         "True" => true,
         "False" => false,
@@ -333,7 +392,7 @@ fn short_event_filter(mut event: Event, date: &Date) -> Option<(bool, Event)> {
             }
         }
         EventType::CrossNight => {
-            let cropped_event: Event = crop_event(date, event);
+            let cropped_event: JsonInputEvent = crop_event(date, event);
             Some((true, cropped_event))
         }
     }
@@ -366,9 +425,10 @@ enum EventType {
 ///
 /// It assumes that it's called only for the events which start on one day and finishes on the
 /// following day.
-fn crop_event(date: &Date, event: Event) -> Event {
+fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
     if date == &event.start_date {
-        Event {
+        JsonInputEvent {
+            description: event.description,
             start_date: event.start_date.clone(),
             start_time: event.start_time,
             end_date: event.start_date,
@@ -378,12 +438,13 @@ fn crop_event(date: &Date, event: Event) -> Event {
             calendar_color: event.calendar_color,
         }
     } else if date == &event.end_date {
-        Event {
+        JsonInputEvent {
             start_date: event.end_date.clone(),
             start_time: Time::midnight(),
             end_date: event.end_date,
             end_time: event.end_time,
             title: event.title,
+            description: event.description,
             all_day: event.all_day,
             calendar_color: event.calendar_color,
         }
@@ -392,7 +453,7 @@ fn crop_event(date: &Date, event: Event) -> Event {
     }
 }
 
-fn determine_event_type(event: &Event, is_all_day: bool) -> EventType {
+fn determine_event_type(event: &JsonInputEvent, is_all_day: bool) -> EventType {
     let sd: &Date = &event.start_date;
     let ed: &Date = &event.end_date;
     let st: &Time = &event.start_time;
@@ -423,8 +484,8 @@ pub struct WeekData {
 
 #[cfg(test)]
 mod tests {
-    use alloc::borrow::ToOwned;
     use super::*;
+    use alloc::borrow::ToOwned;
     use core::str::FromStr;
     #[track_caller]
     fn create_date(s: &str) -> Date {
@@ -444,7 +505,8 @@ mod tests {
 
     #[test]
     fn test_short_event_clash() {
-        let create_event = |title: &str, start_time: &str, end_time: &str| Event {
+        let create_event = |title: &str, start_time: &str, end_time: &str| JsonInputEvent {
+            description: String::default(),
             calendar_color: crate::Color::BLACK,
             title: title.to_owned(),
             start_date: create_date("2025-11-03"),
@@ -454,7 +516,7 @@ mod tests {
             all_day: "False".to_owned(),
         };
 
-        let events: Vec<Event> = Vec::from_iter([
+        let events: Vec<JsonInputEvent> = Vec::from_iter([
             create_event("first", "10:00", "11:00"),
             create_event("second", "10:30", "11:30"),
             create_event("third", "11:00", "12:00"),

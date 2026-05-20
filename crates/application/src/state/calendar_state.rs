@@ -43,6 +43,22 @@ impl<Handle> CalendarState<Handle> {
         }
     }
 
+    pub fn obtain_short_event_description(&self, event_index: usize) -> Option<&str> {
+        if let Self::Ready { week_data, .. } = self {
+            week_data.agenda.short.obtain_description(event_index)
+        } else {
+            None
+        }
+    }
+
+    pub fn obtain_long_event_description(&self, event_index: usize) -> Option<&str> {
+        if let Self::Ready { week_data, .. } = self {
+            week_data.agenda.long.obtain_description(event_index)
+        } else {
+            None
+        }
+    }
+
     pub fn obtain_long_events_titles(&self) -> &[impl AsRef<str>] {
         if let Self::Ready { week_data, .. } = self {
             week_data.agenda.long.titles.as_slice()

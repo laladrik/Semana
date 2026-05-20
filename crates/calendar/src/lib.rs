@@ -18,7 +18,8 @@ pub enum Error<'s> {
 }
 
 #[derive(DeJson)]
-pub struct Event {
+pub struct JsonInputEvent {
+    description: String,
     title: String,
     #[nserde(rename = "start-date")]
     start_date: date::Date,
@@ -31,6 +32,18 @@ pub struct Event {
     #[nserde(rename = "all-day")]
     all_day: String,
     #[nserde(rename = "calendar-color")]
+    calendar_color: Color,
+}
+
+pub struct Event {
+    description: u32,
+    // FIXME(alex): store the string in a separated data storage
+    title: String,
+    start_date: date::Date,
+    start_time: date::Time,
+    end_date: date::Date,
+    end_time: date::Time,
+    all_day: String,
     calendar_color: Color,
 }
 
@@ -81,7 +94,18 @@ pub struct EventRange {
 pub struct EventData {
     pub event_ranges: Vec<EventRange>,
     pub titles: Vec<String>,
+    pub description_handles: Vec<u32>,
+    pub description_strings: Vec<String>,
     pub lanes: Vec<(Lane, Lane)>,
+}
+
+impl EventData {
+    pub fn obtain_description(&self, event: usize) -> Option<&str> {
+        self.description_handles
+            .get(event)
+            .and_then(|handle: &u32| self.description_strings.get(*handle as usize))
+            .map(String::as_str)
+    }
 }
 
 pub type Lane = u8;
