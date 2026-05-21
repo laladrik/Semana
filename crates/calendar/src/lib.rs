@@ -43,7 +43,6 @@ pub struct Event {
     start_time: date::Time,
     end_date: date::Date,
     end_time: date::Time,
-    all_day: String,
     calendar_color: Color,
 }
 

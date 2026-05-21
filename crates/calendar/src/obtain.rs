@@ -171,7 +171,6 @@ where
                 start_time: json_event.start_time,
                 end_date: json_event.end_date,
                 end_time: json_event.end_time,
-                all_day: json_event.all_day,
                 calendar_color: json_event.calendar_color,
             };
 
@@ -235,7 +234,6 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
             start_time,
             end_date,
             end_time,
-            all_day: _,
             calendar_color,
         } = event;
         let range = EventRange {
