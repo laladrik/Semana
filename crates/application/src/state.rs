@@ -12,6 +12,13 @@ use calendar::{
 use sdl3_sys::{SDL_FPoint as FPoint, SDL_FRect as FRect, SDL_Point as Point, SDL_Rect as Rect};
 use sdlext::Color;
 
+mod captions {
+    pub mod event_details_view {
+        pub const TITLE: &str = "Title:";
+        pub const DESCRIPTION: &str = "Description:";
+    }
+}
+
 pub struct Calendar<F: Frontend> {
     _frontend: std::marker::PhantomData<F>,
     pub week_start: calendar::date::Date,
@@ -606,7 +613,7 @@ impl<F: Frontend> App<F> {
         //
         // 1. The user does not resize and click at the same time.
         // 2. The user clicks on the events only when they're visible.
-        let maybe_clicked_event: Option<Option<EventDetails>> = event_mouse_click.map(|mouse_click| {
+        let maybe_clicked_event: Option<EventDetails> = event_mouse_click.and_then(|mouse_click| {
             let MouseEventClick {
                 event_kind,
                 position,
@@ -616,36 +623,34 @@ impl<F: Frontend> App<F> {
                 CalendarEventKind::Long => {
                     find_clicked_event(&position, rectangles.long).and_then(|event: usize| {
                         let titles = self.calendar.state.obtain_long_events_titles();
-                        self.calendar.state.obtain_long_event_description(event).map(|description| EventDetails {
-                            title: titles[event].as_ref(),
-                            description,
-                        })
+                        let title = titles.get(event)?.as_ref();
+                        let description =
+                            self.calendar.state.obtain_long_event_description(event)?;
+                        Some(EventDetails { title, description })
                     })
                 }
-                CalendarEventKind::Short => {
-                    find_clicked_event(&position, rectangles.short).and_then(|event| {
+                CalendarEventKind::Short => find_clicked_event(&position, rectangles.short)
+                    .and_then(|event| {
                         let titles = self.calendar.state.obtain_short_events_titles();
-                        self.calendar.state.obtain_short_event_description(event).map(|description| EventDetails {
-                            title: titles[event].as_ref(),
-                            description,
-                        })
-                    })
-                }
+                        let title = titles.get(event)?.as_ref();
+                        let description =
+                            self.calendar.state.obtain_short_event_description(event)?;
+                        Some(EventDetails { title, description })
+                    }),
             }
         });
 
         match maybe_clicked_event {
-            Some(Some(event_details)) => {
+            Some(event_details) => {
                 let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
                     frontend.get_event_details_text_texture_regirsty();
-                println!("event description: {}", event_details.description);
                 Self::transit_to_event_view(
-                    event_details.title,
+                    event_details,
                     &window_size,
                     event_details_text_texture_regirsty,
                 )
             }
-            _ => {
+            None => {
                 // If the user switches the week, the events for the week are requested from Khal.
                 if self.calendar.is_week_switched {
                     self.calendar.update_week_data(frontend)?;
@@ -735,22 +740,65 @@ impl<F: Frontend> App<F> {
         }
     }
 
-    fn transit_to_event_view<'wdrect, 'frontend>(
-        title: impl AsRef<str>,
+    fn transit_to_event_view<'rect, 'event, 'frontend>(
+        details: EventDetails<'event>,
         window_size: &Point,
         event_details_text_texture_regirsty: &'frontend mut F::TextTextureRegistry,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'rect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
         event_details_text_texture_regirsty.clear();
+        // FIXME(alex): this should be based on the font line height
+        let one_line_height = 30f32;
+        let top_offset = 100f32;
+        let mut vertical_offset = top_offset;
         event_details_text_texture_regirsty.create(
-            title.as_ref(),
+            captions::event_details_view::TITLE,
             Color::WHITE,
             FRect {
                 x: 100.0,
-                y: 100.0,
+                y: vertical_offset,
                 w: window_size.x as f32 - 200.0,
-                h: window_size.y as f32 - 200.0,
+                h: one_line_height,
             },
         )?;
+
+        vertical_offset += one_line_height;
+        // FIXME(alex): a long title is cropped
+        event_details_text_texture_regirsty.create(
+            details.title,
+            Color::WHITE,
+            FRect {
+                x: 150.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += 2f32 * one_line_height;
+        event_details_text_texture_regirsty.create(
+            captions::event_details_view::DESCRIPTION,
+            Color::WHITE,
+            FRect {
+                x: 100.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += one_line_height;
+        // FIXME(alex): a long description is cropped
+        event_details_text_texture_regirsty.create(
+            details.description,
+            Color::WHITE,
+            FRect {
+                x: 150.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: window_size.y as f32 - vertical_offset,
+            },
+        )?;
+
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
