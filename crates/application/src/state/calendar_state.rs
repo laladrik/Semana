@@ -109,6 +109,20 @@ impl<Handle> CalendarState<Handle> {
             e,
         )
     }
+
+    pub fn get_long_event_clash_size(&self) -> calendar::Lane {
+        match self {
+            CalendarState::Loading { .. } => 0,
+            CalendarState::Ready {
+                long_event_clash_size,
+                ..
+            }
+            | CalendarState::Rendering {
+                long_event_clash_size,
+                ..
+            } => *long_event_clash_size,
+        }
+    }
 }
 
 pub struct EventRectangles<'rect> {

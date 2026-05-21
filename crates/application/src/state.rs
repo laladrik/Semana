@@ -99,6 +99,7 @@ impl<F: Frontend> Calendar<F> {
     fn get_ready<'frontend, 'view, 'a, EventTextObjectDB>(
         &mut self,
         view: &'view View,
+        top_panel_height: f32,
         frontend: &'frontend mut EventTextObjectDB,
         event_title_offset: &'a FPoint,
         event_offset: &FPoint,
@@ -140,14 +141,13 @@ impl<F: Frontend> Calendar<F> {
                     event_title_offset,
                     text_registry: frontend.get_long_event_text_registry(),
                 };
-                let top_panel_heigth: f32 = view.calculate_top_panel_height();
                 let long_event_rectangles_opt = create_long_events(
                     &week_data.agenda.long,
                     week_start,
                     reg,
                     event_offset,
                     view.cell_width,
-                    top_panel_heigth,
+                    top_panel_height,
                 );
 
                 let long_event_rectangles_opt = match long_event_rectangles_opt {
@@ -383,20 +383,6 @@ impl<F: Frontend> App<F> {
         Ok(Self { calendar, ui })
     }
 
-    fn get_clash_size(calendar: &Calendar<F>) -> calendar::Lane {
-        match calendar.state {
-            CalendarState::Loading { .. } => 0,
-            CalendarState::Ready {
-                long_event_clash_size,
-                ..
-            }
-            | CalendarState::Rendering {
-                long_event_clash_size,
-                ..
-            } => long_event_clash_size,
-        }
-    }
-
     #[inline]
     fn compute_viewport_size(
         event_offset: &FPoint,
@@ -410,20 +396,15 @@ impl<F: Frontend> App<F> {
         }
     }
 
-    fn create_view(&mut self, window_size: &Point) -> View {
-        let clash_size: u8 = Self::get_clash_size(&self.calendar);
-        let long_event_surface_height =
-            View::compute_long_event_surface_height(self.ui.title_font_height, clash_size);
-        View::new(
-            Self::compute_viewport_size(
-                &self.ui.event_offset,
-                window_size,
-                long_event_surface_height,
-            ),
-            &self.ui.adjustment,
-            self.ui.title_font_height,
-            clash_size,
-        )
+    fn create_view(
+        event_offset: &FPoint,
+        adjustment: &SurfaceAdjustment,
+        window_size: &Point,
+        long_event_surface_height: f32,
+    ) -> View {
+        let size =
+            Self::compute_viewport_size(event_offset, window_size, long_event_surface_height);
+        View::new(size, adjustment)
     }
 
     fn reposition_hours_text_objects(frontend: &mut F, width: f32, view: &View) {
@@ -548,7 +529,7 @@ impl<F: Frontend> App<F> {
     fn compute_long_event_height(&self) -> f32 {
         View::compute_long_event_surface_height(
             self.ui.title_font_height,
-            Self::get_clash_size(&self.calendar),
+            self.calendar.state.get_long_event_clash_size(),
         )
     }
 
@@ -644,11 +625,18 @@ impl<F: Frontend> App<F> {
             Some(event_details) => {
                 let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
                     frontend.get_event_details_text_texture_regirsty();
-                Self::transit_to_event_view(
+                Activities::<F>::render_event_detail_text_objects(
                     event_details,
                     &window_size,
                     event_details_text_texture_regirsty,
-                )
+                )?;
+
+                Ok(NewState {
+                    activity: Activity::EventView,
+                    render_data: RenderData::EventView(EventViewRenderData {
+                        text_registry: event_details_text_texture_regirsty,
+                    }),
+                })
             }
             None => {
                 // If the user switches the week, the events for the week are requested from Khal.
@@ -666,11 +654,13 @@ impl<F: Frontend> App<F> {
                 // The events has been delivered, get ready to render them!
                 self.calendar.get_rendering(frontend);
 
+                let long_event_clash_size: calendar::Lane =
+                    self.calendar.state.get_long_event_clash_size();
                 // The viewport through which we watch the surface with the short events.
                 let short_event_viewport: Rect = {
                     let long_event_surface_height = View::compute_long_event_surface_height(
                         self.ui.title_font_height,
-                        Self::get_clash_size(&self.calendar),
+                        long_event_clash_size,
                     );
                     ShortEventViewport::new(
                         &self.ui.event_offset,
@@ -681,7 +671,18 @@ impl<F: Frontend> App<F> {
                 };
 
                 // Create the view with the short events.
-                let view: calendar::ui::View = self.create_view(&window_size);
+                let long_event_surface_height = View::compute_long_event_surface_height(
+                    self.ui.title_font_height,
+                    long_event_clash_size,
+                );
+
+                let view: calendar::ui::View = Self::create_view(
+                    &self.ui.event_offset,
+                    &self.ui.adjustment,
+                    &window_size,
+                    long_event_surface_height,
+                );
+
                 let hours_viewport = Rect {
                     y: short_event_viewport.y,
                     x: 10,
@@ -705,8 +706,13 @@ impl<F: Frontend> App<F> {
                 // 1. Computes the positions and the sizes of the rectangles for the events (both long and
                 //    short).  This takes into account the clashes of the events.
                 // 2. Based on the sizes of the rectangles it renders the texts.
+                let top_panel_height = View::compute_long_event_surface_height(
+                    self.ui.title_font_height,
+                    long_event_clash_size,
+                );
                 self.calendar.get_ready(
                     &view,
+                    top_panel_height,
                     frontend,
                     &self.ui.event_title_offset,
                     &self.ui.event_offset,
@@ -740,11 +746,66 @@ impl<F: Frontend> App<F> {
         }
     }
 
-    fn transit_to_event_view<'rect, 'event, 'frontend>(
-        details: EventDetails<'event>,
+    pub fn get_root_activity(&self) -> Activity {
+        Activity::WeekView
+    }
+
+    // main function
+    pub fn create_render_data<'wdrect, 'frontend>(
+        &'wdrect mut self,
+        activity: Activity,
+        frontend: &'frontend mut F,
+        window_size: Point,
+        events: impl IntoIterator<Item = Action>,
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+        match activity {
+            Activity::WeekView => self.create_week_view_render_data(frontend, window_size, events),
+            Activity::EventView => {
+                self.create_event_view_render_data(frontend, window_size, events)
+            }
+        }
+    }
+
+    fn create_event_view_render_data<'wdrect, 'frontend>(
+        &'wdrect mut self,
+        frontend: &'frontend mut F,
+        window_size: Point,
+        events: impl IntoIterator<Item = Action>,
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+        for event in events {
+            match event {
+                Action::Escape => {
+                    return self.create_week_view_render_data(
+                        frontend,
+                        window_size,
+                        Vec::new().into_iter(),
+                    );
+                }
+                Action::WindowResize => todo!("fix the resize for the event view"),
+                _ => (),
+            }
+        }
+        let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
+            frontend.get_event_details_text_texture_regirsty();
+        Ok(NewState {
+            activity: Activity::EventView,
+            render_data: RenderData::EventView(EventViewRenderData {
+                text_registry: event_details_text_texture_regirsty,
+            }),
+        })
+    }
+}
+struct Activities<F: Frontend> {
+    _frontend: core::marker::PhantomData<F>,
+}
+
+impl<F: Frontend> Activities<F> {
+    // Renders the text of the event details
+    fn render_event_detail_text_objects(
+        details: EventDetails,
         window_size: &Point,
-        event_details_text_texture_regirsty: &'frontend mut F::TextTextureRegistry,
-    ) -> Result<NewState<'rect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+        event_details_text_texture_regirsty: &mut F::TextTextureRegistry,
+    ) -> Result<(), F::Error> {
         event_details_text_texture_regirsty.clear();
         // FIXME(alex): this should be based on the font line height
         let one_line_height = 30f32;
@@ -800,62 +861,7 @@ impl<F: Frontend> App<F> {
                 },
             )?;
         }
-
-        Ok(NewState {
-            activity: Activity::EventView,
-            render_data: RenderData::EventView(EventViewRenderData {
-                text_registry: event_details_text_texture_regirsty,
-            }),
-        })
-    }
-
-    pub fn get_root_activity(&self) -> Activity {
-        Activity::WeekView
-    }
-
-    // main function
-    pub fn create_render_data<'wdrect, 'frontend>(
-        &'wdrect mut self,
-        activity: Activity,
-        frontend: &'frontend mut F,
-        window_size: Point,
-        events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
-        match activity {
-            Activity::WeekView => self.create_week_view_render_data(frontend, window_size, events),
-            Activity::EventView => {
-                self.create_event_view_render_data(frontend, window_size, events)
-            }
-        }
-    }
-
-    fn create_event_view_render_data<'wdrect, 'frontend>(
-        &'wdrect mut self,
-        frontend: &'frontend mut F,
-        window_size: Point,
-        events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
-        for event in events {
-            match event {
-                Action::Escape => {
-                    return self.create_week_view_render_data(
-                        frontend,
-                        window_size,
-                        Vec::new().into_iter(),
-                    );
-                }
-                Action::WindowResize => todo!("fix the resize for the event view"),
-                _ => (),
-            }
-        }
-        let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
-            frontend.get_event_details_text_texture_regirsty();
-        Ok(NewState {
-            activity: Activity::EventView,
-            render_data: RenderData::EventView(EventViewRenderData {
-                text_registry: event_details_text_texture_regirsty,
-            }),
-        })
+        Ok(())
     }
 }
 
@@ -872,7 +878,7 @@ fn try_register_mouse_click(
     window_size: &Point,
 ) -> Option<MouseEventClick> {
     let short_event_viewport =
-        ShortEventViewport::from_long_event_surface(&long_event_surface, &window_size);
+        ShortEventViewport::from_long_event_surface(long_event_surface, window_size);
 
     let is_long_event_click = is_fpoint_between_points(
         mouse_position,

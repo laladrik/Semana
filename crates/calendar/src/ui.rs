@@ -53,8 +53,6 @@ pub struct View {
     pub cell_width: f32,
     /// The height of a short event.
     pub cell_height: f32,
-    /// The height of the surface with the long events.
-    pub long_event_surface_height: f32,
 }
 
 #[inline]
@@ -73,39 +71,28 @@ pub fn compute_event_surface(
 
 impl View {
     #[inline]
-    pub fn compute_long_event_surface_height(title_font_height: i32, long_event_clash_size: Lane) -> f32 {
+    pub fn compute_long_event_surface_height(
+        title_font_height: i32,
+        long_event_clash_size: Lane,
+    ) -> f32 {
         (title_font_height + Self::LINE_HEIGHT as i32) as f32 * long_event_clash_size as f32
     }
 
     const LINE_HEIGHT: u8 = 15;
-    pub fn new(
-        viewport_size: FPoint,
-        adjustment: &SurfaceAdjustment,
-        title_font_height: i32,
-        long_event_clash_size: Lane,
-    ) -> Self {
+    pub fn new(viewport_size: FPoint, adjustment: &SurfaceAdjustment) -> Self {
         let event_surface: FRect = compute_event_surface(
             &viewport_size,
             adjustment.vertical_scale,
             adjustment.vertical_offset,
         );
-        // The panel above the grid with the short events and beyond the days.
-        let top_panel_height =
-            Self::compute_long_event_surface_height(title_font_height, long_event_clash_size);
         let cell_width: f32 = event_surface.w / 7.;
 
         let cell_height = event_surface.h / 24.;
         Self {
-            long_event_surface_height: top_panel_height,
             cell_height,
             cell_width,
             short_event_surface: event_surface,
         }
-    }
-
-    #[inline(always)]
-    pub fn calculate_top_panel_height(&self) -> f32 {
-        self.long_event_surface_height
     }
 }
 
