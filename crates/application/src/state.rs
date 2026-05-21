@@ -774,30 +774,32 @@ impl<F: Frontend> App<F> {
             },
         )?;
 
-        vertical_offset += 2f32 * one_line_height;
-        event_details_text_texture_regirsty.create(
-            captions::event_details_view::DESCRIPTION,
-            Color::WHITE,
-            FRect {
-                x: 100.0,
-                y: vertical_offset,
-                w: window_size.x as f32 - 200.0,
-                h: one_line_height,
-            },
-        )?;
+        if !details.description.is_empty() {
+            vertical_offset += 2f32 * one_line_height;
+            event_details_text_texture_regirsty.create(
+                captions::event_details_view::DESCRIPTION,
+                Color::WHITE,
+                FRect {
+                    x: 100.0,
+                    y: vertical_offset,
+                    w: window_size.x as f32 - 200.0,
+                    h: one_line_height,
+                },
+            )?;
 
-        vertical_offset += one_line_height;
-        // FIXME(alex): a long description is cropped
-        event_details_text_texture_regirsty.create(
-            details.description,
-            Color::WHITE,
-            FRect {
-                x: 150.0,
-                y: vertical_offset,
-                w: window_size.x as f32 - 200.0,
-                h: window_size.y as f32 - vertical_offset,
-            },
-        )?;
+            vertical_offset += one_line_height;
+            // FIXME(alex): a long description is cropped
+            event_details_text_texture_regirsty.create(
+                details.description,
+                Color::WHITE,
+                FRect {
+                    x: 150.0,
+                    y: vertical_offset,
+                    w: window_size.x as f32 - 200.0,
+                    h: window_size.y as f32 - vertical_offset,
+                },
+            )?;
+        }
 
         Ok(NewState {
             activity: Activity::EventView,
