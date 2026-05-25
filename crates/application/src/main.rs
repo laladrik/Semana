@@ -214,6 +214,7 @@ impl RenderedText {
 }
 
 struct DumbFrontend<'renderer, 'font> {
+    window: *mut sdl::SDL_Window,
     hour_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     days_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     dates_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
@@ -431,6 +432,7 @@ fn unsafe_main() {
                             TextTextureRegistry::new(renderer, &fonts.ui);
 
                         let mut frontend = DumbFrontend {
+                            window: root_window,
                             hour_text_texture_regirsty,
                             days_text_texture_regirsty,
                             dates_text_texture_regirsty,
