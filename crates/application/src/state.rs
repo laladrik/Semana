@@ -1000,6 +1000,19 @@ trait AddFPoint {
     fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint;
 }
 
+trait CoversPoint {
+    fn covers_point(&self, _: &FPoint) -> bool;
+}
+
+impl CoversPoint for FRect {
+    fn covers_point(&self, point: &FPoint) -> bool {
+        (point.x >= self.x)
+            && (point.x <= (self.x + self.w))
+            && (point.y >= self.y)
+            && (point.y <= (self.y + self.h))
+    }
+}
+
 impl<T: std::borrow::Borrow<FPoint>> AddFPoint for T {
     fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
         fpoint_add(self, right)
