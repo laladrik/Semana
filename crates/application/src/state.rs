@@ -1225,6 +1225,8 @@ pub trait Frontend:
     fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_dates_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_event_details_text_texture_regirsty(&mut self) -> &mut Self::TextTextureRegistry;
+    fn start_text_input(&self);
+    fn stop_text_input(&self);
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
 

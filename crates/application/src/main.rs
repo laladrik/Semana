@@ -263,6 +263,21 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
             .map_err(FrontendError::WeekStartIsNotObtained)
     }
 
+    fn start_text_input(&self) {
+        unsafe {
+            if !sdl::SDL_StartTextInput(self.window) {
+                panic!("failed to start text input");
+            }
+        }
+    }
+
+    fn stop_text_input(&self) {
+        unsafe {
+            if !sdl::SDL_StopTextInput(self.window) {
+                panic!("failed to stop text input");
+            }
+        }
+    }
     fn get_event_details_text_texture_regirsty(&mut self) -> &mut Self::TextTextureRegistry {
         &mut self.event_details_text_texture_regirsty
     }
