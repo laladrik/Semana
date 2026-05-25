@@ -232,18 +232,22 @@ impl Ptr for &Renderer {
 }
 
 pub struct Text {
-    ptr: *mut sdl_ttf::TTF_Text,
+    ptr: NonNull<sdl_ttf::TTF_Text>,
 }
 
 impl Ptr for Text {
     type Inner = sdl_ttf::TTF_Text;
 
     fn ptr(&self) -> *mut Self::Inner {
-        self.ptr
+        self.ptr.as_ptr()
     }
 }
 
 impl Text {
+    pub fn new(ptr: NonNull<sdl_ttf::TTF_Text>) -> Self {
+        Self { ptr }
+    }
+
     pub fn try_new(
         engine: *mut sdl_ttf::TTF_TextEngine,
         font: &mut Font,
@@ -252,11 +256,9 @@ impl Text {
         unsafe {
             let ptr =
                 sdl_ttf::TTF_CreateText(engine, font.ptr(), text.as_ptr(), text.count_bytes());
-            if ptr.is_null() {
-                Err(TtfError::TextIsNotCreated)
-            } else {
-                Ok(Self { ptr })
-            }
+            NonNull::new(ptr)
+                .ok_or(TtfError::TextIsNotCreated)
+                .map(Self::new)
         }
     }
 }
@@ -264,7 +266,7 @@ impl Text {
 impl Drop for Text {
     fn drop(&mut self) {
         unsafe {
-            sdl_ttf::TTF_DestroyText(self.ptr);
+            sdl_ttf::TTF_DestroyText(self.ptr.as_ptr());
         }
     }
 }
@@ -556,6 +558,10 @@ impl Renderer {
 
     pub fn render_fill_rect(&self, rect: &sdl::SDL_FRect) -> Result<()> {
         self.call1(sdl::SDL_RenderFillRect, rect, Error::RectangleIsNotDrawn)
+    }
+
+    pub fn render_rect(&self, rect: &sdl::SDL_FRect) -> Result<()> {
+        self.call1(sdl::SDL_RenderRect, rect, Error::RectangleIsNotDrawn)
     }
 
     pub fn render_line(&self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<()> {
