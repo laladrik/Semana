@@ -1,8 +1,11 @@
-#!/bin/bash
+#!/bin/bash --norc
 function runChecks(){
-    if ! rustfmt --check $(git diff --diff-filter=d --name-only --cached '*.rs'); then
-        echo "Git pre-commit hook: source code format checking failure.  Refer to .githooks/pre-commit"
-        return 1;
+    local files="$(git diff --diff-filter=d --name-only --cached '*.rs')"
+    if test -n "$files"; then
+        if ! echo "$files" | xargs -d "\n" rustfmt --config skip_children=true --check; then
+            echo "Git pre-commit hook: source code format checking failure.  Refer to .githooks/pre-commit"
+            return 1;
+        fi
     fi
 
     if ! git diff --diff-filter=d --cached '*.rs' | ( ! grep -w 'dbg!' ); then
