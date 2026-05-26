@@ -1,0 +1,23 @@
+#!/bin/bash
+function runChecks(){
+    if ! rustfmt --check $(git diff --diff-filter=d --name-only --cached '*.rs'); then
+        echo "Git pre-commit hook: source code format checking failure.  Refer to .githooks/pre-commit"
+        return 1;
+    fi
+
+    if ! git diff --diff-filter=d --cached '*.rs' | ( ! grep -w 'dbg!' ); then
+        echo "Git pre-commit hook: search for debugging code.  Refer to .githooks/pre-commit"
+        return 2;
+    fi
+}
+
+git stash --quiet --keep-index
+runChecks
+RET=$?
+git stash pop --quiet
+
+if test $RET -ne 0; then
+    echo "Git pre-commit hook failed.  Take a look at the messages above, which start with "'"Git pre-commit hook"'""
+fi
+
+exit $RET
