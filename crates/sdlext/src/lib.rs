@@ -48,7 +48,7 @@ pub enum TtfError {
     FontIsNotOpened,
     TextIsNotCreated,
     EngineIsNotCreated,
-    TextIsNotDrown,
+    TextIsNotDrawn,
 }
 
 pub type Result<R> = std::result::Result<R, Error>;
