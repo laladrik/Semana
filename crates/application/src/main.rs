@@ -213,15 +213,76 @@ impl RenderedText {
     }
 }
 
+struct TextObjectRegistry<'font> {
+    font: &'font RefCell<sdlext::Font>,
+    text_engine: *mut sdl_ttf::TTF_TextEngine,
+    text_positions: Vec<sdl::SDL_FRect>,
+    text_objects: Vec<sdlext::Text>,
+}
+
+impl<'font> TextObjectRegistry<'font> {
+    fn new(font: &'font RefCell<sdlext::Font>, text_engine: *mut sdl_ttf::TTF_TextEngine) -> Self {
+        Self {
+            font,
+            text_positions: Vec::new(),
+            text_engine,
+            text_objects: Vec::new(),
+        }
+    }
+
+    pub fn render(&self) -> Result<(), sdlext::Error> {
+        for (text, position) in self.text_objects.iter().zip(self.text_positions.iter()) {
+            let sdl::SDL_FRect { x, y, .. } = position;
+            unsafe {
+                if !sdl_ttf::TTF_DrawRendererText(text.ptr(), *x, *y) {
+                    return Err(sdlext::TtfError::TextIsNotDrawn.into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
+    type Error = FrontendError;
+
+    type TextObject = sdlext::Text;
+
+    fn clear(&mut self) {
+        self.text_objects.clear();
+        self.text_positions.clear();
+    }
+
+    fn create(
+        &mut self,
+        text: impl Into<Vec<u8>>,
+        _color: Color,
+        position: sdl3_sys::SDL_FRect,
+    ) -> Result<(), Self::Error> {
+        let cstring = std::ffi::CString::new(text).expect("malware input for a C string");
+        let ret = sdlext::Text::try_new(self.text_engine, &mut self.font.borrow_mut(), &cstring)
+            .expect("the text object hasn't been created");
+        unsafe {
+            let width: f32 = position.w.floor();
+            if !sdl_ttf::TTF_SetTextWrapWidth(ret.ptr(), width as i32) {
+                panic!("fail to set the wrap for the given text");
+            }
+        }
+
+        self.text_objects.push(ret);
+        self.text_positions.push(position);
+        Ok(())
+    }
+}
+
 struct DumbFrontend<'renderer, 'font> {
-    window: *mut sdl::SDL_Window,
     hour_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     days_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     dates_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
 
     long_event_text_registry: TextTextureRegistry<'renderer, 'font>,
     short_event_text_registry: TextTextureRegistry<'renderer, 'font>,
-    event_details_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
+    event_details_text_object_regirsty: TextObjectRegistry<'font>,
 }
 
 impl<'renderer, 'font> GetLongEventTextRegistry for DumbFrontend<'renderer, 'font> {
@@ -245,6 +306,7 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
     type Error = FrontendError;
     type TextTextureRegistry = TextTextureRegistry<'renderer, 'font>;
     type AgendaSource = KhalAgendaSource;
+    type TextObjectRegistry = TextObjectRegistry<'font>;
 
     fn get_hours_text_registry(&mut self) -> &mut TextTextureRegistry<'renderer, 'font> {
         &mut self.hour_text_texture_regirsty
@@ -264,23 +326,8 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
             .map_err(FrontendError::WeekStartIsNotObtained)
     }
 
-    fn start_text_input(&self) {
-        unsafe {
-            if !sdl::SDL_StartTextInput(self.window) {
-                panic!("failed to start text input");
-            }
-        }
-    }
-
-    fn stop_text_input(&self) {
-        unsafe {
-            if !sdl::SDL_StopTextInput(self.window) {
-                panic!("failed to stop text input");
-            }
-        }
-    }
-    fn get_event_details_text_texture_regirsty(&mut self) -> &mut Self::TextTextureRegistry {
-        &mut self.event_details_text_texture_regirsty
+    fn get_event_details_text_object_regirsty(&mut self) -> &mut Self::TextObjectRegistry {
+        &mut self.event_details_text_object_regirsty
     }
 
     fn agenda_source(&self) -> &Self::AgendaSource {
@@ -408,7 +455,7 @@ fn unsafe_main() {
 
                 sdl_ttf_init(
                     renderer,
-                    move |_engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
+                    move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
                         let fonts = Fonts::from_bytes(config::FONT_CONTENT, config::FONT_CONTENT)?;
                         let title_font_height: std::ffi::c_int =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());
@@ -418,8 +465,6 @@ fn unsafe_main() {
                             TextTextureRegistry::new(renderer, &fonts.title);
                         let long_event_text_registry =
                             TextTextureRegistry::new(renderer, &fonts.title);
-                        let event_details_text_texture_regirsty =
-                            TextTextureRegistry::new(renderer, &fonts.ui);
 
                         // hours (00:00, 01:00 etc)
                         let hour_text_texture_regirsty =
@@ -430,15 +475,16 @@ fn unsafe_main() {
                         // dates (2025-12-16, 2025-12-17 etc)
                         let dates_text_texture_regirsty =
                             TextTextureRegistry::new(renderer, &fonts.ui);
+                        let event_details_text_object_regirsty =
+                            TextObjectRegistry::new(&fonts.ui, engine);
 
                         let mut frontend = DumbFrontend {
-                            window: root_window,
                             hour_text_texture_regirsty,
                             days_text_texture_regirsty,
                             dates_text_texture_regirsty,
                             short_event_text_registry,
                             long_event_text_registry,
-                            event_details_text_texture_regirsty,
+                            event_details_text_object_regirsty,
                         };
 
                         let event_title_offset = sdl::SDL_FPoint {

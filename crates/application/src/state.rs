@@ -355,6 +355,21 @@ impl UserInterface {
 pub struct App<F: Frontend> {
     pub calendar: Calendar<F>,
     pub ui: UserInterface,
+    event_details_view: Option<EventDetailsView>,
+}
+
+struct Textbox {
+    border_rect: FRect,
+}
+
+impl Textbox {
+    fn new(rect: FRect) -> Textbox {
+        Textbox { border_rect: rect }
+    }
+}
+
+struct EventDetailsView {
+    description_textbox: Option<Textbox>,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -380,7 +395,11 @@ impl<F: Frontend> App<F> {
         App::create_days_text_objects(frontend, cell_width)?;
 
         App::create_dates_text_objects(frontend, cell_width, &calendar.week_start)?;
-        Ok(Self { calendar, ui })
+        Ok(Self {
+            calendar,
+            ui,
+            event_details_view: None,
+        })
     }
 
     #[inline]
@@ -546,7 +565,7 @@ impl<F: Frontend> App<F> {
         frontend: &'frontend mut F,
         window_size: Point,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextObjectRegistry, F>, F::Error> {
         let mut event_mouse_click: Option<MouseEventClick> = None;
         // :userInputHandling
         for event in events {
@@ -623,18 +642,24 @@ impl<F: Frontend> App<F> {
 
         match maybe_clicked_event {
             Some(event_details) => {
-                let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
-                    frontend.get_event_details_text_texture_regirsty();
-                Activities::<F>::render_event_detail_text_objects(
+                let text_object_registry: &mut F::TextObjectRegistry =
+                    frontend.get_event_details_text_object_regirsty();
+                self.event_details_view = Activities::<F>::create_event_details_text_objects(
                     event_details,
                     &window_size,
-                    event_details_text_texture_regirsty,
-                )?;
+                    text_object_registry,
+                )?
+                .into();
 
                 Ok(NewState {
                     activity: Activity::EventView,
                     render_data: RenderData::EventView(EventViewRenderData {
-                        text_registry: event_details_text_texture_regirsty,
+                        text_registry: text_object_registry,
+                        textbox: self
+                            .event_details_view
+                            .as_ref()
+                            .and_then(|v| v.description_textbox.as_ref())
+                            .map(|tb| &tb.border_rect),
                     }),
                 })
             }
@@ -757,7 +782,7 @@ impl<F: Frontend> App<F> {
         frontend: &'frontend mut F,
         window_size: Point,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextObjectRegistry, F>, F::Error> {
         match activity {
             Activity::WeekView => self.create_week_view_render_data(frontend, window_size, events),
             Activity::EventView => {
@@ -771,7 +796,7 @@ impl<F: Frontend> App<F> {
         frontend: &'frontend mut F,
         window_size: Point,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextTextureRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F::TextObjectRegistry, F>, F::Error> {
         for event in events {
             match event {
                 Action::Escape => {
@@ -785,12 +810,17 @@ impl<F: Frontend> App<F> {
                 _ => (),
             }
         }
-        let event_details_text_texture_regirsty: &mut F::TextTextureRegistry =
-            frontend.get_event_details_text_texture_regirsty();
+        let registry: &mut F::TextObjectRegistry =
+            frontend.get_event_details_text_object_regirsty();
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
-                text_registry: event_details_text_texture_regirsty,
+                text_registry: registry,
+                textbox: self
+                    .event_details_view
+                    .as_ref()
+                    .and_then(|v| v.description_textbox.as_ref())
+                    .map(|tb| &tb.border_rect),
             }),
         })
     }
@@ -801,17 +831,17 @@ struct Activities<F: Frontend> {
 
 impl<F: Frontend> Activities<F> {
     // Renders the text of the event details
-    fn render_event_detail_text_objects(
+    fn create_event_details_text_objects(
         details: EventDetails,
         window_size: &Point,
-        event_details_text_texture_regirsty: &mut F::TextTextureRegistry,
-    ) -> Result<(), F::Error> {
-        event_details_text_texture_regirsty.clear();
+        event_details_text_object_regirsty: &mut F::TextObjectRegistry,
+    ) -> Result<EventDetailsView, F::Error> {
+        event_details_text_object_regirsty.clear();
         // FIXME(alex): this should be based on the font line height
         let one_line_height = 30f32;
         let top_offset = 100f32;
         let mut vertical_offset = top_offset;
-        event_details_text_texture_regirsty.create(
+        event_details_text_object_regirsty.create(
             captions::event_details_view::TITLE,
             Color::WHITE,
             FRect {
@@ -824,7 +854,7 @@ impl<F: Frontend> Activities<F> {
 
         vertical_offset += one_line_height;
         // FIXME(alex): a long title is cropped
-        event_details_text_texture_regirsty.create(
+        event_details_text_object_regirsty.create(
             details.title,
             Color::WHITE,
             FRect {
@@ -835,9 +865,9 @@ impl<F: Frontend> Activities<F> {
             },
         )?;
 
-        if !details.description.is_empty() {
+        let description_textbox: Option<Textbox> = if !details.description.is_empty() {
             vertical_offset += 2f32 * one_line_height;
-            event_details_text_texture_regirsty.create(
+            event_details_text_object_regirsty.create(
                 captions::event_details_view::DESCRIPTION,
                 Color::WHITE,
                 FRect {
@@ -850,18 +880,24 @@ impl<F: Frontend> Activities<F> {
 
             vertical_offset += one_line_height;
             // FIXME(alex): a long description is cropped
-            event_details_text_texture_regirsty.create(
+            let border_rect = FRect {
+                x: 150.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: window_size.y as f32 - vertical_offset,
+            };
+            event_details_text_object_regirsty.create(
                 details.description,
                 Color::WHITE,
-                FRect {
-                    x: 150.0,
-                    y: vertical_offset,
-                    w: window_size.x as f32 - 200.0,
-                    h: window_size.y as f32 - vertical_offset,
-                },
+                border_rect,
             )?;
-        }
-        Ok(())
+            Some(Textbox::new(border_rect))
+        } else {
+            None
+        };
+        Ok(EventDetailsView {
+            description_textbox,
+        })
     }
 }
 
@@ -1219,14 +1255,13 @@ pub trait Frontend:
     type TextObject;
     type Error;
     type TextTextureRegistry: TextTextureRegistry<Error = Self::Error>;
+    type TextObjectRegistry: TextObjectRegistry<Error = Self::Error, TextObject = Self::TextObject>;
     type AgendaSource: AgendaSource<Error = Self::Error>;
 
     fn get_hours_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_dates_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
-    fn get_event_details_text_texture_regirsty(&mut self) -> &mut Self::TextTextureRegistry;
-    fn start_text_input(&self);
-    fn stop_text_input(&self);
+    fn get_event_details_text_object_regirsty(&mut self) -> &mut Self::TextObjectRegistry;
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
 
@@ -1276,6 +1311,21 @@ pub trait TextTextureRegistry {
     /// were created by [`Self::create`].  The iterator returns as much items as the number of the
     /// created text objects.
     fn update_positions(&mut self, values: impl Iterator<Item = FRect>);
+
+    fn clear(&mut self);
+
+    /// Creates a text object from `text`.  The text object is stored within the registry.
+    fn create(
+        &mut self,
+        text: impl Into<Vec<u8>>,
+        color: Color,
+        position: FRect,
+    ) -> Result<(), Self::Error>;
+}
+
+pub trait TextObjectRegistry {
+    type Error;
+    type TextObject;
 
     fn clear(&mut self);
 
