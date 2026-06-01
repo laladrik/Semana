@@ -16,7 +16,8 @@ impl From<FrontendError> for Error {
         match value {
             FrontendError::WeekStartIsNotObtained(e) => Error::from(sdlext::Error::from(e)),
             FrontendError::CStringIsNotCreated(_nul_error) => todo!("handle zeroes in UTF-8"),
-            FrontendError::TextObjectIsNotRegistered(e) => Error::from(e),
+            FrontendError::TextObjectIsNotRegistered(e)
+            | FrontendError::CursorClickHandlingFailure(e) => Error::from(e),
             FrontendError::AgendaSourceFailed(e) => Error::from(e),
         }
     }
@@ -46,6 +47,7 @@ pub enum FrontendError {
     WeekStartIsNotObtained(TimeError),
     CStringIsNotCreated(std::ffi::NulError),
     TextObjectIsNotRegistered(sdlext::Error),
+    CursorClickHandlingFailure(sdlext::Error),
 }
 
 #[derive(Debug)]

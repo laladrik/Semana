@@ -3,8 +3,8 @@ mod error;
 mod render;
 mod state;
 
+use core::cell::RefCell;
 use core::mem::MaybeUninit;
-use std::cell::RefCell;
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
@@ -161,7 +161,9 @@ impl<'renderer, 'font> state::TextTextureRegistry for TextTextureRegistry<'rende
                 let mut width = 0f32;
                 let mut height = 0f32;
                 if !sdl::SDL_GetTextureSize(texture.ptr(), &mut width, &mut height) {
-                    panic!("the texture size failed to be obtained");
+                    return Err(FrontendError::TextObjectIsNotRegistered(
+                        sdlext::Error::CantGetTextureCoordinates,
+                    ));
                 }
                 (width, height)
             };
@@ -270,7 +272,9 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         unsafe {
             let width: f32 = position.w.floor();
             if !sdl_ttf::TTF_SetTextWrapWidth(ret.ptr(), width as i32) {
-                panic!("fail to set the wrap for the given text");
+                return Err(FrontendError::TextObjectIsNotRegistered(
+                    sdlext::Error::TtfError(sdlext::TtfError::TextCantBeWrapped),
+                ));
             }
         }
 
@@ -320,7 +324,7 @@ impl state::TextEngine for TextEngine {
         &self,
         text_object: &Self::TextObject,
         position: &sdl3_sys::SDL_FPoint,
-    ) -> sdl3_sys::SDL_FRect {
+    ) -> Result<sdl3_sys::SDL_FRect, Self::Error> {
         // SAFETY: the input data for the function call is validated.
         let substring: sdl_ttf::TTF_SubString = unsafe {
             let mut substring: MaybeUninit<sdl_ttf::TTF_SubString> = MaybeUninit::zeroed();
@@ -330,8 +334,9 @@ impl state::TextEngine for TextEngine {
                 position.y as i32,
                 substring.as_mut_ptr(),
             ) {
-                // FIXME(alex): this should returned as an error and handled above.
-                panic!("can't get cursor location");
+                return Err(FrontendError::CursorClickHandlingFailure(
+                    sdlext::Error::TtfError(sdlext::TtfError::NoSubstringForPoint),
+                ));
             }
 
             substring.assume_init()
@@ -343,7 +348,7 @@ impl state::TextEngine for TextEngine {
             w: substring.rect.w as f32,
             h: substring.rect.h as f32,
         };
-        cursor_rect
+        Ok(cursor_rect)
     }
 }
 

@@ -826,7 +826,7 @@ impl<F: Frontend> App<F> {
                                 // FIXME(alex): The index should correspond the picked textbox when
                                 // we have a few of them.
                                 let descrption_text_index = 3;
-                                if let Some(text_object) = registry.get(3) {
+                                if let Some(text_object) = registry.get(descrption_text_index) {
                                     // NOTE(alex): this might different if the text has some margin
                                     // around itself.
                                     let textrect = &textbox.border_rect;
@@ -835,14 +835,18 @@ impl<F: Frontend> App<F> {
                                         y: position.y - textrect.y,
                                     };
 
-                                    let mut cursor = text_engine.get_description_cursor_position(
-                                        text_object,
-                                        &relative_position,
-                                    );
+                                    let maybe_cursor: Result<_, _> = text_engine
+                                        .get_description_cursor_position(
+                                            text_object,
+                                            &relative_position,
+                                        );
 
-                                    cursor.x += textrect.x;
-                                    cursor.y += textrect.y;
-                                    textbox.cursor_rect = Some(cursor);
+                                    textbox.cursor_rect =
+                                        maybe_cursor.ok().map(|mut cursor: FRect| {
+                                            cursor.x += textrect.x;
+                                            cursor.y += textrect.y;
+                                            cursor
+                                        });
                                 }
                             }
                         });
@@ -1301,7 +1305,7 @@ pub trait TextEngine {
         &self,
         text_object: &Self::TextObject,
         position: &FPoint,
-    ) -> FRect;
+    ) -> Result<sdl3_sys::SDL_FRect, Self::Error>;
 }
 
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction

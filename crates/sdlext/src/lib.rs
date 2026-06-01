@@ -23,12 +23,14 @@ pub enum Error {
     RendererIsNull,
     LineIsNotDrawn,
     ProcessIsNotCreated,
+    CantGetTextureCoordinates,
 }
 
 #[derive(Debug)]
 pub enum TimeError {
     FailGettingNow,
     FailConvertingNowToDate,
+    WeekNumberIsNotComputed,
 }
 
 impl From<TtfError> for Error {
@@ -49,6 +51,8 @@ pub enum TtfError {
     TextIsNotCreated,
     EngineIsNotCreated,
     TextIsNotDrawn,
+    TextCantBeWrapped,
+    NoSubstringForPoint,
 }
 
 pub type Result<R> = std::result::Result<R, Error>;

@@ -14,7 +14,7 @@ pub fn get_week_start(now: sdl::SDL_Time) -> Result<Date, TimeError> {
         let natural_weekday: i32 = match current_weekday {
             0 => 7,
             d @ 1..7 => d,
-            _ => panic!("SDL has returned an invalid week day"),
+            _ => return Err(TimeError::WeekNumberIsNotComputed),
         };
         // from 1 to 7
         //let natural_weekday: i32 = current_weekday + 7 * ((7 - current_weekday) / 7);
