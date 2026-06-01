@@ -360,11 +360,15 @@ pub struct App<F: Frontend> {
 
 struct Textbox {
     border_rect: FRect,
+    cursor_rect: Option<FRect>,
 }
 
 impl Textbox {
     fn new(rect: FRect) -> Textbox {
-        Textbox { border_rect: rect }
+        Textbox {
+            border_rect: rect,
+            cursor_rect: None,
+        }
     }
 }
 
@@ -643,7 +647,7 @@ impl<F: Frontend> App<F> {
         match maybe_clicked_event {
             Some(event_details) => {
                 let text_object_registry: &mut F::TextObjectRegistry =
-                    frontend.get_event_details_text_object_regirsty();
+                    frontend.get_event_details_text_object_regirsty_mut();
                 self.event_details_view = Activities::<F>::create_event_details_text_objects(
                     event_details,
                     &window_size,
@@ -654,12 +658,17 @@ impl<F: Frontend> App<F> {
                 Ok(NewState {
                     activity: Activity::EventView,
                     render_data: RenderData::EventView(EventViewRenderData {
-                        text_registry: text_object_registry,
+                        text_registry: &*text_object_registry,
                         textbox: self
                             .event_details_view
                             .as_ref()
                             .and_then(|v| v.description_textbox.as_ref())
                             .map(|tb| &tb.border_rect),
+                        cursor: self
+                            .event_details_view
+                            .as_ref()
+                            .and_then(|v| v.description_textbox.as_ref())
+                            .and_then(|tb| tb.cursor_rect.as_ref()),
                     }),
                 })
             }
@@ -806,12 +815,45 @@ impl<F: Frontend> App<F> {
                         Vec::new().into_iter(),
                     );
                 }
+                Action::MouseButtonDown { position, button } => {
+                    self.event_details_view
+                        .as_mut()
+                        .and_then(|view| view.description_textbox.as_mut())
+                        .map(|textbox: &mut Textbox| {
+                            let text_engine = frontend.get_text_engine();
+                            let registry = frontend.get_event_details_text_object_regirsty();
+                            if textbox.border_rect.covers_point(&position) {
+                                // FIXME(alex): The index should correspond the picked textbox when
+                                // we have a few of them.
+                                let descrption_text_index = 3;
+                                if let Some(text_object) = registry.get(3) {
+                                    // NOTE(alex): this might different if the text has some margin
+                                    // around itself.
+                                    let textrect = &textbox.border_rect;
+                                    let relative_position = FPoint {
+                                        x: position.x - textrect.x,
+                                        y: position.y - textrect.y,
+                                    };
+
+                                    let mut cursor = text_engine.get_description_cursor_position(
+                                        text_object,
+                                        &relative_position,
+                                    );
+
+                                    cursor.x += textrect.x;
+                                    cursor.y += textrect.y;
+                                    textbox.cursor_rect = Some(cursor);
+                                }
+                            }
+                        });
+                }
                 Action::WindowResize => todo!("fix the resize for the event view"),
                 _ => (),
             }
         }
+
         let registry: &mut F::TextObjectRegistry =
-            frontend.get_event_details_text_object_regirsty();
+            frontend.get_event_details_text_object_regirsty_mut();
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
@@ -821,6 +863,11 @@ impl<F: Frontend> App<F> {
                     .as_ref()
                     .and_then(|v| v.description_textbox.as_ref())
                     .map(|tb| &tb.border_rect),
+                cursor: self
+                    .event_details_view
+                    .as_ref()
+                    .and_then(|v| v.description_textbox.as_ref())
+                    .and_then(|tb| tb.cursor_rect.as_ref()),
             }),
         })
     }
@@ -1246,6 +1293,17 @@ pub trait GetShortEventTextRegistry {
     fn get_short_event_text_registry(&mut self) -> &mut Self::Registry;
 }
 
+pub trait TextEngine {
+    type TextObject;
+    type Error;
+
+    fn get_description_cursor_position(
+        &self,
+        text_object: &Self::TextObject,
+        position: &FPoint,
+    ) -> FRect;
+}
+
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction
 /// is provide the way to test the core.
 pub trait Frontend:
@@ -1257,11 +1315,14 @@ pub trait Frontend:
     type TextTextureRegistry: TextTextureRegistry<Error = Self::Error>;
     type TextObjectRegistry: TextObjectRegistry<Error = Self::Error, TextObject = Self::TextObject>;
     type AgendaSource: AgendaSource<Error = Self::Error>;
+    type TextEngine: TextEngine<Error = Self::Error, TextObject = Self::TextObject>;
 
     fn get_hours_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_dates_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
-    fn get_event_details_text_object_regirsty(&mut self) -> &mut Self::TextObjectRegistry;
+    fn get_event_details_text_object_regirsty(&self) -> &Self::TextObjectRegistry;
+    fn get_event_details_text_object_regirsty_mut(&mut self) -> &mut Self::TextObjectRegistry;
+    fn get_text_engine(&self) -> &Self::TextEngine;
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
 
@@ -1328,6 +1389,7 @@ pub trait TextObjectRegistry {
     type TextObject;
 
     fn clear(&mut self);
+    fn get(&self, index: usize) -> Option<&Self::TextObject>;
 
     /// Creates a text object from `text`.  The text object is stored within the registry.
     fn create(

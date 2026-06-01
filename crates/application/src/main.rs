@@ -3,6 +3,7 @@ mod error;
 mod render;
 mod state;
 
+use core::mem::MaybeUninit;
 use std::cell::RefCell;
 
 use sdl3_sys as sdl;
@@ -253,6 +254,10 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         self.text_positions.clear();
     }
 
+    fn get(&self, index: usize) -> Option<&Self::TextObject> {
+        self.text_objects.get(index)
+    }
+
     fn create(
         &mut self,
         text: impl Into<Vec<u8>>,
@@ -276,6 +281,7 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
 }
 
 struct DumbFrontend<'renderer, 'font> {
+    text_engine: TextEngine,
     hour_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     days_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
     dates_text_texture_regirsty: TextTextureRegistry<'renderer, 'font>,
@@ -301,12 +307,53 @@ impl<'renderer, 'font> GetShortEventTextRegistry for DumbFrontend<'renderer, 'fo
     }
 }
 
+struct TextEngine {
+    window: *mut sdl::SDL_Window,
+}
+
+impl state::TextEngine for TextEngine {
+    type TextObject = sdlext::Text;
+
+    type Error = FrontendError;
+
+    fn get_description_cursor_position(
+        &self,
+        text_object: &Self::TextObject,
+        position: &sdl3_sys::SDL_FPoint,
+    ) -> sdl3_sys::SDL_FRect {
+        // SAFETY: the input data for the function call is validated.
+        let substring: sdl_ttf::TTF_SubString = unsafe {
+            let mut substring: MaybeUninit<sdl_ttf::TTF_SubString> = MaybeUninit::zeroed();
+            if !sdl_ttf::TTF_GetTextSubStringForPoint(
+                text_object.ptr(),
+                position.x as i32,
+                position.y as i32,
+                substring.as_mut_ptr(),
+            ) {
+                // FIXME(alex): this should returned as an error and handled above.
+                panic!("can't get cursor location");
+            }
+
+            substring.assume_init()
+        };
+
+        let cursor_rect = sdl::SDL_FRect {
+            x: substring.rect.x as f32,
+            y: substring.rect.y as f32,
+            w: substring.rect.w as f32,
+            h: substring.rect.h as f32,
+        };
+        cursor_rect
+    }
+}
+
 impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
     type TextObject = sdlext::Text;
     type Error = FrontendError;
     type TextTextureRegistry = TextTextureRegistry<'renderer, 'font>;
     type AgendaSource = KhalAgendaSource;
     type TextObjectRegistry = TextObjectRegistry<'font>;
+    type TextEngine = TextEngine;
 
     fn get_hours_text_registry(&mut self) -> &mut TextTextureRegistry<'renderer, 'font> {
         &mut self.hour_text_texture_regirsty
@@ -326,8 +373,16 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
             .map_err(FrontendError::WeekStartIsNotObtained)
     }
 
-    fn get_event_details_text_object_regirsty(&mut self) -> &mut Self::TextObjectRegistry {
+    fn get_event_details_text_object_regirsty(&self) -> &Self::TextObjectRegistry {
+        &self.event_details_text_object_regirsty
+    }
+
+    fn get_event_details_text_object_regirsty_mut(&mut self) -> &mut Self::TextObjectRegistry {
         &mut self.event_details_text_object_regirsty
+    }
+
+    fn get_text_engine(&self) -> &Self::TextEngine {
+        &self.text_engine
     }
 
     fn agenda_source(&self) -> &Self::AgendaSource {
@@ -477,6 +532,9 @@ fn unsafe_main() {
                             TextTextureRegistry::new(renderer, &fonts.ui);
                         let event_details_text_object_regirsty =
                             TextObjectRegistry::new(&fonts.ui, engine);
+                        let text_engine = TextEngine {
+                            window: root_window,
+                        };
 
                         let mut frontend = DumbFrontend {
                             hour_text_texture_regirsty,
@@ -485,6 +543,7 @@ fn unsafe_main() {
                             short_event_text_registry,
                             long_event_text_registry,
                             event_details_text_object_regirsty,
+                            text_engine,
                         };
 
                         let event_title_offset = sdl::SDL_FPoint {

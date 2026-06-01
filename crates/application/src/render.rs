@@ -15,6 +15,7 @@ pub enum RenderData<'rect, 'frontend, TTC, F> {
 pub struct EventViewRenderData<'ttc, 'rect, TextObjectRegistry> {
     pub text_registry: &'ttc TextObjectRegistry,
     pub textbox: Option<&'rect sdl::SDL_FRect>,
+    pub cursor: Option<&'rect sdl::SDL_FRect>,
 }
 
 type ERD<'renderer, 'rect, 'ttc, 'font> =
@@ -50,6 +51,11 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &ERD) -> sdlext::Result<
     renderer.clear()?;
     data.text_registry.render()?;
     if let Some(rect) = data.textbox {
+        renderer.set_render_draw_color(Color::WHITE)?;
+        renderer.render_rect(rect)?;
+    }
+
+    if let Some(rect) = data.cursor {
         renderer.set_render_draw_color(Color::WHITE)?;
         renderer.render_rect(rect)?;
     }
