@@ -16,6 +16,7 @@ pub struct EventViewRenderData<'ttc, 'rect, TextObjectRegistry> {
     pub text_registry: &'ttc TextObjectRegistry,
     pub textbox: Option<&'rect sdl::SDL_FRect>,
     pub cursor: Option<&'rect sdl::SDL_FRect>,
+    pub highlight: Vec<sdl::SDL_FRect>,
 }
 
 type ERD<'renderer, 'rect, 'ttc, 'font> =
@@ -49,6 +50,12 @@ pub fn render(renderer: &sdlext::Renderer, data: &RDA) -> sdlext::Result<()> {
 fn render_event_view(renderer: &sdlext::Renderer, data: &ERD) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
+    let highlight_color = Color::from_rgb(config::COLOR_TEXT_HIGHLIGHT);
+    renderer.set_render_draw_color(highlight_color)?;
+    for item in &data.highlight {
+        renderer.render_fill_rect(item)?;
+    }
+
     data.text_registry.render()?;
     if let Some(rect) = data.textbox {
         renderer.set_render_draw_color(Color::WHITE)?;

@@ -361,6 +361,15 @@ pub struct App<F: Frontend> {
 struct Textbox {
     border_rect: FRect,
     cursor_rect: Option<FRect>,
+    /// The following 3 fields allows the text to be selected (highlighted).  The field indicates
+    /// that the text is being selected.
+    ///
+    /// `highlight_start` stores the offset from the highlighting starts.  `highlight_end` stores
+    /// the end of it.  Both are -1 until the selection has started.  `highlight_end` can be -1
+    /// alone if the user only clicks somewhere in the text without selecting it.
+    is_highlighting: bool,
+    highlight_start: i32,
+    highlight_end: i32,
 }
 
 impl Textbox {
@@ -368,6 +377,9 @@ impl Textbox {
         Textbox {
             border_rect: rect,
             cursor_rect: None,
+            is_highlighting: false,
+            highlight_start: -1,
+            highlight_end: -1,
         }
     }
 }
@@ -575,6 +587,7 @@ impl<F: Frontend> App<F> {
         for event in events {
             use Action::*;
             match event {
+                MouseButtonUp => (),
                 Escape => (),
                 WindowResize => self.calendar.request_render(),
                 Scroll(value) => {
@@ -658,6 +671,7 @@ impl<F: Frontend> App<F> {
                 Ok(NewState {
                     activity: Activity::EventView,
                     render_data: RenderData::EventView(EventViewRenderData {
+                        highlight: Vec::new(),
                         text_registry: &*text_object_registry,
                         textbox: self
                             .event_details_view
@@ -815,52 +829,139 @@ impl<F: Frontend> App<F> {
                         Vec::new().into_iter(),
                     );
                 }
-                Action::MouseButtonDown { position, button } => {
-                    self.event_details_view
+                Action::MouseMove { x, y } => {
+                    let maybe_textbox = self
+                        .event_details_view
                         .as_mut()
                         .and_then(|view| view.description_textbox.as_mut())
-                        .map(|textbox: &mut Textbox| {
+                        .filter(|textbox| textbox.is_highlighting);
+
+                    // As long as the user hasn't released the mouse button, the highlighting is
+                    // on.
+                    if let Some(textbox) = maybe_textbox {
+                        assert!(textbox.highlight_start != -1);
+                        let registry = frontend.get_event_details_text_object_regirsty();
+                        let descrption_text_index = 3;
+                        if let Some(text_object) = registry.get(descrption_text_index) {
                             let text_engine = frontend.get_text_engine();
-                            let registry = frontend.get_event_details_text_object_regirsty();
-                            if textbox.border_rect.covers_point(&position) {
-                                // FIXME(alex): The index should correspond the picked textbox when
-                                // we have a few of them.
-                                let descrption_text_index = 3;
-                                if let Some(text_object) = registry.get(descrption_text_index) {
-                                    // NOTE(alex): this might different if the text has some margin
-                                    // around itself.
-                                    let textrect = &textbox.border_rect;
-                                    let relative_position = FPoint {
-                                        x: position.x - textrect.x,
-                                        y: position.y - textrect.y,
-                                    };
+                            // The position is relative to the rectangle shaping of the text.
+                            // Currently it's the border of it.
+                            let relative_position = FPoint {
+                                x: x - textbox.border_rect.x,
+                                y: y - textbox.border_rect.y,
+                            };
 
-                                    let maybe_cursor: Result<_, _> = text_engine
-                                        .get_description_cursor_position(
-                                            text_object,
-                                            &relative_position,
-                                        );
+                            if let Ok(offset) =
+                                text_engine.get_offset(text_object, &relative_position)
+                            {
+                                textbox.highlight_end = offset;
+                            }
+                        }
+                    }
+                }
+                Action::MouseButtonUp => {
+                    let maybe_textbox = self
+                        .event_details_view
+                        .as_mut()
+                        .and_then(|view| view.description_textbox.as_mut());
+                    if let Some(textbox) = maybe_textbox {
+                        textbox.is_highlighting = false;
+                    }
+                }
+                Action::MouseButtonDown {
+                    position,
+                    button: _,
+                } => {
+                    // reset the the second marker and set the state
+                    let maybe_textbox = self
+                        .event_details_view
+                        .as_mut()
+                        .and_then(|view| view.description_textbox.as_mut());
 
-                                    textbox.cursor_rect =
-                                        maybe_cursor.ok().map(|mut cursor: FRect| {
-                                            cursor.x += textrect.x;
-                                            cursor.y += textrect.y;
-                                            cursor
-                                        });
+                    if let Some(textbox) = maybe_textbox {
+                        let text_engine = frontend.get_text_engine();
+                        let registry = frontend.get_event_details_text_object_regirsty();
+                        if textbox.border_rect.covers_point(&position) {
+                            // FIXME(alex): The index should correspond the picked textbox when
+                            // we have a few of them.
+                            let descrption_text_index = 3;
+                            if let Some(text_object) = registry.get(descrption_text_index) {
+                                textbox.is_highlighting = true;
+                                textbox.highlight_end = -1;
+                                // NOTE(alex): this might different if the text has some margin
+                                // around itself.
+                                let textrect = &textbox.border_rect;
+                                let relative_position = FPoint {
+                                    x: position.x - textrect.x,
+                                    y: position.y - textrect.y,
+                                };
+
+                                let maybe_cursor: Result<FRect, _> = text_engine
+                                    .get_description_cursor_position(
+                                        text_object,
+                                        &relative_position,
+                                    );
+
+                                textbox.cursor_rect = maybe_cursor.ok().map(|mut cursor: FRect| {
+                                    cursor.x += textrect.x;
+                                    cursor.y += textrect.y;
+                                    cursor
+                                });
+
+                                if let Ok(offset) =
+                                    text_engine.get_offset(text_object, &relative_position)
+                                {
+                                    textbox.highlight_start = offset;
                                 }
                             }
-                        });
+                        }
+                    };
                 }
                 Action::WindowResize => todo!("fix the resize for the event view"),
                 _ => (),
             }
         }
 
+        let maybe_textbox: Option<&Textbox> = self
+            .event_details_view
+            .as_mut()
+            .and_then(|view| view.description_textbox.as_ref())
+            .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1);
+        let render_highlights: Vec<FRect> = maybe_textbox
+            .and_then(|textbox: &Textbox| {
+                let registry = frontend.get_event_details_text_object_regirsty();
+                let text_engine = frontend.get_text_engine();
+                let descrption_text_index = 3;
+                registry
+                    .get(descrption_text_index)
+                    .and_then(|text_object| {
+                        // normalizing for the case when the highlighting starts from right bottom
+                        // to left top.
+                        let start = textbox.highlight_start.min(textbox.highlight_end);
+                        let end = textbox.highlight_start.max(textbox.highlight_end);
+                        let len = end - start;
+                        text_engine
+                            .calculate_highlights(text_object, start, len)
+                            .ok()
+                    })
+                    .map(|mut highlights: Vec<FRect>| {
+                        // shift the rectangles of highlighting to the coordinates relative to
+                        // the window.
+                        for item in highlights.iter_mut() {
+                            item.x += textbox.border_rect.x;
+                            item.y += textbox.border_rect.y;
+                        }
+                        highlights
+                    })
+            })
+            .unwrap_or_default();
+
         let registry: &mut F::TextObjectRegistry =
             frontend.get_event_details_text_object_regirsty_mut();
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
+                highlight: render_highlights,
                 text_registry: registry,
                 textbox: self
                     .event_details_view
@@ -876,6 +977,7 @@ impl<F: Frontend> App<F> {
         })
     }
 }
+
 struct Activities<F: Frontend> {
     _frontend: core::marker::PhantomData<F>,
 }
@@ -1236,6 +1338,7 @@ pub enum Action {
         x: f32,
         y: f32,
     },
+    MouseButtonUp,
     MouseButtonDown {
         position: FPoint,
         button: MouseButton,
@@ -1300,6 +1403,19 @@ pub trait GetShortEventTextRegistry {
 pub trait TextEngine {
     type TextObject;
     type Error;
+
+    fn get_offset(
+        &self,
+        text_object: &Self::TextObject,
+        position: &sdl3_sys::SDL_FPoint,
+    ) -> Result<i32, Self::Error>;
+
+    fn calculate_highlights(
+        &self,
+        text_object: &Self::TextObject,
+        start: i32,
+        len: i32,
+    ) -> Result<Vec<FRect>, Self::Error>;
 
     fn get_description_cursor_position(
         &self,

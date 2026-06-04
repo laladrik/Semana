@@ -37,6 +37,7 @@ mod config {
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub const FONT_CONTENT: &[u8] = include_bytes!("../../../assets/DejaVuSansMonoBook.ttf");
     pub const COLOR_BACKGROUND: u32 = 0x0C0D0C;
+    pub const COLOR_TEXT_HIGHLIGHT: u32 = 0x009900;
     pub const GRID_SCALE_STEP: f32 = 50.;
     pub const GRID_OFFSET_STEP: f32 = 50.;
 }
@@ -319,6 +320,78 @@ impl state::TextEngine for TextEngine {
     type TextObject = sdlext::Text;
 
     type Error = FrontendError;
+
+    /// Returns the offset from the relative the beginning of the TTF_Text based on the `position`.
+    ///
+    /// SDL_ttf supports calculation of the substring at the given `position`.  The offset is
+    /// the offset of the substring relatively to the beginning of TTF_Text.
+    fn get_offset(
+        &self,
+        text_object: &Self::TextObject,
+        position: &sdl3_sys::SDL_FPoint,
+    ) -> Result<i32, Self::Error> {
+        let substring: sdl_ttf::TTF_SubString = unsafe {
+            let mut substring: MaybeUninit<sdl_ttf::TTF_SubString> = MaybeUninit::zeroed();
+            if !sdl_ttf::TTF_GetTextSubStringForPoint(
+                text_object.ptr(),
+                position.x as i32,
+                position.y as i32,
+                substring.as_mut_ptr(),
+            ) {
+                return Err(FrontendError::CursorClickHandlingFailure(
+                    sdlext::Error::TtfError(sdlext::TtfError::NoSubstringForPoint),
+                ));
+            }
+
+            substring.assume_init()
+        };
+
+        Ok(substring.offset)
+    }
+
+    /// Returns the rectangles highlighting the text of the given `text_object`.  Each rectangle
+    /// corresponds its line of the `text_object` within the given range determined by `start` and
+    /// `len`.
+    fn calculate_highlights(
+        &self,
+        text_object: &Self::TextObject,
+        start: i32,
+        len: i32,
+    ) -> Result<Vec<sdl::SDL_FRect>, Self::Error> {
+        unsafe {
+            let ret: *mut *mut sdl_ttf::TTF_SubString = sdl_ttf::TTF_GetTextSubStringsForRange(
+                text_object.ptr(),
+                start,
+                len,
+                core::ptr::null_mut(),
+            );
+            if ret.is_null() {
+                Err(FrontendError::CursorClickHandlingFailure(
+                    sdlext::Error::TtfError(sdlext::TtfError::NoSubstringForPoint),
+                ))
+            } else {
+                let mut outvec = Vec::new();
+                let mut cursor = 0;
+                while !ret.add(cursor).is_null() {
+                    let substring: *mut sdl_ttf::TTF_SubString = *ret.add(cursor);
+                    if substring.is_null() {
+                        break;
+                    }
+
+                    let rect: sdl3_ttf_sys::SDL_Rect = (*substring).rect as _;
+                    let out = sdl::SDL_FRect {
+                        x: rect.x as f32,
+                        y: rect.y as f32,
+                        w: rect.w as f32,
+                        h: rect.h as f32,
+                    };
+                    outvec.push(out);
+                    cursor += 1;
+                }
+                Ok(outvec)
+            }
+        }
+    }
 
     fn get_description_cursor_position(
         &self,
@@ -608,6 +681,9 @@ fn unsafe_main() {
                                         sdl::SDLK_PAGEDOWN => events.push(state::Action::AddWeek),
                                         _ => (),
                                     },
+                                    sdl::SDL_EVENT_MOUSE_BUTTON_UP => {
+                                        events.push(state::Action::MouseButtonUp)
+                                    }
                                     sdl::SDL_EVENT_MOUSE_MOTION => {
                                         events.push(state::Action::MouseMove {
                                             x: event.motion.x,
