@@ -963,14 +963,6 @@ impl<F: Frontend> App<F> {
                             frontend.set_clipboard(copied_text)?;
                         }
                     }
-
-                    // TASK:
-                    // 1. Convert the highlighting cursors into a start and the length.
-                    // 2. Get the substring from the current event data.
-                    // 3. Create the buffer for the text.
-                    // 4. Copy the highlighted to the buffer.
-                    // 5. Set the buffer to the clipboard  SDL_SetClipboardText(buffer).
-                    // 6. Empty the buffer.
                 }
                 Action::WindowResize => todo!("fix the resize for the event view"),
                 _ => (),
