@@ -24,6 +24,7 @@ pub enum Error {
     LineIsNotDrawn,
     ProcessIsNotCreated,
     CantGetTextureCoordinates,
+    CantSetClipboard,
 }
 
 #[derive(Debug)]
