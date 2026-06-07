@@ -386,6 +386,8 @@ impl Textbox {
 
 struct EventDetailsView {
     description_textbox: Option<Textbox>,
+    event_index: u32,
+    event_kind: CalendarEventKind,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -416,6 +418,22 @@ impl<F: Frontend> App<F> {
             ui,
             event_details_view: None,
         })
+    }
+
+    fn get_selected_event_desription(&self) -> Option<&str> {
+        self.event_details_view
+            .as_ref()
+            .and_then(|view: &EventDetailsView| {
+                let s = &self.calendar.state;
+                match view.event_kind {
+                    CalendarEventKind::Long => {
+                        s.obtain_long_event_description(view.event_index as usize)
+                    }
+                    CalendarEventKind::Short => {
+                        s.obtain_short_event_description(view.event_index as usize)
+                    }
+                }
+            })
     }
 
     #[inline]
@@ -622,6 +640,7 @@ impl<F: Frontend> App<F> {
                         );
                     }
                 }
+                _ => (),
             }
         }
 
@@ -643,7 +662,13 @@ impl<F: Frontend> App<F> {
                         let title = titles.get(event)?.as_ref();
                         let description =
                             self.calendar.state.obtain_long_event_description(event)?;
-                        Some(EventDetails { title, description })
+                        Some(EventDetails {
+                            title,
+                            description,
+                            event_kind,
+                            // FIXME(alex): make a special type for the indexes of events.
+                            index: event as u32,
+                        })
                     })
                 }
                 CalendarEventKind::Short => find_clicked_event(&position, rectangles.short)
@@ -652,7 +677,13 @@ impl<F: Frontend> App<F> {
                         let title = titles.get(event)?.as_ref();
                         let description =
                             self.calendar.state.obtain_short_event_description(event)?;
-                        Some(EventDetails { title, description })
+                        Some(EventDetails {
+                            title,
+                            description,
+                            event_kind,
+                            // FIXME(alex): make a special type for the indexes of events.
+                            index: event as u32,
+                        })
                     }),
             }
         });
@@ -917,6 +948,30 @@ impl<F: Frontend> App<F> {
                         }
                     };
                 }
+                Action::Yank => {
+                    let maybe_textbox: Option<&Textbox> = self
+                        .event_details_view
+                        .as_ref()
+                        .and_then(|view| view.description_textbox.as_ref());
+
+                    if let Some(textbox) = maybe_textbox {
+                        if let Some(description) = self.get_selected_event_desription() {
+                            let start = textbox.highlight_start.min(textbox.highlight_end);
+                            let end = textbox.highlight_start.max(textbox.highlight_end);
+                            // NOTE(alex): end might be wrong. Prevent off by one error.
+                            let copied_text: &str = &description[start as usize..end as usize];
+                            frontend.set_clipboard(copied_text)?;
+                        }
+                    }
+
+                    // TASK:
+                    // 1. Convert the highlighting cursors into a start and the length.
+                    // 2. Get the substring from the current event data.
+                    // 3. Create the buffer for the text.
+                    // 4. Copy the highlighted to the buffer.
+                    // 5. Set the buffer to the clipboard  SDL_SetClipboardText(buffer).
+                    // 6. Empty the buffer.
+                }
                 Action::WindowResize => todo!("fix the resize for the event view"),
                 _ => (),
             }
@@ -1050,6 +1105,8 @@ impl<F: Frontend> Activities<F> {
         };
         Ok(EventDetailsView {
             description_textbox,
+            event_index: details.index,
+            event_kind: details.event_kind,
         })
     }
 }
@@ -1057,6 +1114,8 @@ impl<F: Frontend> Activities<F> {
 struct EventDetails<'event> {
     title: &'event str,
     description: &'event str,
+    index: u32,
+    event_kind: CalendarEventKind,
 }
 
 // If mouse_position is within the surface of the long events or the short events then
@@ -1319,10 +1378,14 @@ fn scale_short_events(
 }
 
 pub enum Action {
+    // FIXME(alex): replace this non-sense with key events. Requires to figure out how to handle
+    // the modifying keys.  Think about how to apply Rust enums for it.
+    Yank,
+    Escape,
+
     WindowResize,
     SubtractWeek,
     AddWeek,
-    Escape,
     // NOTE(alex): the following actions depends on the layout of the window.  This causes a quite
     // a couple of questions:
     //
@@ -1445,6 +1508,7 @@ pub trait Frontend:
     fn get_text_engine(&self) -> &Self::TextEngine;
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;
+    fn set_clipboard(&self, text: impl Into<Vec<u8>>) -> Result<(), Self::Error>;
 
     fn agenda_source(&self) -> &Self::AgendaSource;
 }

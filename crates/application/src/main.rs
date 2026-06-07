@@ -466,6 +466,20 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
     fn agenda_source(&self) -> &Self::AgendaSource {
         &KhalAgendaSource
     }
+
+    fn set_clipboard(&self, text: impl Into<Vec<u8>>) -> Result<(), Self::Error> {
+        unsafe {
+            let cstring =
+                std::ffi::CString::new(text).map_err(FrontendError::CStringIsNotCreated)?;
+            if !sdl::SDL_SetClipboardText(cstring.as_c_str().as_ptr()) {
+                Err(FrontendError::ClipboardIsBroken(
+                    sdlext::Error::CantSetClipboard,
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 /// It provides the data from the program Khal.  It provides the data according the trait
@@ -651,6 +665,13 @@ fn unsafe_main() {
                                         window_size.y = event.window.data2;
                                     }
                                     sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
+                                        // FIXME(alex): the key handling should be within the
+                                        // application logic rather than platform.
+                                        sdl::SDLK_C
+                                            if (event.key.mod_ as u32 & sdl::SDL_KMOD_CTRL) > 0 =>
+                                        {
+                                            events.push(state::Action::Yank);
+                                        }
                                         sdl::SDLK_UP => {
                                             events.push(state::Action::Scroll(
                                                 -config::GRID_OFFSET_STEP,
