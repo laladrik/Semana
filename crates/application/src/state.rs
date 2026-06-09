@@ -251,11 +251,8 @@ struct ShortEventViewport {
 
 impl ShortEventViewport {
     fn new(event_offset: &FPoint, window_size: &Point, long_event_surface_height: f32) -> Self {
-        let short_event_viewport_offset = FPoint {
-            x: event_offset.x,
-            y: event_offset.y + long_event_surface_height,
-        };
-
+        let short_event_viewport_offset: FPoint =
+            fpoint_add(event_offset, 0f32, long_event_surface_height);
         let short_event_viewport_size: FPoint = window_size
             .as_fpoint()
             .sub_fpoint(short_event_viewport_offset);
@@ -443,10 +440,7 @@ impl<F: Frontend> App<F> {
         long_event_surface_height: f32,
     ) -> FPoint {
         let yoffset = event_offset.y + long_event_surface_height;
-        FPoint {
-            x: window_size.x as f32 - event_offset.x,
-            y: window_size.y as f32 - yoffset,
-        }
+        fpoint_sub(window_size.as_fpoint(), event_offset.x, yoffset)
     }
 
     fn create_view(
@@ -622,8 +616,7 @@ impl<F: Frontend> App<F> {
                     self.calendar.request_render();
                 }
                 MouseMove { x, y } => {
-                    self.ui.mouse_position.x = x;
-                    self.ui.mouse_position.y = y;
+                    self.ui.mouse_position = FPoint { x, y };
                 }
                 SubtractWeek => self.calendar.subtract_week(),
                 AddWeek => self.calendar.add_week(),
@@ -896,7 +889,7 @@ impl<F: Frontend> App<F> {
                 }
                 Action::MouseButtonDown {
                     position,
-                    button: _,
+                    button: MouseButton::Left,
                 } => {
                     // reset the the second marker and set the state
                     let maybe_textbox = self
@@ -917,11 +910,8 @@ impl<F: Frontend> App<F> {
                                 // NOTE(alex): this might different if the text has some margin
                                 // around itself.
                                 let textrect = &textbox.border_rect;
-                                let relative_position = FPoint {
-                                    x: position.x - textrect.x,
-                                    y: position.y - textrect.y,
-                                };
-
+                                let relative_position: FPoint =
+                                    fpoint_add(position, textrect.x, textrect.y);
                                 if let Ok(offset) =
                                     text_engine.get_offset(text_object, &relative_position)
                                 {
@@ -1020,12 +1010,10 @@ impl<F: Frontend> App<F> {
                     text_engine.calculate_highlights(descrption, cursor, 1).ok()
                 });
 
-                if let Some(rect) = rect {
-                    textbox.cursor_rect = rect.into_iter().next();
-                    if let Some(cursor_rect) = textbox.cursor_rect.as_mut() {
-                        cursor_rect.x += textbox.border_rect.x;
-                        cursor_rect.y += textbox.border_rect.y;
-                    }
+                if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
+                    cursor_rect =
+                        cursor_rect.move_frect(textbox.border_rect.x, textbox.border_rect.y);
+                    textbox.cursor_rect = Some(cursor_rect)
                 }
             }
         }
@@ -1232,27 +1220,30 @@ fn is_fpoint_between_points(
     x > lx && y > ly && x < rx && y < ry
 }
 
-fn fpoint_add(
-    left: impl std::borrow::Borrow<FPoint>,
-    right: impl std::borrow::Borrow<FPoint>,
-) -> FPoint {
+fn fpoint_add(left: impl std::borrow::Borrow<FPoint>, x: f32, y: f32) -> FPoint {
     let left: &FPoint = left.borrow();
-    let right: &FPoint = right.borrow();
     FPoint {
-        x: left.x + right.x,
-        y: left.y + right.y,
+        x: left.x + x,
+        y: left.y + y,
     }
 }
 
-fn fpoint_sub(
-    left: impl std::borrow::Borrow<FPoint>,
-    right: impl std::borrow::Borrow<FPoint>,
-) -> FPoint {
-    let left: &FPoint = left.borrow();
-    let right: &FPoint = right.borrow();
-    FPoint {
-        x: left.x - right.x,
-        y: left.y - right.y,
+fn fpoint_sub(left: impl std::borrow::Borrow<FPoint>, x: f32, y: f32) -> FPoint {
+    fpoint_add(left, -x, -y)
+}
+
+trait MoveFRect {
+    fn move_frect(self, x: f32, y: f32) -> Self;
+}
+
+impl MoveFRect for FRect {
+    fn move_frect(self, x: f32, y: f32) -> Self {
+        Self {
+            x: self.x + x,
+            y: self.y + y,
+            h: self.h,
+            w: self.w,
+        }
     }
 }
 
@@ -1275,7 +1266,7 @@ impl CoversPoint for FRect {
 
 impl<T: std::borrow::Borrow<FPoint>> AddFPoint for T {
     fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
-        fpoint_add(self, right)
+        fpoint_add(self, right.borrow().x, right.borrow().y)
     }
 }
 
@@ -1285,7 +1276,7 @@ trait SubFPoint {
 
 impl<T: std::borrow::Borrow<FPoint>> SubFPoint for T {
     fn sub_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
-        fpoint_sub(self, right)
+        fpoint_sub(self, right.borrow().x, right.borrow().y)
     }
 }
 
