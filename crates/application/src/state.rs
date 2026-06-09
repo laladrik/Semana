@@ -949,13 +949,6 @@ impl<F: Frontend> App<F> {
                     }
                 }
                 Action::WindowResize => {
-                    // TODO(alex):
-                    // 0. Ignore the resize if the resize is small than a value from configuration
-                    // 1. Get the width of the window.
-                    // 2. Calculate the width for the text objects.
-                    // 3. Set the width for the text objects.
-                    // 4. Set the width for the textbox.
-
                     let window_width = window_size.x as f32;
                     // FIXME(alex): store this offset somewhere and pass to the functions which
                     // creates the text objects in Activities::create_event_details_text_objects.
@@ -1556,7 +1549,6 @@ pub trait AgendaSource {
         &self,
         week_start: &calendar::date::Date,
     ) -> Result<Self::RequestHandle, Self::Error>;
-    // TODO(alex): return a guard which reminds about freeing the handle.
     fn cancel(&self, handle: &Self::RequestHandle);
     fn is_ready(&self, handle: &Self::RequestHandle) -> bool;
     fn free(&self, handle: Self::RequestHandle);

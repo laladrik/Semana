@@ -33,7 +33,6 @@ struct TextTextureRegistry<'renderer, 'font> {
 }
 
 mod config {
-    // TODO(alex): create a constant which defines the minimal text width on event detail view
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub const FONT_CONTENT: &[u8] = include_bytes!("../../../assets/DejaVuSansMonoBook.ttf");
