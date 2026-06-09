@@ -1039,7 +1039,6 @@ impl<F: Frontend> Activities<F> {
         let mut vertical_offset = top_offset;
         event_details_text_object_regirsty.create(
             captions::event_details_view::TITLE,
-            Color::WHITE,
             FRect {
                 x: 100.0,
                 y: vertical_offset,
@@ -1052,7 +1051,6 @@ impl<F: Frontend> Activities<F> {
         // FIXME(alex): a long title is cropped
         event_details_text_object_regirsty.create(
             details.title,
-            Color::WHITE,
             FRect {
                 x: 150.0,
                 y: vertical_offset,
@@ -1065,7 +1063,6 @@ impl<F: Frontend> Activities<F> {
             vertical_offset += 2f32 * one_line_height;
             event_details_text_object_regirsty.create(
                 captions::event_details_view::DESCRIPTION,
-                Color::WHITE,
                 FRect {
                     x: 100.0,
                     y: vertical_offset,
@@ -1082,11 +1079,7 @@ impl<F: Frontend> Activities<F> {
                 w: window_size.x as f32 - 200.0,
                 h: window_size.y as f32 - vertical_offset,
             };
-            event_details_text_object_regirsty.create(
-                details.description,
-                Color::WHITE,
-                border_rect,
-            )?;
+            event_details_text_object_regirsty.create(details.description, border_rect)?;
             Some(Textbox::new(border_rect))
         } else {
             None
@@ -1564,12 +1557,7 @@ pub trait TextObjectRegistry {
     fn get(&self, index: usize) -> Option<&Self::TextObject>;
 
     /// Creates a text object from `text`.  The text object is stored within the registry.
-    fn create(
-        &mut self,
-        text: impl Into<Vec<u8>>,
-        color: Color,
-        position: FRect,
-    ) -> Result<(), Self::Error>;
+    fn create(&mut self, text: impl Into<Vec<u8>>, position: FRect) -> Result<(), Self::Error>;
 }
 
 struct EventTitleRegistration<'a, TTC: TextTextureRegistry> {

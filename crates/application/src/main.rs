@@ -264,7 +264,6 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
     fn create(
         &mut self,
         text: impl Into<Vec<u8>>,
-        _color: Color,
         position: sdl3_sys::SDL_FRect,
     ) -> Result<(), Self::Error> {
         let cstring = std::ffi::CString::new(text).expect("malware input for a C string");
