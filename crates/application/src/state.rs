@@ -947,7 +947,8 @@ impl<F: Frontend> App<F> {
                     let maybe_textbox: Option<&Textbox> = self
                         .event_details_view
                         .as_ref()
-                        .and_then(|view| view.description_textbox.as_ref());
+                        .and_then(|view| view.description_textbox.as_ref())
+                        .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1);
 
                     if let Some(textbox) = maybe_textbox
                         && let Some(description) = self.get_selected_event_desription()
