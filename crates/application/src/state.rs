@@ -922,18 +922,6 @@ impl<F: Frontend> App<F> {
                                     y: position.y - textrect.y,
                                 };
 
-                                let maybe_cursor: Result<FRect, _> = text_engine
-                                    .get_description_cursor_position(
-                                        text_object,
-                                        &relative_position,
-                                    );
-
-                                textbox.cursor_rect = maybe_cursor.ok().map(|mut cursor: FRect| {
-                                    cursor.x += textrect.x;
-                                    cursor.y += textrect.y;
-                                    cursor
-                                });
-
                                 if let Ok(offset) =
                                     text_engine.get_offset(text_object, &relative_position)
                                 {
@@ -960,7 +948,28 @@ impl<F: Frontend> App<F> {
                         frontend.set_clipboard(copied_text)?;
                     }
                 }
-                Action::WindowResize => todo!("fix the resize for the event view"),
+                Action::WindowResize => {
+                    // TODO(alex):
+                    // 0. Ignore the resize if the resize is small than a value from configuration
+                    // 1. Get the width of the window.
+                    // 2. Calculate the width for the text objects.
+                    // 3. Set the width for the text objects.
+                    // 4. Set the width for the textbox.
+
+                    let window_width = window_size.x as f32;
+                    // FIXME(alex): store this offset somewhere and pass to the functions which
+                    // creates the text objects in Activities::create_event_details_text_objects.
+                    let text_width = window_width - 300.;
+                    let registry: &mut _ = frontend.get_event_details_text_object_regirsty_mut();
+                    registry.set_width(text_width)?;
+                    let maybe_textbox: Option<&mut Textbox> = self
+                        .event_details_view
+                        .as_mut()
+                        .and_then(|view| view.description_textbox.as_mut());
+                    if let Some(textbox) = maybe_textbox {
+                        textbox.border_rect.w = text_width;
+                    }
+                }
                 _ => (),
             }
         }
@@ -968,9 +977,9 @@ impl<F: Frontend> App<F> {
         let maybe_textbox: Option<&Textbox> = self
             .event_details_view
             .as_mut()
-            .and_then(|view| view.description_textbox.as_ref())
-            .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1);
+            .and_then(|view| view.description_textbox.as_ref());
         let render_highlights: Vec<FRect> = maybe_textbox
+            .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1)
             .and_then(|textbox: &Textbox| {
                 let registry = frontend.get_event_details_text_object_regirsty();
                 let text_engine = frontend.get_text_engine();
@@ -998,6 +1007,35 @@ impl<F: Frontend> App<F> {
                     })
             })
             .unwrap_or_default();
+
+        let maybe_textbox: Option<&mut Textbox> = self
+            .event_details_view
+            .as_mut()
+            .and_then(|view| view.description_textbox.as_mut());
+        if let Some(textbox) = maybe_textbox {
+            let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
+                (-1, -1) => None,
+                (x, -1) => Some(x),
+                (_x, y) => Some(y),
+            };
+
+            if let Some(cursor) = cursor {
+                let text_engine = frontend.get_text_engine();
+                let descrption_text_index = 3;
+                let registry = frontend.get_event_details_text_object_regirsty();
+                let rect = registry.get(descrption_text_index).and_then(|descrption| {
+                    text_engine.calculate_highlights(descrption, cursor, 1).ok()
+                });
+
+                if let Some(rect) = rect {
+                    textbox.cursor_rect = rect.into_iter().next();
+                    if let Some(cursor_rect) = textbox.cursor_rect.as_mut() {
+                        cursor_rect.x += textbox.border_rect.x;
+                        cursor_rect.y += textbox.border_rect.y;
+                    }
+                }
+            }
+        }
 
         let registry: &mut F::TextObjectRegistry =
             frontend.get_event_details_text_object_regirsty_mut();
@@ -1558,6 +1596,8 @@ pub trait TextObjectRegistry {
 
     /// Creates a text object from `text`.  The text object is stored within the registry.
     fn create(&mut self, text: impl Into<Vec<u8>>, position: FRect) -> Result<(), Self::Error>;
+
+    fn set_width(&mut self, width: f32) -> Result<(), Self::Error>;
 }
 
 struct EventTitleRegistration<'a, TTC: TextTextureRegistry> {

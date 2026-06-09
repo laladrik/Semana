@@ -33,6 +33,7 @@ struct TextTextureRegistry<'renderer, 'font> {
 }
 
 mod config {
+    // TODO(alex): create a constant which defines the minimal text width on event detail view
     pub const EVENT_TITLE_OFFSET_X: f32 = 2.0;
     pub const EVENT_TITLE_OFFSET_Y: f32 = 4.0;
     pub const FONT_CONTENT: &[u8] = include_bytes!("../../../assets/DejaVuSansMonoBook.ttf");
@@ -261,6 +262,23 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         self.text_objects.get(index)
     }
 
+    fn set_width(&mut self, width: f32) -> Result<(), Self::Error> {
+        unsafe {
+            for (position, text_object) in
+                self.text_positions.iter_mut().zip(self.text_objects.iter())
+            {
+                position.w = width;
+                // FIXME(alex): make a wrapper for it.
+                if !sdl_ttf::TTF_SetTextWrapWidth(text_object.ptr(), width as i32) {
+                    return Err(FrontendError::TextObjectIsNotRegistered(
+                        sdlext::Error::TtfError(sdlext::TtfError::TextCantBeWrapped),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn create(
         &mut self,
         text: impl Into<Vec<u8>>,
@@ -271,6 +289,7 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
             .expect("the text object hasn't been created");
         unsafe {
             let width: f32 = position.w.floor();
+            // FIXME(alex): make a wrapper for it.
             if !sdl_ttf::TTF_SetTextWrapWidth(ret.ptr(), width as i32) {
                 return Err(FrontendError::TextObjectIsNotRegistered(
                     sdlext::Error::TtfError(sdlext::TtfError::TextCantBeWrapped),
