@@ -629,16 +629,11 @@ impl<F: Frontend> App<F> {
                 AddWeek => self.calendar.add_week(),
                 MouseButtonDown {
                     position: mouse_position,
-                    button,
+                    button: MouseButton::Left,
                 } => {
-                    if let MouseButton::Left = button {
-                        let long_event_surface = self.compute_long_event_surface(&window_size);
-                        event_mouse_click = try_register_mouse_click(
-                            mouse_position,
-                            &long_event_surface,
-                            &window_size,
-                        );
-                    }
+                    let long_event_surface = self.compute_long_event_surface(&window_size);
+                    event_mouse_click =
+                        try_register_mouse_click(mouse_position, &long_event_surface, &window_size);
                 }
                 _ => (),
             }
@@ -954,14 +949,14 @@ impl<F: Frontend> App<F> {
                         .as_ref()
                         .and_then(|view| view.description_textbox.as_ref());
 
-                    if let Some(textbox) = maybe_textbox {
-                        if let Some(description) = self.get_selected_event_desription() {
-                            let start = textbox.highlight_start.min(textbox.highlight_end);
-                            let end = textbox.highlight_start.max(textbox.highlight_end);
-                            // NOTE(alex): end might be wrong. Prevent off by one error.
-                            let copied_text: &str = &description[start as usize..end as usize];
-                            frontend.set_clipboard(copied_text)?;
-                        }
+                    if let Some(textbox) = maybe_textbox
+                        && let Some(description) = self.get_selected_event_desription()
+                    {
+                        let start = textbox.highlight_start.min(textbox.highlight_end);
+                        let end = textbox.highlight_start.max(textbox.highlight_end);
+                        // NOTE(alex): end might be wrong. Prevent off by one error.
+                        let copied_text: &str = &description[start as usize..end as usize];
+                        frontend.set_clipboard(copied_text)?;
                     }
                 }
                 Action::WindowResize => todo!("fix the resize for the event view"),
