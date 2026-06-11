@@ -751,6 +751,15 @@ fn unsafe_main() {
                                             });
                                         }
                                     }
+                                    sdl::SDL_EVENT_MOUSE_WHEEL => {
+                                        let mod_state: sdl::SDL_Keymod = sdl::SDL_GetModState();
+                                        if mod_state as u32 & sdl::SDL_KMOD_CTRL > 0 {
+                                            events.push(state::Action::Zoom(event.wheel.y * 50.));
+                                        } else {
+                                            events
+                                                .push(state::Action::Scroll(event.wheel.y * -50.));
+                                        }
+                                    }
                                     _ => (),
                                 }
                             }
