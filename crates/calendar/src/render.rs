@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 
 use super::date::{Date, MINUTES_PER_DAY, MINUTES_PER_HOUR, Time};
 use super::types::{FPoint, FSize};
-use super::{Color, EventData, Lane};
+use super::{Color, EventTable, Lane};
 
 pub struct Arguments {
     pub column_width: f32,
@@ -248,7 +248,7 @@ fn create_short_event_rectangle(
 }
 
 pub fn long_event_rectangles(
-    long_events: &EventData,
+    long_events: &EventTable,
     first_date: &Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle> {
@@ -274,7 +274,7 @@ pub fn long_event_rectangles(
 /// # Assumptions
 /// The `events` are sorted by [`Event::start_time`]
 pub fn short_event_rectangles(
-    short_events: &EventData,
+    short_events: &EventTable,
     first_date: &'_ Date,
     arguments: &Arguments,
 ) -> impl Iterator<Item = Rectangle> {
@@ -403,7 +403,7 @@ mod tests {
         };
 
         let lanes = Vec::from([(0, 1)]);
-        let events_with_lanes = EventData {
+        let events_with_lanes = EventTable {
             event_ranges: events,
             titles,
             lanes,

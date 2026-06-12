@@ -422,14 +422,13 @@ impl<F: Frontend> App<F> {
             .as_ref()
             .and_then(|view: &EventDetailsView| {
                 let s = &self.calendar.state;
-                match view.event_kind {
-                    CalendarEventKind::Long => {
-                        s.obtain_long_event_description(view.event_index as usize)
-                    }
-                    CalendarEventKind::Short => {
-                        s.obtain_short_event_description(view.event_index as usize)
-                    }
-                }
+                let is_long = match view.event_kind {
+                    CalendarEventKind::Long => true,
+                    CalendarEventKind::Short => false,
+                };
+
+                s.get_event_table(is_long)
+                    .and_then(|t| t.obtain_description(view.event_index))
             })
     }
 
@@ -646,10 +645,9 @@ impl<F: Frontend> App<F> {
             match event_kind {
                 CalendarEventKind::Long => {
                     find_clicked_event(&position, rectangles.long).and_then(|event: usize| {
-                        let titles = self.calendar.state.obtain_long_events_titles();
-                        let title = titles.get(event)?.as_ref();
-                        let description =
-                            self.calendar.state.obtain_long_event_description(event)?;
+                        let table = self.calendar.state.get_event_table(true)?;
+                        let title = table.obtain_title(event as u32)?;
+                        let description = table.obtain_description(event as u32)?;
                         Some(EventDetails {
                             title,
                             description,
@@ -661,10 +659,9 @@ impl<F: Frontend> App<F> {
                 }
                 CalendarEventKind::Short => find_clicked_event(&position, rectangles.short)
                     .and_then(|event| {
-                        let titles = self.calendar.state.obtain_short_events_titles();
-                        let title = titles.get(event)?.as_ref();
-                        let description =
-                            self.calendar.state.obtain_short_event_description(event)?;
+                        let table = self.calendar.state.get_event_table(false)?;
+                        let title = table.obtain_title(event as u32)?;
+                        let description = table.obtain_description(event as u32)?;
                         Some(EventDetails {
                             title,
                             description,
@@ -1420,7 +1417,7 @@ pub enum MouseButton {
 }
 
 fn create_long_events<'a, TTC: TextTextureRegistry>(
-    event_data: &calendar::EventData,
+    event_data: &calendar::EventTable,
     week_start: &calendar::date::Date,
     mut registration: EventTitleRegistration<'a, TTC>,
     event_offset: &FPoint,
@@ -1440,7 +1437,7 @@ fn create_long_events<'a, TTC: TextTextureRegistry>(
 }
 
 fn create_short_events<'a, TTC: TextTextureRegistry>(
-    event_data: &calendar::EventData,
+    event_data: &calendar::EventTable,
     week_start: &calendar::date::Date,
     mut registration: EventTitleRegistration<'a, TTC>,
     view: &View,

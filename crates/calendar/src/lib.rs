@@ -90,7 +90,7 @@ pub struct EventRange {
     pub calendar_color: Color,
 }
 
-pub struct EventData {
+pub struct EventTable {
     pub event_ranges: Vec<EventRange>,
     pub titles: Vec<String>,
     pub description_handles: Vec<u32>,
@@ -98,12 +98,16 @@ pub struct EventData {
     pub lanes: Vec<(Lane, Lane)>,
 }
 
-impl EventData {
-    pub fn obtain_description(&self, event: usize) -> Option<&str> {
+impl EventTable {
+    pub fn obtain_description(&self, event: u32) -> Option<&str> {
         self.description_handles
-            .get(event)
+            .get(event as usize)
             .and_then(|handle: &u32| self.description_strings.get(*handle as usize))
             .map(String::as_str)
+    }
+
+    pub fn obtain_title(&self, event: u32) -> Option<&str> {
+        self.titles.get(event as usize).map(|s| s.as_str())
     }
 }
 

@@ -3,7 +3,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::date::{Date, DateStream, MINUTES_PER_DAY, Minutes, Time};
-use super::{Event, EventData, JsonInputEvent};
+use super::{Event, EventTable, JsonInputEvent};
 pub trait JsonParser {
     type Error;
 
@@ -185,7 +185,7 @@ where
     Ok(week_schedule)
 }
 
-impl EventData {
+impl EventTable {
     pub fn calculate_biggest_clash(&self) -> Lane {
         self.lanes
             .iter()
@@ -205,8 +205,8 @@ pub struct Events {
 }
 
 pub struct WeekScheduleWithLanes {
-    pub long: EventData,
-    pub short: EventData,
+    pub long: EventTable,
+    pub short: EventTable,
 }
 
 impl WeekScheduleWithLanes {
@@ -269,7 +269,7 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
     }
 
     WeekScheduleWithLanes {
-        long: EventData {
+        long: EventTable {
             event_ranges: long_event_ranges,
             titles: long_event_titles,
             lanes: long_lanes,
@@ -277,7 +277,7 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
             description_strings: events.long_event_descriptions,
         },
 
-        short: EventData {
+        short: EventTable {
             event_ranges: short_event_ranges,
             titles: short_event_titles,
             lanes: short_lanes,

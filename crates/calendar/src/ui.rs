@@ -1,4 +1,4 @@
-use crate::EventData;
+use crate::EventTable;
 use crate::Lane;
 use crate::date::Date;
 use crate::render;
@@ -98,7 +98,7 @@ impl View {
 
 pub fn create_short_event_rectangles(
     short_event_surface: &FRect,
-    short_events: &EventData,
+    short_events: &EventTable,
     week_start: &Date,
 ) -> render::Rectangles {
     let arguments = render::Arguments {
@@ -113,7 +113,7 @@ pub fn create_short_event_rectangles(
 
 pub fn create_long_event_rectangles(
     offset: &FPoint,
-    long_events: &EventData,
+    long_events: &EventTable,
     week_start: &Date,
     cell_width: f32,
     top_panel_height: f32,
