@@ -911,7 +911,7 @@ impl<F: Frontend> App<F> {
                                 // around itself.
                                 let textrect = &textbox.border_rect;
                                 let relative_position: FPoint =
-                                    fpoint_add(position, textrect.x, textrect.y);
+                                    fpoint_sub(position, textrect.x, textrect.y);
                                 if let Ok(offset) =
                                     text_engine.get_offset(text_object, &relative_position)
                                 {
