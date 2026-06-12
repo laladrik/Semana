@@ -109,6 +109,10 @@ impl EventTable {
     pub fn obtain_title(&self, event: u32) -> Option<&str> {
         self.titles.get(event as usize).map(|s| s.as_str())
     }
+
+    pub fn obtain_range(&self, event: u32) -> Option<&EventRange> {
+        self.event_ranges.get(event as usize)
+    }
 }
 
 pub type Lane = u8;

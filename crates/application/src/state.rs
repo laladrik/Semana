@@ -16,6 +16,8 @@ mod captions {
     pub mod event_details_view {
         pub const TITLE: &str = "Title:";
         pub const DESCRIPTION: &str = "Description:";
+        pub const FROM: &str = "From:";
+        pub const UNTIL: &str = "Until:";
     }
 }
 
@@ -650,6 +652,7 @@ impl<F: Frontend> App<F> {
             find_clicked_event(&position, rectangles).and_then(|event: usize| {
                 let table = self.calendar.state.get_event_table(is_long)?;
                 let title = table.obtain_title(event as u32)?;
+                let range = table.obtain_range(event as u32)?;
                 let description = table.obtain_description(event as u32)?;
                 Some(EventDetails {
                     title,
@@ -657,6 +660,7 @@ impl<F: Frontend> App<F> {
                     event_kind,
                     // FIXME(alex): make a special type for the indexes of events.
                     index: event as u32,
+                    range,
                 })
             })
         });
@@ -845,7 +849,7 @@ impl<F: Frontend> App<F> {
                     if let Some(textbox) = maybe_textbox {
                         assert!(textbox.highlight_start != -1);
                         let registry = frontend.get_event_details_text_object_regirsty();
-                        let descrption_text_index = 3;
+                        let descrption_text_index = 7;
                         if let Some(text_object) = registry.get(descrption_text_index) {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
@@ -888,7 +892,7 @@ impl<F: Frontend> App<F> {
                         if textbox.border_rect.covers_point(&position) {
                             // FIXME(alex): The index should correspond the picked textbox when
                             // we have a few of them.
-                            let descrption_text_index = 3;
+                            let descrption_text_index = 7;
                             if let Some(text_object) = registry.get(descrption_text_index) {
                                 textbox.is_highlighting = true;
                                 textbox.highlight_end = -1;
@@ -951,7 +955,7 @@ impl<F: Frontend> App<F> {
             .and_then(|textbox: &Textbox| {
                 let registry = frontend.get_event_details_text_object_regirsty();
                 let text_engine = frontend.get_text_engine();
-                let descrption_text_index = 3;
+                let descrption_text_index = 7;
                 registry
                     .get(descrption_text_index)
                     .and_then(|text_object| {
@@ -989,7 +993,7 @@ impl<F: Frontend> App<F> {
 
             if let Some(cursor) = cursor {
                 let text_engine = frontend.get_text_engine();
-                let descrption_text_index = 3;
+                let descrption_text_index = 7;
                 let registry = frontend.get_event_details_text_object_regirsty();
                 let rect = registry.get(descrption_text_index).and_then(|descrption| {
                     text_engine.calculate_highlights(descrption, cursor, 1).ok()
@@ -1029,6 +1033,14 @@ struct Activities<F: Frontend> {
     _frontend: core::marker::PhantomData<F>,
 }
 
+#[inline]
+fn format_date_time(date: &calendar::date::Date, time: &calendar::date::Time) -> String {
+    format!(
+        "{}-{:02}-{:02} {:02}:{:02}",
+        date.year, date.month, date.day, time.hour, time.minute
+    )
+}
+
 impl<F: Frontend> Activities<F> {
     // Renders the text of the event details
     fn create_event_details_text_objects(
@@ -1055,6 +1067,52 @@ impl<F: Frontend> Activities<F> {
         // FIXME(alex): a long title is cropped
         event_details_text_object_regirsty.create(
             details.title,
+            FRect {
+                x: 150.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += one_line_height * 2.;
+        event_details_text_object_regirsty.create(
+            captions::event_details_view::FROM,
+            FRect {
+                x: 100.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += one_line_height;
+        event_details_text_object_regirsty.create(
+            // FIXME(alex): the date should be formatted according the locale chosen by the user
+            format_date_time(&details.range.start_date, &details.range.start_time),
+            FRect {
+                x: 150.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += one_line_height;
+        event_details_text_object_regirsty.create(
+            captions::event_details_view::UNTIL,
+            FRect {
+                x: 100.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += one_line_height;
+        event_details_text_object_regirsty.create(
+            // FIXME(alex): the date should be formatted according the locale chosen by the user
+            format_date_time(&details.range.end_date, &details.range.end_time),
             FRect {
                 x: 150.0,
                 y: vertical_offset,
@@ -1101,6 +1159,7 @@ struct EventDetails<'event> {
     description: &'event str,
     index: u32,
     event_kind: CalendarEventKind,
+    range: &'event calendar::EventRange,
 }
 
 // If mouse_position is within the surface of the long events or the short events then
