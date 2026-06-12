@@ -54,22 +54,6 @@ impl<Handle> CalendarState<Handle> {
         }
     }
 
-    pub fn obtain_long_events_titles(&self) -> &[impl AsRef<str>] {
-        if let Self::Ready { week_data, .. } = self {
-            week_data.agenda.long.titles.as_slice()
-        } else {
-            NO_TITLES.as_slice()
-        }
-    }
-
-    pub fn obtain_short_events_titles(&self) -> &[impl AsRef<str>] {
-        if let Self::Ready { week_data, .. } = self {
-            week_data.agenda.short.titles.as_slice()
-        } else {
-            NO_TITLES.as_slice()
-        }
-    }
-
     /// It provides a memory-safe way to switch the state.  The function creates an uninitialized
     /// state to replace the current one.  Then it tries to switch to the next state provided by
     /// the function `update`.  The function must return any valid state and an error if any has

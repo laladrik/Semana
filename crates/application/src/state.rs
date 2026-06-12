@@ -642,35 +642,23 @@ impl<F: Frontend> App<F> {
                 position,
             } = mouse_click;
             let rectangles: EventRectangles = self.calendar.state.obtain_events();
-            match event_kind {
-                CalendarEventKind::Long => {
-                    find_clicked_event(&position, rectangles.long).and_then(|event: usize| {
-                        let table = self.calendar.state.get_event_table(true)?;
-                        let title = table.obtain_title(event as u32)?;
-                        let description = table.obtain_description(event as u32)?;
-                        Some(EventDetails {
-                            title,
-                            description,
-                            event_kind,
-                            // FIXME(alex): make a special type for the indexes of events.
-                            index: event as u32,
-                        })
-                    })
-                }
-                CalendarEventKind::Short => find_clicked_event(&position, rectangles.short)
-                    .and_then(|event| {
-                        let table = self.calendar.state.get_event_table(false)?;
-                        let title = table.obtain_title(event as u32)?;
-                        let description = table.obtain_description(event as u32)?;
-                        Some(EventDetails {
-                            title,
-                            description,
-                            event_kind,
-                            // FIXME(alex): make a special type for the indexes of events.
-                            index: event as u32,
-                        })
-                    }),
-            }
+            let (is_long, rectangles): (_, _) = match event_kind {
+                CalendarEventKind::Long => (true, rectangles.long),
+                CalendarEventKind::Short => (false, rectangles.short),
+            };
+
+            find_clicked_event(&position, rectangles).and_then(|event: usize| {
+                let table = self.calendar.state.get_event_table(is_long)?;
+                let title = table.obtain_title(event as u32)?;
+                let description = table.obtain_description(event as u32)?;
+                Some(EventDetails {
+                    title,
+                    description,
+                    event_kind,
+                    // FIXME(alex): make a special type for the indexes of events.
+                    index: event as u32,
+                })
+            })
         });
 
         match maybe_clicked_event {
