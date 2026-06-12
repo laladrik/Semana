@@ -187,6 +187,7 @@ pub struct RectangleSet {
 
 fn create_long_event_rectangle(
     long_event: &EventRange,
+    calendar_color: Color,
     first_date: &Date,
     arguments: &Arguments,
 ) -> Rectangle {
@@ -217,7 +218,7 @@ fn create_long_event_rectangle(
     };
 
     Rectangle {
-        color: long_event.calendar_color,
+        color: calendar_color,
         at: start_point,
         size,
     }
@@ -225,6 +226,7 @@ fn create_long_event_rectangle(
 
 fn create_short_event_rectangle(
     event: &EventRange,
+    calendar_color: Color,
     first_date: &Date,
     arguments: &Arguments,
 ) -> Rectangle {
@@ -241,7 +243,7 @@ fn create_short_event_rectangle(
     };
 
     Rectangle {
-        color: event.calendar_color,
+        color: calendar_color,
         at: start_point,
         size,
     }
@@ -256,10 +258,13 @@ pub fn long_event_rectangles(
         .event_ranges
         .iter()
         .zip(&long_events.lanes)
+        .zip(&long_events.calendar_colors)
         .map(|item| {
-            let (event, lane_position): (&EventRange, &(Lane, Lane)) = item;
+            let ((event, lane_position), calendar_color): ((&EventRange, &(Lane, Lane)), &Color) =
+                item;
             let (event_lane, total_lanes) = *lane_position;
-            let mut rect = create_long_event_rectangle(event, first_date, arguments);
+            let mut rect =
+                create_long_event_rectangle(event, *calendar_color, first_date, arguments);
             if total_lanes != 1 {
                 let lane_height: f32 = arguments.column_height / total_lanes as f32;
                 rect.at.y += lane_height * event_lane as f32;
@@ -286,10 +291,13 @@ pub fn short_event_rectangles(
         .event_ranges
         .iter()
         .zip(&short_events.lanes)
+        .zip(&short_events.calendar_colors)
         .map(|item| {
-            let (event, lane_position): (&EventRange, &(Lane, Lane)) = item;
+            let ((event, lane_position), calendar_color): ((&EventRange, &(Lane, Lane)), &Color) =
+                item;
             let (event_lane, total_lanes) = *lane_position;
-            let mut rect = create_short_event_rectangle(event, first_date, arguments);
+            let mut rect =
+                create_short_event_rectangle(event, *calendar_color, first_date, arguments);
             if total_lanes != 1 {
                 let column_width: f32 = arguments.column_width;
                 let lane_width: f32 = column_width / total_lanes as f32;

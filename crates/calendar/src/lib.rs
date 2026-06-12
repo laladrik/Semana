@@ -87,10 +87,10 @@ pub struct EventRange {
     pub start_time: date::Time,
     pub end_date: date::Date,
     pub end_time: date::Time,
-    pub calendar_color: Color,
 }
 
 pub struct EventTable {
+    pub calendar_colors: Vec<Color>,
     pub event_ranges: Vec<EventRange>,
     pub titles: Vec<String>,
     pub description_handles: Vec<u32>,

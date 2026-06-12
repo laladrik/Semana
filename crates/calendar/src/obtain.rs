@@ -1,4 +1,4 @@
-use crate::EventRange;
+use crate::{Color, EventRange};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -226,7 +226,7 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
     let short_lanes: Vec<(Lane, Lane)> =
         find_clashes(&events.short, start_date, short_event_clash_condition);
 
-    let create = |event: Event| -> (EventRange, String, u32) {
+    let create = |event: Event| -> (EventRange, String, u32, Color) {
         let Event {
             description,
             title,
@@ -241,31 +241,34 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
             start_time,
             end_date,
             end_time,
-            calendar_color,
         };
-        (range, title, description)
+        (range, title, description, calendar_color)
     };
 
     let n = events.long.len();
     let mut long_event_ranges: Vec<EventRange> = Vec::with_capacity(n);
     let mut long_event_titles: Vec<String> = Vec::with_capacity(n);
     let mut long_descriptions: Vec<u32> = Vec::with_capacity(n);
+    let mut long_calendar_colors: Vec<Color> = Vec::with_capacity(n);
     for long_event in events.long.into_iter() {
-        let (range, title, description) = create(long_event);
+        let (range, title, description, calendar_color) = create(long_event);
         long_event_ranges.push(range);
         long_event_titles.push(title);
         long_descriptions.push(description);
+        long_calendar_colors.push(calendar_color);
     }
 
     let n = events.short.len();
     let mut short_event_ranges: Vec<EventRange> = Vec::with_capacity(n);
     let mut short_event_titles: Vec<String> = Vec::with_capacity(n);
     let mut short_descriptions: Vec<u32> = Vec::with_capacity(n);
+    let mut short_calendar_colors: Vec<Color> = Vec::with_capacity(n);
     for short_event in events.short.into_iter() {
-        let (range, title, description) = create(short_event);
+        let (range, title, description, calendar_color) = create(short_event);
         short_event_ranges.push(range);
         short_event_titles.push(title);
         short_descriptions.push(description);
+        short_calendar_colors.push(calendar_color);
     }
 
     WeekScheduleWithLanes {
@@ -275,6 +278,7 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
             lanes: long_lanes,
             description_handles: long_descriptions,
             description_strings: events.long_event_descriptions,
+            calendar_colors: long_calendar_colors,
         },
 
         short: EventTable {
@@ -283,6 +287,7 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
             lanes: short_lanes,
             description_handles: short_descriptions,
             description_strings: events.short_event_descriptions,
+            calendar_colors: short_calendar_colors,
         },
     }
 }
