@@ -32,7 +32,7 @@ pub struct JsonInputEvent {
     #[nserde(rename = "all-day")]
     all_day: String,
     #[nserde(rename = "calendar-color")]
-    calendar_color: Color,
+    calendar_color: Option<Color>,
 }
 
 pub struct Event {
@@ -48,7 +48,7 @@ pub struct Event {
 
 #[derive(Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
-pub struct Color(u32);
+pub struct Color(pub u32);
 
 #[cfg(test)]
 impl Color {

@@ -40,6 +40,7 @@ mod config {
     pub const COLOR_TEXT_HIGHLIGHT: u32 = 0x009900;
     pub const GRID_SCALE_STEP: f32 = 50.;
     pub const GRID_OFFSET_STEP: f32 = 50.;
+    pub const DEFAULT_CALENDAR_COLOR: calendar::Color = calendar::Color(0xffffffff);
 }
 
 impl<'renderer, 'font> TextTextureRegistry<'renderer, 'font> {
@@ -597,10 +598,15 @@ impl AgendaSource for KhalAgendaSource {
             let byte_ptr: *const i8 = ret.cast();
             let output_cstr = std::ffi::CStr::from_ptr(byte_ptr);
             let output_str: &str = output_cstr.to_str().expect("can't convert to utf-8");
-            calendar::obtain::parse_events(&calendar::obtain::NanoSerde, output_str, week_start)
-                .map(|events| calendar::obtain::get_lanes(events, week_start))
-                // FIXME(alex): this panics if the process provides unsupported input
-                .expect("fail to parse events")
+            calendar::obtain::parse_events(
+                &calendar::obtain::NanoSerde,
+                output_str,
+                week_start,
+                config::DEFAULT_CALENDAR_COLOR,
+            )
+            .map(|events| calendar::obtain::get_lanes(events, week_start))
+            // FIXME(alex): this panics if the process provides unsupported input
+            .expect("fail to parse events")
         }
     }
 }

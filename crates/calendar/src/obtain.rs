@@ -124,6 +124,7 @@ pub fn parse_events<OutputParser>(
     json_parser: &OutputParser,
     bytes: &str,
     date: &Date,
+    default_calendar_color: Color,
 ) -> Result<Events, Error<OutputParser::Error>>
 where
     OutputParser: JsonParser,
@@ -171,7 +172,7 @@ where
                 start_time: json_event.start_time,
                 end_date: json_event.end_date,
                 end_time: json_event.end_time,
-                calendar_color: json_event.calendar_color,
+                calendar_color: json_event.calendar_color.unwrap_or(default_calendar_color),
             };
 
             if is_short {
