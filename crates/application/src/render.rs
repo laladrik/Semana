@@ -9,20 +9,18 @@ use sdlext::Color;
 
 pub enum RenderData<'rect, 'frontend, F> {
     WeekView(WeekViewRenderData<'rect, 'frontend, F>),
-    EventView(EventViewRenderData<'frontend, 'rect, F>),
+    EventView(EventViewRenderData<'rect, 'frontend, F>),
 }
 
-pub struct EventViewRenderData<'frontend, 'rect, F> {
+pub struct EventViewRenderData<'rect, 'frontend, F> {
     pub frontend: &'frontend F,
     pub textbox: Option<&'rect sdl::SDL_FRect>,
     pub cursor: Option<&'rect sdl::SDL_FRect>,
     pub highlight: Vec<sdl::SDL_FRect>,
 }
 
-type ERD<'renderer, 'rect, 'frontend, 'font> =
+type EventView<'renderer, 'rect, 'frontend, 'font> =
     EventViewRenderData<'frontend, 'rect, DumbFrontend<'renderer, 'font>>;
-
-type RDA<'renderer, 'rect, 'ttc, 'font> = RenderData<'rect, 'ttc, DumbFrontend<'renderer, 'font>>;
 
 pub struct WeekViewRenderData<'rect, 'frontend, F> {
     pub event_viewport: sdl::SDL_Rect,
@@ -34,10 +32,10 @@ pub struct WeekViewRenderData<'rect, 'frontend, F> {
     pub dates_viewport: sdl::SDL_Rect,
 }
 
-type RD<'renderer, 'rect, 'ttc, 'font> =
+type WeekView<'renderer, 'rect, 'ttc, 'font> =
     WeekViewRenderData<'rect, 'ttc, DumbFrontend<'renderer, 'font>>;
 
-pub fn render(renderer: &sdlext::Renderer, data: &RDA) -> sdlext::Result<()> {
+pub fn render(renderer: &sdlext::Renderer, data: &RenderData<DumbFrontend>) -> sdlext::Result<()> {
     match data {
         RenderData::WeekView(week_view_render_data) => {
             render_week_view(renderer, week_view_render_data)
@@ -46,7 +44,7 @@ pub fn render(renderer: &sdlext::Renderer, data: &RDA) -> sdlext::Result<()> {
     }
 }
 
-fn render_event_view(renderer: &sdlext::Renderer, data: &ERD) -> sdlext::Result<()> {
+fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
     let highlight_color = Color::from_rgb(config::COLOR_TEXT_HIGHLIGHT);
@@ -75,7 +73,7 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &ERD) -> sdlext::Result<
     renderer.present()
 }
 
-fn render_week_view(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
+fn render_week_view(renderer: &sdlext::Renderer, data: &WeekView) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
     render_events(renderer, data)?;
@@ -90,7 +88,7 @@ fn render_week_view(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()
     renderer.present()
 }
 
-fn render_events(renderer: &sdlext::Renderer, data: &RD) -> sdlext::Result<()> {
+fn render_events(renderer: &sdlext::Renderer, data: &WeekView) -> sdlext::Result<()> {
     let event_render = RectangleRender { renderer };
     calendar::render::render_rectangles(data.long_event_rectangles.iter(), &event_render)?;
     data.frontend.long_event_text_registry.render()?;
