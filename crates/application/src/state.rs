@@ -594,7 +594,7 @@ impl<F: Frontend> App<F> {
         frontend: &'frontend mut F,
         window_size: Point,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextObjectRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F>, F::Error> {
         let mut event_mouse_click: Option<MouseEventClick> = None;
         // :userInputHandling
         for event in events {
@@ -667,12 +667,16 @@ impl<F: Frontend> App<F> {
 
         match maybe_clicked_event {
             Some(event_details) => {
-                let text_object_registry: &mut F::TextObjectRegistry =
-                    frontend.get_event_details_text_object_regirsty_mut();
+                let form_field_content_registry: &RefCell<F::TextObjectRegistry> =
+                    frontend.get_event_details_text_object_regirsty();
+                let form_field_label_registry: &RefCell<F::TextTextureRegistry> =
+                    frontend.get_event_details_field_label_regirsty();
                 self.event_details_view = Activities::<F>::create_event_details_text_objects(
                     event_details,
                     &window_size,
-                    text_object_registry,
+                    &mut form_field_content_registry.borrow_mut(),
+                    &mut form_field_label_registry.borrow_mut(),
+                    Color::WHITE,
                 )?
                 .into();
 
@@ -680,7 +684,7 @@ impl<F: Frontend> App<F> {
                     activity: Activity::EventView,
                     render_data: RenderData::EventView(EventViewRenderData {
                         highlight: Vec::new(),
-                        text_registry: &*text_object_registry,
+                        frontend: &*frontend,
                         textbox: self
                             .event_details_view
                             .as_ref()
@@ -813,7 +817,7 @@ impl<F: Frontend> App<F> {
         frontend: &'frontend mut F,
         window_size: Point,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextObjectRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F>, F::Error> {
         match activity {
             Activity::WeekView => self.create_week_view_render_data(frontend, window_size, events),
             Activity::EventView => {
@@ -827,7 +831,7 @@ impl<F: Frontend> App<F> {
         frontend: &'frontend mut F,
         window_size: Point,
         events: impl IntoIterator<Item = Action>,
-    ) -> Result<NewState<'wdrect, 'frontend, F::TextObjectRegistry, F>, F::Error> {
+    ) -> Result<NewState<'wdrect, 'frontend, F>, F::Error> {
         for event in events {
             match event {
                 Action::Escape => {
@@ -849,8 +853,8 @@ impl<F: Frontend> App<F> {
                     if let Some(textbox) = maybe_textbox {
                         assert!(textbox.highlight_start != -1);
                         let registry = frontend.get_event_details_text_object_regirsty();
-                        let descrption_text_index = 7;
-                        if let Some(text_object) = registry.get(descrption_text_index) {
+                        let descrption_text_index = 3;
+                        if let Some(text_object) = registry.borrow().get(descrption_text_index) {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
@@ -892,8 +896,9 @@ impl<F: Frontend> App<F> {
                         if textbox.border_rect.covers_point(&position) {
                             // FIXME(alex): The index should correspond the picked textbox when
                             // we have a few of them.
-                            let descrption_text_index = 7;
-                            if let Some(text_object) = registry.get(descrption_text_index) {
+                            let descrption_text_index = 3;
+                            if let Some(text_object) = registry.borrow().get(descrption_text_index)
+                            {
                                 textbox.is_highlighting = true;
                                 textbox.highlight_end = -1;
                                 // NOTE(alex): this might different if the text has some margin
@@ -932,8 +937,8 @@ impl<F: Frontend> App<F> {
                     // FIXME(alex): store this offset somewhere and pass to the functions which
                     // creates the text objects in Activities::create_event_details_text_objects.
                     let text_width = window_width - 300.;
-                    let registry: &mut _ = frontend.get_event_details_text_object_regirsty_mut();
-                    registry.set_width(text_width)?;
+                    let registry: &RefCell<_> = frontend.get_event_details_text_object_regirsty();
+                    registry.borrow_mut().set_width(text_width)?;
                     let maybe_textbox: Option<&mut Textbox> = self
                         .event_details_view
                         .as_mut()
@@ -955,8 +960,9 @@ impl<F: Frontend> App<F> {
             .and_then(|textbox: &Textbox| {
                 let registry = frontend.get_event_details_text_object_regirsty();
                 let text_engine = frontend.get_text_engine();
-                let descrption_text_index = 7;
+                let descrption_text_index = 3;
                 registry
+                    .borrow()
                     .get(descrption_text_index)
                     .and_then(|text_object| {
                         // normalizing for the case when the highlighting starts from right bottom
@@ -993,11 +999,14 @@ impl<F: Frontend> App<F> {
 
             if let Some(cursor) = cursor {
                 let text_engine = frontend.get_text_engine();
-                let descrption_text_index = 7;
+                let descrption_text_index = 3;
                 let registry = frontend.get_event_details_text_object_regirsty();
-                let rect = registry.get(descrption_text_index).and_then(|descrption| {
-                    text_engine.calculate_highlights(descrption, cursor, 1).ok()
-                });
+                let rect = registry
+                    .borrow()
+                    .get(descrption_text_index)
+                    .and_then(|descrption| {
+                        text_engine.calculate_highlights(descrption, cursor, 1).ok()
+                    });
 
                 if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
                     cursor_rect =
@@ -1007,13 +1016,11 @@ impl<F: Frontend> App<F> {
             }
         }
 
-        let registry: &mut F::TextObjectRegistry =
-            frontend.get_event_details_text_object_regirsty_mut();
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
+                frontend,
                 highlight: render_highlights,
-                text_registry: registry,
                 textbox: self
                     .event_details_view
                     .as_ref()
@@ -1047,14 +1054,17 @@ impl<F: Frontend> Activities<F> {
         details: EventDetails,
         window_size: &Point,
         event_details_text_object_regirsty: &mut F::TextObjectRegistry,
+        event_details_field_label_regirsty: &mut F::TextTextureRegistry,
+        label_color: Color,
     ) -> Result<EventDetailsView, F::Error> {
         event_details_text_object_regirsty.clear();
         // FIXME(alex): this should be based on the font line height
         let one_line_height = 30f32;
         let top_offset = 100f32;
         let mut vertical_offset = top_offset;
-        event_details_text_object_regirsty.create(
+        event_details_field_label_regirsty.create(
             captions::event_details_view::TITLE,
+            label_color,
             FRect {
                 x: 100.0,
                 y: vertical_offset,
@@ -1076,8 +1086,9 @@ impl<F: Frontend> Activities<F> {
         )?;
 
         vertical_offset += one_line_height * 2.;
-        event_details_text_object_regirsty.create(
+        event_details_field_label_regirsty.create(
             captions::event_details_view::FROM,
+            label_color,
             FRect {
                 x: 100.0,
                 y: vertical_offset,
@@ -1099,8 +1110,9 @@ impl<F: Frontend> Activities<F> {
         )?;
 
         vertical_offset += one_line_height;
-        event_details_text_object_regirsty.create(
+        event_details_field_label_regirsty.create(
             captions::event_details_view::UNTIL,
+            label_color,
             FRect {
                 x: 100.0,
                 y: vertical_offset,
@@ -1123,8 +1135,9 @@ impl<F: Frontend> Activities<F> {
 
         let description_textbox: Option<Textbox> = if !details.description.is_empty() {
             vertical_offset += 2f32 * one_line_height;
-            event_details_text_object_regirsty.create(
+            event_details_field_label_regirsty.create(
                 captions::event_details_view::DESCRIPTION,
+                label_color,
                 FRect {
                     x: 100.0,
                     y: vertical_offset,
@@ -1204,9 +1217,9 @@ fn try_register_mouse_click(
     }
 }
 
-pub struct NewState<'rect, 'frontend, TTC, F> {
+pub struct NewState<'rect, 'frontend, F> {
     pub activity: Activity,
-    pub render_data: RenderData<'rect, 'frontend, TTC, F>,
+    pub render_data: RenderData<'rect, 'frontend, F>,
 }
 
 fn find_clicked_event(
@@ -1534,6 +1547,8 @@ pub trait TextEngine {
     ) -> Result<sdl3_sys::SDL_FRect, Self::Error>;
 }
 
+use core::cell::RefCell;
+
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction
 /// is provide the way to test the core.
 pub trait Frontend:
@@ -1550,8 +1565,11 @@ pub trait Frontend:
     fn get_hours_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_days_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
     fn get_dates_text_registry(&mut self) -> &mut Self::TextTextureRegistry;
-    fn get_event_details_text_object_regirsty(&self) -> &Self::TextObjectRegistry;
-    fn get_event_details_text_object_regirsty_mut(&mut self) -> &mut Self::TextObjectRegistry;
+
+    fn get_event_details_field_label_regirsty(&self) -> &RefCell<Self::TextTextureRegistry>;
+
+    fn get_event_details_text_object_regirsty(&self) -> &RefCell<Self::TextObjectRegistry>;
+    //fn get_event_details_text_object_regirsty_mut(&mut self) -> &mut Self::TextObjectRegistry;
     fn get_text_engine(&self) -> &Self::TextEngine;
 
     fn get_current_week_start(&self) -> Result<calendar::date::Date, Self::Error>;

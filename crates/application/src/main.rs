@@ -311,7 +311,8 @@ struct DumbFrontend<'renderer, 'font> {
 
     long_event_text_registry: TextTextureRegistry<'renderer, 'font>,
     short_event_text_registry: TextTextureRegistry<'renderer, 'font>,
-    event_details_text_object_regirsty: TextObjectRegistry<'font>,
+    event_details_text_object_regirsty: RefCell<TextObjectRegistry<'font>>,
+    event_details_field_label_regirsty: RefCell<TextTextureRegistry<'renderer, 'font>>,
 }
 
 impl<'renderer, 'font> GetLongEventTextRegistry for DumbFrontend<'renderer, 'font> {
@@ -469,13 +470,13 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
             .map_err(FrontendError::WeekStartIsNotObtained)
     }
 
-    fn get_event_details_text_object_regirsty(&self) -> &Self::TextObjectRegistry {
+    fn get_event_details_text_object_regirsty(&self) -> &RefCell<Self::TextObjectRegistry> {
         &self.event_details_text_object_regirsty
     }
 
-    fn get_event_details_text_object_regirsty_mut(&mut self) -> &mut Self::TextObjectRegistry {
-        &mut self.event_details_text_object_regirsty
-    }
+    //fn get_event_details_text_object_regirsty_mut(&mut self) -> &mut Self::TextObjectRegistry {
+    //    &mut self.event_details_text_object_regirsty
+    //}
 
     fn get_text_engine(&self) -> &Self::TextEngine {
         &self.text_engine
@@ -497,6 +498,10 @@ impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
                 Ok(())
             }
         }
+    }
+
+    fn get_event_details_field_label_regirsty(&self) -> &RefCell<Self::TextTextureRegistry> {
+        &self.event_details_field_label_regirsty
     }
 }
 
@@ -646,11 +651,15 @@ fn unsafe_main() {
                         let dates_text_texture_regirsty =
                             TextTextureRegistry::new(renderer, &fonts.ui);
                         let event_details_text_object_regirsty =
-                            TextObjectRegistry::new(&fonts.ui, engine);
+                            RefCell::new(TextObjectRegistry::new(&fonts.ui, engine));
                         let text_engine = TextEngine {
                             window: root_window,
                         };
 
+                        // From, Until, Title, Description - the label of the fields in the form in
+                        // the event details view
+                        let event_details_field_label_regirsty =
+                            RefCell::new(TextTextureRegistry::new(renderer, &fonts.ui));
                         let mut frontend = DumbFrontend {
                             hour_text_texture_regirsty,
                             days_text_texture_regirsty,
@@ -659,6 +668,7 @@ fn unsafe_main() {
                             long_event_text_registry,
                             event_details_text_object_regirsty,
                             text_engine,
+                            event_details_field_label_regirsty,
                         };
 
                         let event_title_offset = sdl::SDL_FPoint {

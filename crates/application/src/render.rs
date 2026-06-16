@@ -7,23 +7,22 @@ use crate::RectangleRender;
 use super::config;
 use sdlext::Color;
 
-pub enum RenderData<'rect, 'frontend, TTC, F> {
+pub enum RenderData<'rect, 'frontend, F> {
     WeekView(WeekViewRenderData<'rect, 'frontend, F>),
-    EventView(EventViewRenderData<'frontend, 'rect, TTC>),
+    EventView(EventViewRenderData<'frontend, 'rect, F>),
 }
 
-pub struct EventViewRenderData<'ttc, 'rect, TextObjectRegistry> {
-    pub text_registry: &'ttc TextObjectRegistry,
+pub struct EventViewRenderData<'frontend, 'rect, F> {
+    pub frontend: &'frontend F,
     pub textbox: Option<&'rect sdl::SDL_FRect>,
     pub cursor: Option<&'rect sdl::SDL_FRect>,
     pub highlight: Vec<sdl::SDL_FRect>,
 }
 
-type ERD<'renderer, 'rect, 'ttc, 'font> =
-    EventViewRenderData<'ttc, 'rect, crate::TextObjectRegistry<'font>>;
+type ERD<'renderer, 'rect, 'frontend, 'font> =
+    EventViewRenderData<'frontend, 'rect, DumbFrontend<'renderer, 'font>>;
 
-type RDA<'renderer, 'rect, 'ttc, 'font> =
-    RenderData<'rect, 'ttc, crate::TextObjectRegistry<'font>, DumbFrontend<'renderer, 'font>>;
+type RDA<'renderer, 'rect, 'ttc, 'font> = RenderData<'rect, 'ttc, DumbFrontend<'renderer, 'font>>;
 
 pub struct WeekViewRenderData<'rect, 'frontend, F> {
     pub event_viewport: sdl::SDL_Rect,
@@ -56,7 +55,14 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &ERD) -> sdlext::Result<
         renderer.render_fill_rect(item)?;
     }
 
-    data.text_registry.render()?;
+    data.frontend
+        .event_details_field_label_regirsty
+        .borrow()
+        .render()?;
+    data.frontend
+        .event_details_text_object_regirsty
+        .borrow()
+        .render()?;
     if let Some(rect) = data.textbox {
         renderer.set_render_draw_color(Color::WHITE)?;
         renderer.render_rect(rect)?;
