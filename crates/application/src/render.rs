@@ -1,3 +1,4 @@
+use calendar::types::AsRect;
 use calendar::ui::View;
 use sdl3_sys as sdl;
 
@@ -75,13 +76,7 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
         let registry = frontend.event_details_text_object_regirsty.borrow();
         let text_objects: &[_] = registry.text_objects.as_slice();
         for (text, position) in text_objects.iter().zip(text_object_positions.iter()) {
-            let vp = sdl::SDL_Rect {
-                x: position.x.floor() as i32,
-                y: position.y.floor() as i32,
-                w: position.w.floor() as i32,
-                h: position.h.floor() as i32,
-            };
-
+            let vp = position.as_rect();
             set_render_viewport_context(renderer, &vp, || {
                 sdlext::ttf_draw_renderer_text(text, 3., 2.).map_err(sdlext::Error::TtfError)
             })?

@@ -1,5 +1,12 @@
 use crate::render::{EventViewRenderData, RenderData, WeekViewRenderData};
+use core::cell::RefCell;
+
 mod calendar_state;
+use calendar::types::{
+    AddFPoint, AsFPoint, CoversPoint, MoveFRect, SubFPoint, fpoint_add, fpoint_sub,
+    is_fpoint_between_points,
+};
+
 use calendar_state::CalendarState;
 use calendar_state::EventRectangles;
 use calendar_state::WeekData;
@@ -1313,91 +1320,6 @@ impl From<NonNegativeF32> for f32 {
     }
 }
 
-#[inline]
-fn is_fpoint_between_points(
-    point: impl std::borrow::Borrow<FPoint>,
-    left_top: impl std::borrow::Borrow<FPoint>,
-    bottom_right: impl std::borrow::Borrow<FPoint>,
-) -> bool {
-    let FPoint { x, y } = point.borrow();
-    let FPoint { x: lx, y: ly } = left_top.borrow();
-    let FPoint { x: rx, y: ry } = bottom_right.borrow();
-    x > lx && y > ly && x < rx && y < ry
-}
-
-fn fpoint_add(left: impl std::borrow::Borrow<FPoint>, x: f32, y: f32) -> FPoint {
-    let left: &FPoint = left.borrow();
-    FPoint {
-        x: left.x + x,
-        y: left.y + y,
-    }
-}
-
-fn fpoint_sub(left: impl std::borrow::Borrow<FPoint>, x: f32, y: f32) -> FPoint {
-    fpoint_add(left, -x, -y)
-}
-
-trait MoveFRect {
-    fn move_frect(self, x: f32, y: f32) -> Self;
-}
-
-impl MoveFRect for FRect {
-    fn move_frect(self, x: f32, y: f32) -> Self {
-        Self {
-            x: self.x + x,
-            y: self.y + y,
-            h: self.h,
-            w: self.w,
-        }
-    }
-}
-
-trait AddFPoint {
-    fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint;
-}
-
-trait CoversPoint {
-    fn covers_point(&self, _: &FPoint) -> bool;
-}
-
-impl CoversPoint for FRect {
-    fn covers_point(&self, point: &FPoint) -> bool {
-        (point.x >= self.x)
-            && (point.x <= (self.x + self.w))
-            && (point.y >= self.y)
-            && (point.y <= (self.y + self.h))
-    }
-}
-
-impl<T: std::borrow::Borrow<FPoint>> AddFPoint for T {
-    fn add_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
-        fpoint_add(self, right.borrow().x, right.borrow().y)
-    }
-}
-
-trait SubFPoint {
-    fn sub_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint;
-}
-
-impl<T: std::borrow::Borrow<FPoint>> SubFPoint for T {
-    fn sub_fpoint(self, right: impl std::borrow::Borrow<FPoint>) -> FPoint {
-        fpoint_sub(self, right.borrow().x, right.borrow().y)
-    }
-}
-
-trait AsFPoint {
-    fn as_fpoint(&self) -> FPoint;
-}
-
-impl AsFPoint for Point {
-    fn as_fpoint(&self) -> FPoint {
-        FPoint {
-            x: self.x as f32,
-            y: self.y as f32,
-        }
-    }
-}
-
 /// When the surface with the short events is scaled, technically it means that only its size
 /// changes.  Given that, the events slip away from under the mouse.  Therefore, the vertical
 /// offset of the surface is to be adjusted.
@@ -1587,15 +1509,7 @@ pub trait TextEngine {
         start: i32,
         len: i32,
     ) -> Result<Vec<FRect>, Self::Error>;
-
-    fn get_description_cursor_position(
-        &self,
-        text_object: &Self::TextObject,
-        position: &FPoint,
-    ) -> Result<sdl3_sys::SDL_FRect, Self::Error>;
 }
-
-use core::cell::RefCell;
 
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction
 /// is provide the way to test the core.

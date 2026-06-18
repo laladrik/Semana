@@ -1,5 +1,4 @@
 static NO_RECT: calendar::render::Rectangles = Vec::new();
-static NO_TITLES: Vec<String> = Vec::new();
 
 // FIXME: Flatten the structure
 pub struct WeekData {
