@@ -268,6 +268,16 @@ impl Text {
     }
 }
 
+pub fn ttf_draw_renderer_text(text: &Text, x: f32, y: f32) -> std::result::Result<(), TtfError> {
+    unsafe {
+        if !sdl_ttf::TTF_DrawRendererText(text.ptr(), x, y) {
+            Err(TtfError::TextIsNotDrawn)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl Drop for Text {
     fn drop(&mut self) {
         unsafe {
@@ -514,6 +524,24 @@ impl Renderer {
         }
     }
 
+    fn call2<Arg1, Arg2>(
+        &self,
+        unsafe_fn: unsafe extern "C" fn(*mut sdl::SDL_Renderer, Arg1, Arg2) -> bool,
+        arg1: Arg1,
+        arg2: Arg2,
+        err: Error,
+    ) -> Result<()> {
+        // SAFETY: the pointer of the renderer is initialized and remains immutable through out the
+        // life time of the data structure.
+        unsafe {
+            if !(unsafe_fn)(self.ptr(), arg1, arg2) {
+                Err(err)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
     fn call3<Arg1, Arg2, Arg3>(
         &self,
         unsafe_fn: unsafe extern "C" fn(*mut sdl::SDL_Renderer, Arg1, Arg2, Arg3) -> bool,
@@ -563,6 +591,24 @@ impl Renderer {
 
     pub fn render_fill_rect(&self, rect: &sdl::SDL_FRect) -> Result<()> {
         self.call1(sdl::SDL_RenderFillRect, rect, Error::RectangleIsNotDrawn)
+    }
+
+    pub fn render_rects(&self, rects: &[sdl::SDL_FRect]) -> Result<()> {
+        self.call2(
+            sdl::SDL_RenderRects,
+            rects.as_ptr(),
+            rects.len() as i32,
+            Error::RectangleIsNotDrawn,
+        )
+    }
+
+    pub fn render_fill_rects(&self, rects: &[sdl::SDL_FRect]) -> Result<()> {
+        self.call2(
+            sdl::SDL_RenderFillRects,
+            rects.as_ptr(),
+            rects.len() as i32,
+            Error::RectangleIsNotDrawn,
+        )
     }
 
     pub fn render_rect(&self, rect: &sdl::SDL_FRect) -> Result<()> {
