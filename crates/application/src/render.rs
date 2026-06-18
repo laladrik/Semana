@@ -47,20 +47,47 @@ pub fn render(renderer: &sdlext::Renderer, data: &RenderData<DumbFrontend>) -> s
 fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::Result<()> {
     renderer.set_render_draw_color(Color::from_rgb(config::COLOR_BACKGROUND))?;
     renderer.clear()?;
-    let highlight_color = Color::from_rgb(config::COLOR_TEXT_HIGHLIGHT);
-    renderer.set_render_draw_color(highlight_color)?;
-    for item in &data.highlight {
-        renderer.render_fill_rect(item)?;
+    let frontend = data.frontend;
+    let regref = frontend.event_details_text_object_regirsty.borrow();
+    let text_object_positions = &regref.text_positions;
+
+    '_render_text_fields: {
+        renderer.set_render_draw_color(Color::from_rgb(0x333333))?;
+        renderer.render_fill_rects(text_object_positions)?;
+        renderer.set_render_draw_color(Color::WHITE)?;
+        renderer.render_rects(text_object_positions)?;
     }
 
-    data.frontend
+    frontend
         .event_details_field_label_regirsty
         .borrow()
         .render()?;
-    data.frontend
-        .event_details_text_object_regirsty
-        .borrow()
-        .render()?;
+
+    '_render_selection_highlighting: {
+        let highlight_color = Color::from_rgb(config::COLOR_TEXT_HIGHLIGHT);
+        renderer.set_render_draw_color(highlight_color)?;
+        for item in &data.highlight {
+            renderer.render_fill_rect(item)?;
+        }
+    }
+
+    '_render_text_within_fields: {
+        let registry = frontend.event_details_text_object_regirsty.borrow();
+        let text_objects: &[_] = registry.text_objects.as_slice();
+        for (text, position) in text_objects.iter().zip(text_object_positions.iter()) {
+            let vp = sdl::SDL_Rect {
+                x: position.x.floor() as i32,
+                y: position.y.floor() as i32,
+                w: position.w.floor() as i32,
+                h: position.h.floor() as i32,
+            };
+
+            set_render_viewport_context(renderer, &vp, || {
+                sdlext::ttf_draw_renderer_text(text, 3., 2.).map_err(sdlext::Error::TtfError)
+            })?
+        }
+    }
+
     if let Some(rect) = data.textbox {
         renderer.set_render_draw_color(Color::WHITE)?;
         renderer.render_rect(rect)?;

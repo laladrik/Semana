@@ -12,6 +12,9 @@ use calendar::{
 use sdl3_sys::{SDL_FPoint as FPoint, SDL_FRect as FRect, SDL_Point as Point, SDL_Rect as Rect};
 use sdlext::Color;
 
+// FIXME(alex): remove this ASAP
+const DESCRIPTION_TEXT_INDEX: usize = 3;
+
 mod captions {
     pub mod event_details_view {
         pub const TITLE: &str = "Title:";
@@ -387,6 +390,8 @@ struct EventDetailsView {
     description_textbox: Option<Textbox>,
     event_index: u32,
     event_kind: CalendarEventKind,
+    // The fields which stretch as the window does.
+    flexible_fields: Box<[u32]>,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -853,8 +858,7 @@ impl<F: Frontend> App<F> {
                     if let Some(textbox) = maybe_textbox {
                         assert!(textbox.highlight_start != -1);
                         let registry = frontend.get_event_details_text_object_regirsty();
-                        let descrption_text_index = 3;
-                        if let Some(text_object) = registry.borrow().get(descrption_text_index) {
+                        if let Some(text_object) = registry.borrow().get(DESCRIPTION_TEXT_INDEX) {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
@@ -896,8 +900,7 @@ impl<F: Frontend> App<F> {
                         if textbox.border_rect.covers_point(&position) {
                             // FIXME(alex): The index should correspond the picked textbox when
                             // we have a few of them.
-                            let descrption_text_index = 3;
-                            if let Some(text_object) = registry.borrow().get(descrption_text_index)
+                            if let Some(text_object) = registry.borrow().get(DESCRIPTION_TEXT_INDEX)
                             {
                                 textbox.is_highlighting = true;
                                 textbox.highlight_end = -1;
@@ -936,9 +939,30 @@ impl<F: Frontend> App<F> {
                     let window_width = window_size.x as f32;
                     // FIXME(alex): store this offset somewhere and pass to the functions which
                     // creates the text objects in Activities::create_event_details_text_objects.
-                    let text_width = window_width - 300.;
-                    let registry: &RefCell<_> = frontend.get_event_details_text_object_regirsty();
-                    registry.borrow_mut().set_width(text_width)?;
+                    const OFFSET: f32 = 300.;
+                    let text_width = window_width - OFFSET;
+                    let registry: &RefCell<F::TextObjectRegistry> =
+                        frontend.get_event_details_text_object_regirsty();
+
+                    {
+                        let maybe_flexible_fields: Option<&[u32]> = self
+                            .event_details_view
+                            .as_ref()
+                            .map(|view| view.flexible_fields.as_ref());
+                        if let Some(flexible_fields) = maybe_flexible_fields {
+                            let mut regref = registry.borrow_mut();
+                            let positions: &mut _ = regref.get_positions_mut();
+                            for i in flexible_fields.iter() {
+                                positions[*i as usize].w = text_width;
+                            }
+                        }
+                    }
+
+                    // The error is raised if the descrption does not exist or if SDL fails to set
+                    // the wrapping
+                    let _ = registry
+                        .borrow_mut()
+                        .set_wrap(DESCRIPTION_TEXT_INDEX as u32, text_width);
                     let maybe_textbox: Option<&mut Textbox> = self
                         .event_details_view
                         .as_mut()
@@ -960,10 +984,9 @@ impl<F: Frontend> App<F> {
             .and_then(|textbox: &Textbox| {
                 let registry = frontend.get_event_details_text_object_regirsty();
                 let text_engine = frontend.get_text_engine();
-                let descrption_text_index = 3;
                 registry
                     .borrow()
-                    .get(descrption_text_index)
+                    .get(DESCRIPTION_TEXT_INDEX)
                     .and_then(|text_object| {
                         // normalizing for the case when the highlighting starts from right bottom
                         // to left top.
@@ -999,11 +1022,10 @@ impl<F: Frontend> App<F> {
 
             if let Some(cursor) = cursor {
                 let text_engine = frontend.get_text_engine();
-                let descrption_text_index = 3;
                 let registry = frontend.get_event_details_text_object_regirsty();
                 let rect = registry
                     .borrow()
-                    .get(descrption_text_index)
+                    .get(DESCRIPTION_TEXT_INDEX)
                     .and_then(|descrption| {
                         text_engine.calculate_highlights(descrption, cursor, 1).ok()
                     });
@@ -1058,6 +1080,15 @@ impl<F: Frontend> Activities<F> {
         label_color: Color,
     ) -> Result<EventDetailsView, F::Error> {
         event_details_text_object_regirsty.clear();
+        let mut field_counter = 0;
+        // Assuming that 10 is the maximum possible number of field for a calendar event.
+        let mut flexible_fields: [u32; 10] = [0; 10];
+        let mut flexible_fields_cursor: usize = 0;
+        let mut push_flexible_field = |value| {
+            flexible_fields[flexible_fields_cursor] = value;
+            flexible_fields_cursor += 1;
+        };
+
         // FIXME(alex): this should be based on the font line height
         let one_line_height = 30f32;
         let top_offset = 100f32;
@@ -1085,6 +1116,9 @@ impl<F: Frontend> Activities<F> {
             },
         )?;
 
+        push_flexible_field(field_counter);
+        field_counter += 1;
+
         vertical_offset += one_line_height * 2.;
         event_details_field_label_regirsty.create(
             captions::event_details_view::FROM,
@@ -1098,16 +1132,20 @@ impl<F: Frontend> Activities<F> {
         )?;
 
         vertical_offset += one_line_height;
+        // FIXME(alex): the width of the field should be based on the size of the font.
+        const DATE_TIME_FIELD_WIDTH: f32 = 220.0;
         event_details_text_object_regirsty.create(
             // FIXME(alex): the date should be formatted according the locale chosen by the user
             format_date_time(&details.range.start_date, &details.range.start_time),
             FRect {
                 x: 150.0,
                 y: vertical_offset,
-                w: window_size.x as f32 - 200.0,
+                w: DATE_TIME_FIELD_WIDTH,
                 h: one_line_height,
             },
         )?;
+
+        field_counter += 1;
 
         vertical_offset += one_line_height;
         event_details_field_label_regirsty.create(
@@ -1128,10 +1166,12 @@ impl<F: Frontend> Activities<F> {
             FRect {
                 x: 150.0,
                 y: vertical_offset,
-                w: window_size.x as f32 - 200.0,
+                w: DATE_TIME_FIELD_WIDTH,
                 h: one_line_height,
             },
         )?;
+
+        field_counter += 1;
 
         let description_textbox: Option<Textbox> = if !details.description.is_empty() {
             vertical_offset += 2f32 * one_line_height;
@@ -1155,14 +1195,22 @@ impl<F: Frontend> Activities<F> {
                 h: window_size.y as f32 - vertical_offset,
             };
             event_details_text_object_regirsty.create(details.description, border_rect)?;
+            event_details_text_object_regirsty
+                .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
+
+            push_flexible_field(field_counter);
+            field_counter += 1;
+            _ = field_counter;
             Some(Textbox::new(border_rect))
         } else {
             None
         };
+
         Ok(EventDetailsView {
             description_textbox,
             event_index: details.index,
             event_kind: details.event_kind,
+            flexible_fields: Box::from(&flexible_fields[..flexible_fields_cursor]),
         })
     }
 }
@@ -1642,7 +1690,10 @@ pub trait TextObjectRegistry {
     /// Creates a text object from `text`.  The text object is stored within the registry.
     fn create(&mut self, text: impl Into<Vec<u8>>, position: FRect) -> Result<(), Self::Error>;
 
-    fn set_width(&mut self, width: f32) -> Result<(), Self::Error>;
+    fn get_positions_mut(&mut self) -> &mut [FRect];
+
+    /// Sets the text wrap length
+    fn set_wrap(&mut self, index: u32, width: f32) -> Result<(), Self::Error>;
 }
 
 struct EventTitleRegistration<'a, TTC: TextTextureRegistry> {

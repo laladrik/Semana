@@ -20,6 +20,7 @@ impl From<FrontendError> for Error {
             | FrontendError::CursorClickHandlingFailure(e)
             | FrontendError::ClipboardIsBroken(e) => Error::from(e),
             FrontendError::AgendaSourceFailed(e) => Error::from(e),
+            FrontendError::TextObjectNotFound => todo!("handle the error of absent text object"),
         }
     }
 }
@@ -52,6 +53,7 @@ pub enum FrontendError {
     TextObjectIsNotRegistered(sdlext::Error),
     CursorClickHandlingFailure(sdlext::Error),
     ClipboardIsBroken(sdlext::Error),
+    TextObjectNotFound,
 }
 
 #[derive(Debug)]

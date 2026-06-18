@@ -234,18 +234,6 @@ impl<'font> TextObjectRegistry<'font> {
             text_objects: Vec::new(),
         }
     }
-
-    pub fn render(&self) -> Result<(), sdlext::Error> {
-        for (text, position) in self.text_objects.iter().zip(self.text_positions.iter()) {
-            let sdl::SDL_FRect { x, y, .. } = position;
-            unsafe {
-                if !sdl_ttf::TTF_DrawRendererText(text.ptr(), *x, *y) {
-                    return Err(sdlext::TtfError::TextIsNotDrawn.into());
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
@@ -262,21 +250,25 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         self.text_objects.get(index)
     }
 
-    fn set_width(&mut self, width: f32) -> Result<(), Self::Error> {
-        unsafe {
-            for (position, text_object) in
-                self.text_positions.iter_mut().zip(self.text_objects.iter())
-            {
-                position.w = width;
+    fn get_positions_mut(&mut self) -> &mut [sdl3_sys::SDL_FRect] {
+        self.text_positions.as_mut_slice()
+    }
+
+    fn set_wrap(&mut self, index: u32, width: f32) -> Result<(), Self::Error> {
+        match self.text_objects.get(index as usize) {
+            Some(text_object) => {
                 // FIXME(alex): make a wrapper for it.
-                if !sdl_ttf::TTF_SetTextWrapWidth(text_object.ptr(), width as i32) {
-                    return Err(FrontendError::TextObjectIsNotRegistered(
-                        sdlext::Error::TtfError(sdlext::TtfError::TextCantBeWrapped),
-                    ));
+                unsafe {
+                    if !sdl_ttf::TTF_SetTextWrapWidth(text_object.ptr(), width as i32) {
+                        return Err(FrontendError::TextObjectIsNotRegistered(
+                            sdlext::Error::TtfError(sdlext::TtfError::TextCantBeWrapped),
+                        ));
+                    }
+                    Ok(())
                 }
             }
+            None => Err(FrontendError::TextObjectNotFound),
         }
-        Ok(())
     }
 
     fn create(
@@ -287,16 +279,6 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         let cstring = std::ffi::CString::new(text).expect("malware input for a C string");
         let ret = sdlext::Text::try_new(self.text_engine, &mut self.font.borrow_mut(), &cstring)
             .expect("the text object hasn't been created");
-        unsafe {
-            let width: f32 = position.w.floor();
-            // FIXME(alex): make a wrapper for it.
-            if !sdl_ttf::TTF_SetTextWrapWidth(ret.ptr(), width as i32) {
-                return Err(FrontendError::TextObjectIsNotRegistered(
-                    sdlext::Error::TtfError(sdlext::TtfError::TextCantBeWrapped),
-                ));
-            }
-        }
-
         self.text_objects.push(ret);
         self.text_positions.push(position);
         Ok(())
