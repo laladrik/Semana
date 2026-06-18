@@ -84,7 +84,7 @@ impl MoveFRect for FRect {
 }
 
 pub trait AddFPoint {
-    fn add_fpoint(self, right: impl core::borrow::Borrow<FPoint>) -> FPoint;
+    fn add_fpoint(self, x: f32, y: f32) -> FPoint;
 }
 
 pub trait CoversPoint {
@@ -101,18 +101,18 @@ impl CoversPoint for FRect {
 }
 
 impl<T: core::borrow::Borrow<FPoint>> AddFPoint for T {
-    fn add_fpoint(self, right: impl core::borrow::Borrow<FPoint>) -> FPoint {
-        fpoint_add(self, right.borrow().x, right.borrow().y)
+    fn add_fpoint(self, x: f32, y: f32) -> FPoint {
+        fpoint_add(self, x, y)
     }
 }
 
 pub trait SubFPoint {
-    fn sub_fpoint(self, right: impl core::borrow::Borrow<FPoint>) -> FPoint;
+    fn sub_fpoint(self, x: f32, y: f32) -> FPoint;
 }
 
 impl<T: core::borrow::Borrow<FPoint>> SubFPoint for T {
-    fn sub_fpoint(self, right: impl core::borrow::Borrow<FPoint>) -> FPoint {
-        fpoint_sub(self, right.borrow().x, right.borrow().y)
+    fn sub_fpoint(self, x: f32, y: f32) -> FPoint {
+        fpoint_sub(self, x, y)
     }
 }
 

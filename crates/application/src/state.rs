@@ -3,8 +3,7 @@ use core::cell::RefCell;
 
 mod calendar_state;
 use calendar::types::{
-    AddFPoint, AsFPoint, CoversPoint, MoveFRect, SubFPoint, fpoint_add, fpoint_sub,
-    is_fpoint_between_points,
+    AddFPoint, AsFPoint, CoversPoint, MoveFRect, SubFPoint, is_fpoint_between_points,
 };
 
 use calendar_state::CalendarState;
@@ -264,10 +263,10 @@ struct ShortEventViewport {
 impl ShortEventViewport {
     fn new(event_offset: &FPoint, window_size: &Point, long_event_surface_height: f32) -> Self {
         let short_event_viewport_offset: FPoint =
-            fpoint_add(event_offset, 0f32, long_event_surface_height);
+            event_offset.add_fpoint(0f32, long_event_surface_height);
         let short_event_viewport_size: FPoint = window_size
             .as_fpoint()
-            .sub_fpoint(short_event_viewport_offset);
+            .sub_fpoint(short_event_viewport_offset.x, short_event_viewport_offset.y);
         Self {
             offset: short_event_viewport_offset,
             size: short_event_viewport_size,
@@ -453,7 +452,7 @@ impl<F: Frontend> App<F> {
         long_event_surface_height: f32,
     ) -> FPoint {
         let yoffset = event_offset.y + long_event_surface_height;
-        fpoint_sub(window_size.as_fpoint(), event_offset.x, yoffset)
+        window_size.as_fpoint().sub_fpoint(event_offset.x, yoffset)
     }
 
     fn create_view(
@@ -915,7 +914,7 @@ impl<F: Frontend> App<F> {
                                 // around itself.
                                 let textrect = &textbox.border_rect;
                                 let relative_position: FPoint =
-                                    fpoint_sub(position, textrect.x, textrect.y);
+                                    position.sub_fpoint(textrect.x, textrect.y);
                                 if let Ok(offset) =
                                     text_engine.get_offset(text_object, &relative_position)
                                 {
@@ -1240,21 +1239,23 @@ fn try_register_mouse_click(
     let short_event_viewport =
         ShortEventViewport::from_long_event_surface(long_event_surface, window_size);
 
-    let is_long_event_click = is_fpoint_between_points(
-        mouse_position,
-        long_event_surface.offset,
-        long_event_surface
-            .offset
-            .add_fpoint(long_event_surface.size),
-    );
+    let is_long_event_click = {
+        let size = long_event_surface.size;
+        is_fpoint_between_points(
+            mouse_position,
+            long_event_surface.offset,
+            long_event_surface.offset.add_fpoint(size.x, size.y),
+        )
+    };
 
-    let is_short_event_click = is_fpoint_between_points(
-        mouse_position,
-        short_event_viewport.offset,
-        short_event_viewport
-            .offset
-            .add_fpoint(short_event_viewport.size),
-    );
+    let is_short_event_click = {
+        let size = short_event_viewport.size;
+        is_fpoint_between_points(
+            mouse_position,
+            short_event_viewport.offset,
+            short_event_viewport.offset.add_fpoint(size.x, size.y),
+        )
+    };
 
     if is_long_event_click {
         Some(MouseEventClick {
@@ -1262,7 +1263,8 @@ fn try_register_mouse_click(
             position: mouse_position,
         })
     } else if is_short_event_click {
-        let position = mouse_position.sub_fpoint(short_event_viewport.offset);
+        let offset = short_event_viewport.offset;
+        let position = mouse_position.sub_fpoint(offset.x, offset.y);
         Some(MouseEventClick {
             event_kind: CalendarEventKind::Short,
             position,
@@ -1283,7 +1285,7 @@ fn find_clicked_event(
 ) -> Option<usize> {
     rectangles.iter().position(|rect| {
         let left_top = rect.at;
-        let bottom_right = rect.at.add_fpoint(rect.size);
+        let bottom_right = rect.at.add_fpoint(rect.size.x, rect.size.y);
         is_fpoint_between_points(position, left_top, bottom_right)
     })
 }
