@@ -1356,7 +1356,8 @@ fn compute_cursor_adjustment(
     let is_within = is_fpoint_between_points(
         mouse,
         short_event_viewport_offset,
-        short_event_viewport_offset.add_fpoint(short_event_viewport_size),
+        short_event_viewport_offset
+            .add_fpoint(short_event_viewport_size.x, short_event_viewport_size.y),
     );
     // if the mouse cursor is within the viewport
     if is_within {

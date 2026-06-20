@@ -393,37 +393,6 @@ impl state::TextEngine for TextEngine {
             }
         }
     }
-
-    fn get_description_cursor_position(
-        &self,
-        text_object: &Self::TextObject,
-        position: &sdl3_sys::SDL_FPoint,
-    ) -> Result<sdl3_sys::SDL_FRect, Self::Error> {
-        // SAFETY: the input data for the function call is validated.
-        let substring: sdl_ttf::TTF_SubString = unsafe {
-            let mut substring: MaybeUninit<sdl_ttf::TTF_SubString> = MaybeUninit::zeroed();
-            if !sdl_ttf::TTF_GetTextSubStringForPoint(
-                text_object.ptr(),
-                position.x as i32,
-                position.y as i32,
-                substring.as_mut_ptr(),
-            ) {
-                return Err(FrontendError::CursorClickHandlingFailure(
-                    sdlext::Error::TtfError(sdlext::TtfError::NoSubstringForPoint),
-                ));
-            }
-
-            substring.assume_init()
-        };
-
-        let cursor_rect = sdl::SDL_FRect {
-            x: substring.rect.x as f32,
-            y: substring.rect.y as f32,
-            w: substring.rect.w as f32,
-            h: substring.rect.h as f32,
-        };
-        Ok(cursor_rect)
-    }
 }
 
 impl<'renderer, 'font> Frontend for DumbFrontend<'renderer, 'font> {
