@@ -30,11 +30,79 @@ mod captions {
     }
 }
 
+/// An event changes its color upon being clicked.  The function computes the difference between
+/// the given color and that color.  The difference will be either _positive_ or _negative_.  It's
+/// negative be default. However, if the `color` is close to black, the diffirence is positive.
+/// There is no reason to dim the color which dark as it is.
+///
+// FIXME(alex): the compiler doesn't generate SIMD instructions for the floating point
+// calculations.
+fn compute_clicked_calendar_event_color(color: &calendar::Color) -> calendar::ColorDiff {
+    use core::array::from_fn;
+    type Vec3 = [f32; 3];
+    fn get_len(vec3: &Vec3) -> f32 {
+        let sum: f32 = vec3.iter().map(|x| x * x).sum();
+        sum.sqrt()
+    }
+
+    let max = 255f32;
+    const RED_SHIFT: u32 = 24;
+    const GREEN_SHIFT: u32 = 16;
+    const BLUE_SHIFT: u32 = 8;
+    const _ALPHA_SHIFT: u32 = 0;
+
+    let color_vec: Vec3 = {
+        let val = color.0;
+        let r = (val & (0xff << RED_SHIFT)) >> RED_SHIFT;
+        let g = (val & (0xff << GREEN_SHIFT)) >> GREEN_SHIFT;
+        let b = (val & (0xff << BLUE_SHIFT)) >> BLUE_SHIFT;
+        [r as f32 / max, g as f32 / max, b as f32 / max]
+    };
+
+    let inverted_color_vec: Vec3 = {
+        let color_vec_len = get_len(&color_vec);
+        let inverted_color_vec: Vec3 = from_fn(|i| -color_vec[i]);
+        // 15% from the the entire spectre.  E.g. from R: 255, G: 255, B: 255
+        const ADJUSTING_VECTOR_LENGTH: f32 = 0.15;
+        let adjusted_len = ADJUSTING_VECTOR_LENGTH / color_vec_len;
+        from_fn(|i| inverted_color_vec[i] * adjusted_len)
+    };
+
+    let ret: Vec3 = from_fn(|i| color_vec[i] + inverted_color_vec[i]);
+    let adjustment_color: Vec3 = if ret.iter().any(|color_channel| *color_channel < 0f32) {
+        from_fn(|i| -inverted_color_vec[i])
+    } else {
+        inverted_color_vec
+    };
+
+    calendar::ColorDiff(adjustment_color)
+}
+
+struct ClickedCalendarEvent {
+    /// When the user click an event, the color of the event is the sum of this and
+    /// `original_color`.
+    color_diff: calendar::ColorDiff,
+    /// Every calendar event belongs to its calendar.  The value of the field is the color of that
+    /// calendar.
+    original_color: calendar::Color,
+    /// The rectangle of the calendar event.  It is relative to window coordinates.
+    rectangle: FRect,
+    /// The index of the calendar event in the table [`calendar::EventTable`].  The same index is
+    /// used to accesses the rectangle from [`CalendarState`] to render the calendar event on the
+    /// week view.
+    index: u32,
+    kind: CalendarEventKind,
+}
+
+// FIXME(alex): this structure carries the data for the week view.  Probably, it should be renamed
+// to WeekView.
 pub struct Calendar<F: Frontend> {
     _frontend: std::marker::PhantomData<F>,
     pub week_start: calendar::date::Date,
     pub is_week_switched: bool,
     state: CalendarState<<F::AgendaSource as AgendaSource>::RequestHandle>,
+    /// Holds the information about the event which was under the mouse cursor upen the left click.
+    clicked_event: Option<ClickedCalendarEvent>,
 }
 
 impl<F: Frontend> Calendar<F> {
@@ -49,6 +117,7 @@ impl<F: Frontend> Calendar<F> {
                 agenda_source_handle,
             },
             is_week_switched,
+            clicked_event: None,
         })
     }
 
@@ -611,7 +680,29 @@ impl<F: Frontend> App<F> {
         for event in events {
             use Action::*;
             match event {
-                MouseButtonUp => (),
+                MouseButtonUp {
+                    position: mouse_position,
+                } => {
+                    // 1. Erase the color of clicked rectangle and the rectangle itself.
+                    // 2. Trigger the clicking on the calendar event which was under the cursor
+                    //    when the user pressed the mouse button.
+                    if let Some(clicked_event) = self.calendar.clicked_event.take() {
+                        self.calendar.state.set_color(
+                            clicked_event.index,
+                            clicked_event.kind.is_long(),
+                            clicked_event.original_color,
+                        );
+
+                        let long_event_surface = self.compute_long_event_surface(&window_size);
+                        if clicked_event.rectangle.covers_point(&mouse_position) {
+                            event_mouse_click = try_register_mouse_click(
+                                mouse_position,
+                                &long_event_surface,
+                                &window_size,
+                            );
+                        }
+                    }
+                }
                 Escape => (),
                 WindowResize => self.calendar.request_render(),
                 Scroll(value) => {
@@ -627,8 +718,35 @@ impl<F: Frontend> App<F> {
                     );
                     self.calendar.request_render();
                 }
-                MouseMove { x, y } => {
+                MouseMove {
+                    x,
+                    y,
+                    pressed_button,
+                } => {
                     self.ui.mouse_position = FPoint { x, y };
+                    // If the cursor moves with the pressed left button, the event changes its
+                    // color if the cursor is over the event, otherwise the color is the original.
+                    // This is enabled only if the cursor was over the event upon the click.
+                    if let Some(MouseButton::Left) = pressed_button
+                        && let Some(clicked_event) = self.calendar.clicked_event.as_ref()
+                    {
+                        let color = if clicked_event
+                            .rectangle
+                            .covers_point(&self.ui.mouse_position)
+                        {
+                            clicked_event
+                                .original_color
+                                .adjust(&clicked_event.color_diff)
+                        } else {
+                            clicked_event.original_color
+                        };
+
+                        self.calendar.state.set_color(
+                            clicked_event.index,
+                            clicked_event.kind.is_long(),
+                            color,
+                        );
+                    }
                 }
                 SubtractWeek => self.calendar.subtract_week(),
                 AddWeek => self.calendar.add_week(),
@@ -637,8 +755,79 @@ impl<F: Frontend> App<F> {
                     button: MouseButton::Left,
                 } => {
                     let long_event_surface = self.compute_long_event_surface(&window_size);
-                    event_mouse_click =
+                    let mouse_click =
                         try_register_mouse_click(mouse_position, &long_event_surface, &window_size);
+
+                    // This is "tagging" of the clicked event.  The saved information allows us to:
+                    // 1. Change the color of the event based on the cursor position.  The cursor
+                    //    stays over the calendar event, the event has the adjusted color.  The
+                    //    cursor is dragged away, the event has its original color.
+                    // 2. Show the view with the event details upon the button release as long as
+                    //    the cursor is over the calendar event.  Otherwise nothing happens.
+                    self.calendar.clicked_event = mouse_click.and_then(|mouse_click| {
+                        let MouseEventClick {
+                            event_kind,
+                            position,
+                        } = mouse_click;
+                        let rectangles: EventRectangles = self.calendar.state.obtain_events();
+                        let (is_long, rectangles): (_, _) = match event_kind {
+                            CalendarEventKind::Long => (true, rectangles.long),
+                            CalendarEventKind::Short => (false, rectangles.short),
+                        };
+
+                        find_clicked_event(&position, rectangles).and_then(|event: usize| {
+                            self.calendar
+                                .state
+                                .get_rectangle(event as u32, is_long)
+                                .map(|rectangle| {
+                                    let origin: FRect = {
+                                        let ret = FRect {
+                                            x: rectangle.at.x,
+                                            y: rectangle.at.y,
+                                            w: rectangle.size.x,
+                                            h: rectangle.size.y,
+                                        };
+
+                                        // FIXME(alex): this should in a function which would
+                                        // "normalize" the coordinates of any event based on its
+                                        // kind.
+                                        let offset = match event_kind {
+                                            CalendarEventKind::Long => FPoint { x: 0., y: 0. },
+                                            CalendarEventKind::Short => {
+                                                ShortEventViewport::from_long_event_surface(
+                                                    &long_event_surface,
+                                                    &window_size,
+                                                )
+                                                .offset
+                                            }
+                                        };
+
+                                        ret.move_frect(offset.x, offset.y)
+                                    };
+
+                                    let color_diff =
+                                        compute_clicked_calendar_event_color(&rectangle.color);
+                                    ClickedCalendarEvent {
+                                        index: event as u32,
+                                        original_color: rectangle.color,
+                                        rectangle: origin,
+                                        kind: event_kind,
+                                        color_diff,
+                                    }
+                                })
+                        })
+                    });
+
+                    // Adjust the color of the clicked event.
+                    if let Some(clicked_event) = self.calendar.clicked_event.as_ref() {
+                        self.calendar.state.set_color(
+                            clicked_event.index,
+                            clicked_event.kind.is_long(),
+                            clicked_event
+                                .original_color
+                                .adjust(&clicked_event.color_diff),
+                        );
+                    }
                 }
                 _ => (),
             }
@@ -790,7 +979,6 @@ impl<F: Frontend> App<F> {
                 )?;
 
                 let rectangles: EventRectangles = self.calendar.state.obtain_events();
-
                 let horizontal_offset = self.ui.event_offset.x as i32;
                 let dates_viewport = Rect {
                     x: horizontal_offset,
@@ -852,7 +1040,11 @@ impl<F: Frontend> App<F> {
                         Vec::new().into_iter(),
                     );
                 }
-                Action::MouseMove { x, y } => {
+                Action::MouseMove {
+                    x,
+                    y,
+                    pressed_button: _,
+                } => {
                     let maybe_textbox = self
                         .event_details_view
                         .as_mut()
@@ -881,7 +1073,7 @@ impl<F: Frontend> App<F> {
                         }
                     }
                 }
-                Action::MouseButtonUp => {
+                Action::MouseButtonUp { .. } => {
                     let maybe_textbox = self
                         .event_details_view
                         .as_mut()
@@ -1302,6 +1494,15 @@ enum CalendarEventKind {
     Short,
 }
 
+impl CalendarEventKind {
+    fn is_long(&self) -> bool {
+        match self {
+            CalendarEventKind::Long => true,
+            CalendarEventKind::Short => false,
+        }
+    }
+}
+
 struct MouseEventClick {
     event_kind: CalendarEventKind,
     position: FPoint,
@@ -1433,8 +1634,11 @@ pub enum Action {
     MouseMove {
         x: f32,
         y: f32,
+        pressed_button: Option<MouseButton>,
     },
-    MouseButtonUp,
+    MouseButtonUp {
+        position: FPoint,
+    },
     MouseButtonDown {
         position: FPoint,
         button: MouseButton,

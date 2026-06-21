@@ -22,6 +22,46 @@ pub enum CalendarState<Handle> {
 }
 
 impl<Handle> CalendarState<Handle> {
+    pub fn set_color(&mut self, event: u32, is_event_long: bool, color: calendar::Color) {
+        if let Self::Ready {
+            long_event_rectangles_opt,
+            short_event_rectangles_opt,
+            ..
+        } = self
+        {
+            let events: &mut [_] = match is_event_long {
+                true => long_event_rectangles_opt.as_mut_slice(),
+                false => short_event_rectangles_opt.as_mut_slice(),
+            };
+
+            if let Some(event) = events.get_mut(event as usize) {
+                event.color = color
+            }
+        }
+    }
+
+    pub fn get_rectangle(
+        &self,
+        event: u32,
+        is_event_long: bool,
+    ) -> Option<&calendar::render::Rectangle> {
+        if let Self::Ready {
+            long_event_rectangles_opt,
+            short_event_rectangles_opt,
+            ..
+        } = self
+        {
+            let events: &[_] = match is_event_long {
+                true => long_event_rectangles_opt.as_slice(),
+                false => short_event_rectangles_opt.as_slice(),
+            };
+
+            events.get(event as usize)
+        } else {
+            None
+        }
+    }
+
     pub fn obtain_events<'a>(&'a self) -> EventRectangles<'a> {
         match self {
             Self::Loading { .. } => EventRectangles {

@@ -687,12 +687,27 @@ fn unsafe_main() {
                                         _ => (),
                                     },
                                     sdl::SDL_EVENT_MOUSE_BUTTON_UP => {
-                                        events.push(state::Action::MouseButtonUp)
+                                        events.push(state::Action::MouseButtonUp {
+                                            position: sdl::SDL_FPoint {
+                                                x: event.button.x,
+                                                y: event.button.y,
+                                            },
+                                        });
                                     }
                                     sdl::SDL_EVENT_MOUSE_MOTION => {
+                                        let button: Option<state::MouseButton> =
+                                            // FIXME(alex): handle the rest of the buttons on
+                                            // demand.
+                                            if event.motion.state & sdl::SDL_BUTTON_LEFT > 0 {
+                                                Some(state::MouseButton::Left)
+                                            } else {
+                                                None
+                                            };
+
                                         events.push(state::Action::MouseMove {
                                             x: event.motion.x,
                                             y: event.motion.y,
+                                            pressed_button: button,
                                         })
                                     }
 
