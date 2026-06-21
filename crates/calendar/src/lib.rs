@@ -47,12 +47,33 @@ pub struct Event {
 }
 
 #[derive(Clone, Copy)]
+pub struct ColorDiff(pub [f32; 3]);
+
+#[derive(Clone, Copy)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct Color(pub u32);
 
-#[cfg(test)]
 impl Color {
     const BLACK: Color = Color(0x000000ff);
+
+    pub fn adjust(&self, diff: &ColorDiff) -> Color {
+        // NOTE(alex): may add with overflow?
+        const RED_SHIFT: u32 = 24;
+        const GREEN_SHIFT: u32 = 16;
+        const BLUE_SHIFT: u32 = 8;
+        const _ALPHA_SHIFT: u32 = 0;
+
+        let r = (self.0 & (0xff << RED_SHIFT)) >> RED_SHIFT;
+        let g = (self.0 & (0xff << GREEN_SHIFT)) >> GREEN_SHIFT;
+        let b = (self.0 & (0xff << BLUE_SHIFT)) >> BLUE_SHIFT;
+        // NOTE(alex): converting -0.5f32 to u32 results 0u32
+        let new_r: u32 = (r as i32 + ((diff.0[0] * 255f32) as i32)) as u32;
+        let new_g: u32 = (g as i32 + ((diff.0[1] * 255f32) as i32)) as u32;
+        let new_b: u32 = (b as i32 + ((diff.0[2] * 255f32) as i32)) as u32;
+
+        let val = Color::BLACK.0 | new_r << RED_SHIFT | new_g << GREEN_SHIFT | new_b << BLUE_SHIFT;
+        Color(val)
+    }
 }
 
 impl From<Color> for u32 {
