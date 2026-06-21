@@ -3,3 +3,7 @@
 /.cargo
 /Cargo.lock
 .gdb_history
+Cargo.sublime-workspace
+init.lua
+untitled.sublime-workspace
+.gdb
