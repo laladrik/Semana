@@ -1310,8 +1310,6 @@ impl<F: Frontend> App<F> {
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
-                // TODO(alex):
-                // Add the zero offsets
                 offsets: self
                     .event_details_view
                     .as_ref()
@@ -1716,8 +1714,6 @@ pub enum Action {
     //    handled or on the following?
     // 3. Probably, the entire layout is not needed for these events.  Given that, only the
     //    required can be calculated and the new layout is calculated based on the action
-    // TODO(alex):
-    // Add the mouse position to the event
     TextScroll {
         offset: f32,
         x: f32,
