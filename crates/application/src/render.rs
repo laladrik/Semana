@@ -58,7 +58,7 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
     let text_object_positions = &regref.text_positions;
 
     '_render_text_fields: {
-        renderer.set_render_draw_color(Color::from_rgb(0x333333))?;
+        renderer.set_render_draw_color(Color::from_rgb(config::TEXT_FIELD_BACKGROUND))?;
         renderer.render_fill_rects(text_object_positions)?;
         renderer.set_render_draw_color(Color::WHITE)?;
         renderer.render_rects(text_object_positions)?;

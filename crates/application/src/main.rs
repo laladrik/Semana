@@ -41,6 +41,7 @@ mod config {
     pub const GRID_SCALE_STEP: f32 = 50.;
     pub const GRID_OFFSET_STEP: f32 = 50.;
     pub const DEFAULT_CALENDAR_COLOR: calendar::Color = calendar::Color(0xffffffff);
+    pub const TEXT_FIELD_BACKGROUND: u32 = 0x333333;
 }
 
 impl<'renderer, 'font> TextTextureRegistry<'renderer, 'font> {
