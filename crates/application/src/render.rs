@@ -16,8 +16,13 @@ pub enum RenderData<'rect, 'frontend, F> {
 pub struct EventViewRenderData<'rect, 'frontend, F> {
     pub frontend: &'frontend F,
     pub textbox: Option<&'rect sdl::SDL_FRect>,
+    /// a.k.a. caret.  The bar which is drawn in the text.  It tells you where the typed text would
+    /// be inserted.
     pub cursor: Option<&'rect sdl::SDL_FRect>,
+    /// a.k.a. selection. The rectangles which allow you to tell you the selected text.
     pub highlight: Vec<sdl::SDL_FRect>,
+    /// The offsets of the text objects rendered inside the fields
+    pub offsets: &'rect [f32],
 }
 
 type EventView<'renderer, 'rect, 'frontend, 'font> =
@@ -73,12 +78,14 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
     }
 
     '_render_text_within_fields: {
-        let registry = frontend.event_details_text_object_regirsty.borrow();
-        let text_objects: &[_] = registry.text_objects.as_slice();
-        for (text, position) in text_objects.iter().zip(text_object_positions.iter()) {
-            let vp = position.as_rect();
-            set_render_viewport_context(renderer, &vp, || {
-                sdlext::ttf_draw_renderer_text(text, 3., 2.).map_err(sdlext::Error::TtfError)
+        let text_objects: &[_] = regref.text_objects.as_slice();
+        for i in 0..text_objects.len() {
+            let text = &text_objects[i];
+            let viewport = text_object_positions[i].as_rect();
+            let offset = data.offsets[i];
+            set_render_viewport_context(renderer, &viewport, || {
+                let x = 3. + offset;
+                sdlext::ttf_draw_renderer_text(text, x, 2.).map_err(sdlext::Error::TtfError)
             })?
         }
     }

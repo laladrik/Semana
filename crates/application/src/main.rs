@@ -250,6 +250,10 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         self.text_objects.get(index)
     }
 
+    fn get_positions(&self) -> &[sdl3_sys::SDL_FRect] {
+        self.text_positions.as_slice()
+    }
+
     fn get_positions_mut(&mut self) -> &mut [sdl3_sys::SDL_FRect] {
         self.text_positions.as_mut_slice()
     }
@@ -657,14 +661,20 @@ fn unsafe_main() {
                                             events.push(state::Action::Yank);
                                         }
                                         sdl::SDLK_UP => {
-                                            events.push(state::Action::Scroll(
-                                                -config::GRID_OFFSET_STEP,
-                                            ));
+                                            events.push(state::Action::Scroll {
+                                                offset: -config::GRID_OFFSET_STEP,
+                                                // FIXME(alex): the event should be redesigned
+                                                x: 0f32,
+                                                y: 0f32,
+                                            });
                                         }
                                         sdl::SDLK_DOWN => {
-                                            events.push(state::Action::Scroll(
-                                                config::GRID_OFFSET_STEP,
-                                            ));
+                                            events.push(state::Action::Scroll {
+                                                // FIXME(alex): the event should be redesigned
+                                                offset: config::GRID_OFFSET_STEP,
+                                                x: 0f32,
+                                                y: 0f32,
+                                            });
                                         }
                                         sdl::SDLK_MINUS => {
                                             events.push(state::Action::Zoom(
@@ -737,9 +747,18 @@ fn unsafe_main() {
                                         let mod_state: sdl::SDL_Keymod = sdl::SDL_GetModState();
                                         if mod_state as u32 & sdl::SDL_KMOD_CTRL > 0 {
                                             events.push(state::Action::Zoom(event.wheel.y * 50.));
+                                        } else if mod_state as u32 & sdl::SDL_KMOD_SHIFT > 0 {
+                                            events.push(state::Action::TextScroll {
+                                                offset: event.wheel.y,
+                                                x: event.wheel.mouse_x,
+                                                y: event.wheel.mouse_y,
+                                            });
                                         } else {
-                                            events
-                                                .push(state::Action::Scroll(event.wheel.y * -50.));
+                                            events.push(state::Action::Scroll {
+                                                offset: event.wheel.y,
+                                                x: event.wheel.mouse_x,
+                                                y: event.wheel.mouse_y,
+                                            });
                                         }
                                     }
                                     _ => (),

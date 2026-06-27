@@ -20,6 +20,7 @@ use sdlext::Color;
 
 // FIXME(alex): remove this ASAP
 const DESCRIPTION_TEXT_INDEX: usize = 3;
+const TEXT_SCROLL_AMPLIFIER: f32 = 10.0;
 
 mod captions {
     pub mod event_details_view {
@@ -465,8 +466,13 @@ struct EventDetailsView {
     description_textbox: Option<Textbox>,
     event_index: u32,
     event_kind: CalendarEventKind,
-    // The fields which stretch as the window does.
+    /// The fields which stretch as the window does.
     flexible_fields: Box<[u32]>,
+    /// The strings which are rendered inside the text fields.
+    texts: Box<[Box<str>]>,
+    /// The offsets of the text objects.  They are used for the case when a string is longer than
+    /// its field (a.k.a. viewport).
+    offsets: Box<[f32]>,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -705,8 +711,8 @@ impl<F: Frontend> App<F> {
                 }
                 Escape => (),
                 WindowResize => self.calendar.request_render(),
-                Scroll(value) => {
-                    self.ui.add_adjustment(value);
+                Scroll { offset: value, .. } => {
+                    self.ui.add_adjustment(value * -50.);
                     self.calendar.request_render();
                 }
                 Zoom(value) => {
@@ -883,6 +889,11 @@ impl<F: Frontend> App<F> {
                 Ok(NewState {
                     activity: Activity::EventView,
                     render_data: RenderData::EventView(EventViewRenderData {
+                        offsets: self
+                            .event_details_view
+                            .as_ref()
+                            .map(|view| view.offsets.as_ref())
+                            .unwrap_or(&[]),
                         highlight: Vec::new(),
                         frontend: &*frontend,
                         textbox: self
@@ -1033,6 +1044,59 @@ impl<F: Frontend> App<F> {
     ) -> Result<NewState<'wdrect, 'frontend, F>, F::Error> {
         for event in events {
             match event {
+                // Scrolling a single line text which doesn't fit its field (a.k.a. viewport).
+                Action::TextScroll { offset, x, y } => {
+                    let offset = offset * TEXT_SCROLL_AMPLIFIER;
+                    let registry = frontend.get_event_details_text_object_regirsty().borrow();
+                    let positions = registry.get_positions();
+                    if let Some((scrolled_text_index, position)) = positions
+                        .iter()
+                        .enumerate()
+                        .find(|(_, pos)| pos.covers_point(&FPoint { x, y }))
+                        && let Some(text) = registry.get(scrolled_text_index)
+                    {
+                        let mut new_offset = 0f32;
+                        if let Some(view) = self.event_details_view.as_ref() {
+                            // The offsets are as many as text objects.  Given that, the default
+                            // value is not expected to be set.
+                            let current_offset = view
+                                .offsets
+                                .get(scrolled_text_index)
+                                .cloned()
+                                .unwrap_or_default();
+                            new_offset = current_offset;
+
+                            // It's assumed that the scrollable text has only line.  A multiline
+                            // text is supposed to be only in the description.
+                            // FIXME(alex): add sanitazing of the single line texts.  Replace the
+                            // line break character with something.  Alternatively, figure out a
+                            // better handling of this case.
+                            let text_rect: Option<FRect> = view
+                                .texts
+                                .get(scrolled_text_index)
+                                .and_then(|text_string| {
+                                    let text_engine = frontend.get_text_engine();
+                                    text_engine
+                                        .calculate_highlights(text, 0, text_string.len() as i32)
+                                        .ok()
+                                })
+                                .and_then(|v| v.into_iter().next());
+
+                            if let Some(text_rect) = text_rect.filter(|r| r.w > position.w) {
+                                new_offset =
+                                    (current_offset + offset).clamp(position.w - text_rect.w, 0f32);
+                            }
+                        }
+
+                        if let Some(offset) = self
+                            .event_details_view
+                            .as_mut()
+                            .and_then(|view| view.offsets.get_mut(scrolled_text_index))
+                        {
+                            *offset = new_offset;
+                        }
+                    }
+                }
                 Action::Escape => {
                     return self.create_week_view_render_data(
                         frontend,
@@ -1168,6 +1232,13 @@ impl<F: Frontend> App<F> {
                     if let Some(textbox) = maybe_textbox {
                         textbox.border_rect.w = text_width;
                     }
+
+                    // NOT PLANNED
+                    if let Some(offsets) =
+                        self.event_details_view.as_mut().map(|v| v.offsets.as_mut())
+                    {
+                        offsets.fill(0f32);
+                    }
                 }
                 _ => (),
             }
@@ -1239,6 +1310,13 @@ impl<F: Frontend> App<F> {
         Ok(NewState {
             activity: Activity::EventView,
             render_data: RenderData::EventView(EventViewRenderData {
+                // TODO(alex):
+                // Add the zero offsets
+                offsets: self
+                    .event_details_view
+                    .as_ref()
+                    .map(|view| view.offsets.as_ref())
+                    .unwrap(),
                 frontend,
                 highlight: render_highlights,
                 textbox: self
@@ -1280,7 +1358,9 @@ impl<F: Frontend> Activities<F> {
         event_details_text_object_regirsty.clear();
         let mut field_counter = 0;
         // Assuming that 10 is the maximum possible number of field for a calendar event.
-        let mut flexible_fields: [u32; 10] = [0; 10];
+        const MAX_FIELDS: usize = 10;
+        let mut texts: Vec<Box<str>> = Vec::with_capacity(MAX_FIELDS);
+        let mut flexible_fields: [u32; MAX_FIELDS] = [0; MAX_FIELDS];
         let mut flexible_fields_cursor: usize = 0;
         let mut push_flexible_field = |value| {
             flexible_fields[flexible_fields_cursor] = value;
@@ -1313,6 +1393,7 @@ impl<F: Frontend> Activities<F> {
                 h: one_line_height,
             },
         )?;
+        texts.push(Box::from(details.title));
 
         push_flexible_field(field_counter);
         field_counter += 1;
@@ -1332,9 +1413,11 @@ impl<F: Frontend> Activities<F> {
         vertical_offset += one_line_height;
         // FIXME(alex): the width of the field should be based on the size of the font.
         const DATE_TIME_FIELD_WIDTH: f32 = 220.0;
+        let start = format_date_time(&details.range.start_date, &details.range.start_time);
+        texts.push(Box::from(start));
         event_details_text_object_regirsty.create(
             // FIXME(alex): the date should be formatted according the locale chosen by the user
-            format_date_time(&details.range.start_date, &details.range.start_time),
+            texts.last().unwrap().as_ref(),
             FRect {
                 x: 150.0,
                 y: vertical_offset,
@@ -1358,9 +1441,11 @@ impl<F: Frontend> Activities<F> {
         )?;
 
         vertical_offset += one_line_height;
+        let until = format_date_time(&details.range.end_date, &details.range.end_time);
+        texts.push(Box::from(until));
         event_details_text_object_regirsty.create(
             // FIXME(alex): the date should be formatted according the locale chosen by the user
-            format_date_time(&details.range.end_date, &details.range.end_time),
+            texts.last().unwrap().as_ref(),
             FRect {
                 x: 150.0,
                 y: vertical_offset,
@@ -1395,10 +1480,10 @@ impl<F: Frontend> Activities<F> {
             event_details_text_object_regirsty.create(details.description, border_rect)?;
             event_details_text_object_regirsty
                 .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
+            texts.push(Box::from(details.description));
 
             push_flexible_field(field_counter);
             field_counter += 1;
-            _ = field_counter;
             Some(Textbox::new(border_rect))
         } else {
             None
@@ -1409,6 +1494,8 @@ impl<F: Frontend> Activities<F> {
             event_index: details.index,
             event_kind: details.event_kind,
             flexible_fields: Box::from(&flexible_fields[..flexible_fields_cursor]),
+            texts: texts.into_boxed_slice(),
+            offsets: (0..field_counter).map(|_| 0f32).collect(),
         })
     }
 }
@@ -1629,7 +1716,20 @@ pub enum Action {
     //    handled or on the following?
     // 3. Probably, the entire layout is not needed for these events.  Given that, only the
     //    required can be calculated and the new layout is calculated based on the action
-    Scroll(f32),
+    // TODO(alex):
+    // Add the mouse position to the event
+    TextScroll {
+        offset: f32,
+        x: f32,
+        y: f32,
+    },
+    Scroll {
+        offset: f32,
+        #[allow(unused)]
+        x: f32,
+        #[allow(unused)]
+        y: f32,
+    },
     Zoom(f32),
     MouseMove {
         x: f32,
@@ -1812,6 +1912,8 @@ pub trait TextObjectRegistry {
     fn create(&mut self, text: impl Into<Vec<u8>>, position: FRect) -> Result<(), Self::Error>;
 
     fn get_positions_mut(&mut self) -> &mut [FRect];
+    // NOT PLANNED
+    fn get_positions(&self) -> &[sdl3_sys::SDL_FRect];
 
     /// Sets the text wrap length
     fn set_wrap(&mut self, index: u32, width: f32) -> Result<(), Self::Error>;
