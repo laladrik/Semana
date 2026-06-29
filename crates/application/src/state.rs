@@ -21,6 +21,7 @@ use sdlext::Color;
 // FIXME(alex): remove this ASAP
 const DESCRIPTION_TEXT_INDEX: usize = 3;
 const TEXT_SCROLL_AMPLIFIER: f32 = 10.0;
+const EVENT_DETAILS_VIEW_PADDING: FPoint = FPoint { x: 3., y: 2. };
 
 mod captions {
     pub mod event_details_view {
@@ -473,6 +474,7 @@ struct EventDetailsView {
     /// The offsets of the text objects.  They are used for the case when a string is longer than
     /// its field (a.k.a. viewport).
     offsets: Box<[f32]>,
+    text_field_padding: FPoint,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -885,29 +887,24 @@ impl<F: Frontend> App<F> {
                     Color::WHITE,
                 )?
                 .into();
-
-                Ok(NewState {
-                    activity: Activity::EventView,
-                    render_data: RenderData::EventView(EventViewRenderData {
-                        offsets: self
-                            .event_details_view
-                            .as_ref()
-                            .map(|view| view.offsets.as_ref())
-                            .unwrap_or(&[]),
-                        highlight: Vec::new(),
-                        frontend: &*frontend,
-                        textbox: self
-                            .event_details_view
-                            .as_ref()
-                            .and_then(|v| v.description_textbox.as_ref())
-                            .map(|tb| &tb.border_rect),
-                        cursor: self
-                            .event_details_view
-                            .as_ref()
-                            .and_then(|v| v.description_textbox.as_ref())
-                            .and_then(|tb| tb.cursor_rect.as_ref()),
-                    }),
-                })
+                if let Some(view) = self.event_details_view.as_ref() {
+                    Ok(NewState {
+                        activity: Activity::EventView,
+                        render_data: RenderData::EventView(EventViewRenderData {
+                            text_field_padding: view.text_field_padding,
+                            offsets: view.offsets.as_ref(),
+                            highlight: Vec::new(),
+                            frontend: &*frontend,
+                            textbox: view.description_textbox.as_ref().map(|tb| &tb.border_rect),
+                            cursor: view
+                                .description_textbox
+                                .as_ref()
+                                .and_then(|tb| tb.cursor_rect.as_ref()),
+                        }),
+                    })
+                } else {
+                    unreachable!("The view is set right above")
+                }
             }
             None => {
                 // If the user switches the week, the events for the week are requested from Khal.
@@ -1307,28 +1304,24 @@ impl<F: Frontend> App<F> {
             }
         }
 
-        Ok(NewState {
-            activity: Activity::EventView,
-            render_data: RenderData::EventView(EventViewRenderData {
-                offsets: self
-                    .event_details_view
-                    .as_ref()
-                    .map(|view| view.offsets.as_ref())
-                    .unwrap(),
-                frontend,
-                highlight: render_highlights,
-                textbox: self
-                    .event_details_view
-                    .as_ref()
-                    .and_then(|v| v.description_textbox.as_ref())
-                    .map(|tb| &tb.border_rect),
-                cursor: self
-                    .event_details_view
-                    .as_ref()
-                    .and_then(|v| v.description_textbox.as_ref())
-                    .and_then(|tb| tb.cursor_rect.as_ref()),
-            }),
-        })
+        if let Some(view) = self.event_details_view.as_ref() {
+            Ok(NewState {
+                activity: Activity::EventView,
+                render_data: RenderData::EventView(EventViewRenderData {
+                    text_field_padding: view.text_field_padding,
+                    offsets: view.offsets.as_ref(),
+                    frontend,
+                    highlight: render_highlights,
+                    textbox: view.description_textbox.as_ref().map(|tb| &tb.border_rect),
+                    cursor: view
+                        .description_textbox
+                        .as_ref()
+                        .and_then(|tb| tb.cursor_rect.as_ref()),
+                }),
+            })
+        } else {
+            unreachable!("The view must be set by this moment")
+        }
     }
 }
 
@@ -1488,6 +1481,7 @@ impl<F: Frontend> Activities<F> {
         };
 
         Ok(EventDetailsView {
+            text_field_padding: EVENT_DETAILS_VIEW_PADDING,
             description_textbox,
             event_index: details.index,
             event_kind: details.event_kind,

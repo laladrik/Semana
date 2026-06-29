@@ -23,6 +23,7 @@ pub struct EventViewRenderData<'rect, 'frontend, F> {
     pub highlight: Vec<sdl::SDL_FRect>,
     /// The offsets of the text objects rendered inside the fields
     pub offsets: &'rect [f32],
+    pub text_field_padding: sdl::SDL_FPoint,
 }
 
 type EventView<'renderer, 'rect, 'frontend, 'font> =
@@ -84,8 +85,9 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
             let viewport = text_object_positions[i].as_rect();
             let offset = data.offsets[i];
             set_render_viewport_context(renderer, &viewport, || {
-                let x = 3. + offset;
-                sdlext::ttf_draw_renderer_text(text, x, 2.).map_err(sdlext::Error::TtfError)
+                let x = data.text_field_padding.x + offset;
+                sdlext::ttf_draw_renderer_text(text, x, data.text_field_padding.y)
+                    .map_err(sdlext::Error::TtfError)
             })?
         }
     }
