@@ -1243,75 +1243,74 @@ impl<F: Frontend> App<F> {
             }
         }
 
-        let maybe_textbox: Option<&Textbox> = self
-            .event_details_view
-            .as_mut()
-            .and_then(|view| view.description_textbox.as_ref());
-        let render_highlights: Vec<FRect> = maybe_textbox
-            .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1)
-            .and_then(|textbox: &Textbox| {
-                let registry = frontend.get_event_details_text_object_regirsty();
+        let Some(view_mut) = self.event_details_view.as_mut() else {
+            unreachable!("the Event Details View must be ready")
+        };
+
+        let render_highlights: Vec<FRect> = {
+            let view: &EventDetailsView = &*view_mut;
+            let maybe_textbox: Option<&Textbox> = view.description_textbox.as_ref();
+            maybe_textbox
+                .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1)
+                .and_then(|textbox: &Textbox| {
+                    let registry = frontend.get_event_details_text_object_regirsty();
+                    let text_engine = frontend.get_text_engine();
+                    registry
+                        .borrow()
+                        .get(DESCRIPTION_TEXT_INDEX)
+                        .and_then(|text_object| {
+                            // normalizing for the case when the highlighting starts from right bottom
+                            // to left top.
+                            let start = textbox.highlight_start.min(textbox.highlight_end);
+                            let end = textbox.highlight_start.max(textbox.highlight_end);
+                            let len = end - start;
+                            text_engine
+                                .calculate_highlights(text_object, start, len)
+                                .ok()
+                        })
+                        .map(|mut highlights: Vec<FRect>| {
+                            // shift the rectangles of highlighting to the coordinates relative to
+                            // the window.
+                            for item in highlights.iter_mut() {
+                                item.x += textbox.border_rect.x + view.text_field_padding.x;
+                                item.y += textbox.border_rect.y + view.text_field_padding.y;
+                            }
+                            highlights
+                        })
+                })
+                .unwrap_or_default()
+        };
+
+        if let Some(textbox) = view_mut.description_textbox.as_mut() {
+            let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
+                (-1, -1) => None,
+                (x, -1) => Some(x),
+                (_x, y) => Some(y),
+            };
+
+            if let Some(cursor) = cursor {
                 let text_engine = frontend.get_text_engine();
-                registry
+                let registry = frontend.get_event_details_text_object_regirsty();
+                let rect = registry
                     .borrow()
                     .get(DESCRIPTION_TEXT_INDEX)
-                    .and_then(|text_object| {
-                        // normalizing for the case when the highlighting starts from right bottom
-                        // to left top.
-                        let start = textbox.highlight_start.min(textbox.highlight_end);
-                        let end = textbox.highlight_start.max(textbox.highlight_end);
-                        let len = end - start;
-                        text_engine
-                            .calculate_highlights(text_object, start, len)
-                            .ok()
-                    })
-                    .map(|mut highlights: Vec<FRect>| {
-                        // shift the rectangles of highlighting to the coordinates relative to
-                        // the window.
-                        for item in highlights.iter_mut() {
-                            item.x += textbox.border_rect.x;
-                            item.y += textbox.border_rect.y;
-                        }
-                        highlights
-                    })
-            })
-            .unwrap_or_default();
+                    .and_then(|descrption| {
+                        text_engine.calculate_highlights(descrption, cursor, 1).ok()
+                    });
 
-        //let maybe_textbox: Option<&mut Textbox> = self
-        //    .event_details_view
-        //    .as_mut()
-        //    .and_then(|view| view.description_textbox.as_mut());
-        if let Some(view) = self.event_details_view.as_mut() {
-            if let Some(textbox) = view.description_textbox.as_mut() {
-                let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
-                    (-1, -1) => None,
-                    (x, -1) => Some(x),
-                    (_x, y) => Some(y),
-                };
-
-                if let Some(cursor) = cursor {
-                    let text_engine = frontend.get_text_engine();
-                    let registry = frontend.get_event_details_text_object_regirsty();
-                    let rect =
-                        registry
-                            .borrow()
-                            .get(DESCRIPTION_TEXT_INDEX)
-                            .and_then(|descrption| {
-                                text_engine.calculate_highlights(descrption, cursor, 1).ok()
-                            });
-
-                    if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
-                        cursor_rect = cursor_rect
-                            .move_frect(textbox.border_rect.x, textbox.border_rect.y)
-                            .move_frect(view.text_field_padding.x, view.text_field_padding.y);
-                        textbox.cursor_rect = Some(cursor_rect)
-                    }
+                if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
+                    cursor_rect = cursor_rect
+                        .move_frect(textbox.border_rect.x, textbox.border_rect.y)
+                        .move_frect(view_mut.text_field_padding.x, view_mut.text_field_padding.y);
+                    textbox.cursor_rect = Some(cursor_rect)
                 }
             }
         }
 
-        if let Some(view) = self.event_details_view.as_ref() {
-            Ok(NewState {
+        Ok({
+            // The view is immutable later.
+            let view: &EventDetailsView = &*view_mut;
+            NewState {
                 activity: Activity::EventView,
                 render_data: RenderData::EventView(EventViewRenderData {
                     text_field_padding: view.text_field_padding,
@@ -1324,10 +1323,8 @@ impl<F: Frontend> App<F> {
                         .as_ref()
                         .and_then(|tb| tb.cursor_rect.as_ref()),
                 }),
-            })
-        } else {
-            unreachable!("The view must be set by this moment")
-        }
+            }
+        })
     }
 }
 
