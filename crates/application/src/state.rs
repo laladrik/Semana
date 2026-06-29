@@ -1106,15 +1106,17 @@ impl<F: Frontend> App<F> {
                     y,
                     pressed_button: _,
                 } => {
-                    let maybe_textbox = self
-                        .event_details_view
-                        .as_mut()
-                        .and_then(|view| view.description_textbox.as_mut())
-                        .filter(|textbox| textbox.is_highlighting);
-
+                    let Some(view) = self.event_details_view.as_mut() else {
+                        continue;
+                    };
+                    //if let Some(view) =  {
                     // As long as the user hasn't released the mouse button, the highlighting is
                     // on.
-                    if let Some(textbox) = maybe_textbox {
+                    if let Some(textbox) = view
+                        .description_textbox
+                        .as_mut()
+                        .filter(|textbox| textbox.is_highlighting)
+                    {
                         assert!(textbox.highlight_start != -1);
                         let registry = frontend.get_event_details_text_object_regirsty();
                         if let Some(text_object) = registry.borrow().get(DESCRIPTION_TEXT_INDEX) {
@@ -1122,8 +1124,8 @@ impl<F: Frontend> App<F> {
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
                             let relative_position = FPoint {
-                                x: x - textbox.border_rect.x,
-                                y: y - textbox.border_rect.y,
+                                x: x - textbox.border_rect.x - view.text_field_padding.x,
+                                y: y - textbox.border_rect.y - view.text_field_padding.y,
                             };
 
                             if let Ok(offset) =
@@ -1275,31 +1277,35 @@ impl<F: Frontend> App<F> {
             })
             .unwrap_or_default();
 
-        let maybe_textbox: Option<&mut Textbox> = self
-            .event_details_view
-            .as_mut()
-            .and_then(|view| view.description_textbox.as_mut());
-        if let Some(textbox) = maybe_textbox {
-            let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
-                (-1, -1) => None,
-                (x, -1) => Some(x),
-                (_x, y) => Some(y),
-            };
+        //let maybe_textbox: Option<&mut Textbox> = self
+        //    .event_details_view
+        //    .as_mut()
+        //    .and_then(|view| view.description_textbox.as_mut());
+        if let Some(view) = self.event_details_view.as_mut() {
+            if let Some(textbox) = view.description_textbox.as_mut() {
+                let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
+                    (-1, -1) => None,
+                    (x, -1) => Some(x),
+                    (_x, y) => Some(y),
+                };
 
-            if let Some(cursor) = cursor {
-                let text_engine = frontend.get_text_engine();
-                let registry = frontend.get_event_details_text_object_regirsty();
-                let rect = registry
-                    .borrow()
-                    .get(DESCRIPTION_TEXT_INDEX)
-                    .and_then(|descrption| {
-                        text_engine.calculate_highlights(descrption, cursor, 1).ok()
-                    });
+                if let Some(cursor) = cursor {
+                    let text_engine = frontend.get_text_engine();
+                    let registry = frontend.get_event_details_text_object_regirsty();
+                    let rect =
+                        registry
+                            .borrow()
+                            .get(DESCRIPTION_TEXT_INDEX)
+                            .and_then(|descrption| {
+                                text_engine.calculate_highlights(descrption, cursor, 1).ok()
+                            });
 
-                if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
-                    cursor_rect =
-                        cursor_rect.move_frect(textbox.border_rect.x, textbox.border_rect.y);
-                    textbox.cursor_rect = Some(cursor_rect)
+                    if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
+                        cursor_rect = cursor_rect
+                            .move_frect(textbox.border_rect.x, textbox.border_rect.y)
+                            .move_frect(view.text_field_padding.x, view.text_field_padding.y);
+                        textbox.cursor_rect = Some(cursor_rect)
+                    }
                 }
             }
         }
