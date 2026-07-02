@@ -573,18 +573,17 @@ mod tests {
 
     #[test]
     fn test_short_event_clash() {
-        let create_event = |title: &str, start_time: &str, end_time: &str| JsonInputEvent {
-            description: String::default(),
+        let create_event = |title: &str, start_time: &str, end_time: &str| Event {
+            description: 0,
             calendar_color: crate::Color::BLACK,
             title: title.to_owned(),
             start_date: create_date("2025-11-03"),
             start_time: create_time(start_time),
             end_date: create_date("2025-11-03"),
             end_time: create_time(end_time),
-            all_day: "False".to_owned(),
         };
 
-        let events: Vec<JsonInputEvent> = Vec::from_iter([
+        let events: Vec<Event> = Vec::from_iter([
             create_event("first", "10:00", "11:00"),
             create_event("second", "10:30", "11:30"),
             create_event("third", "11:00", "12:00"),

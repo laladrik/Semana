@@ -344,7 +344,6 @@ mod tests {
     #[test]
     fn test_create_long_event_rectangle() {
         let event = EventRange {
-            calendar_color: Color::BLACK,
             start_date: create_date("2025-11-04"),
             start_time: create_time("00:00"),
             end_date: create_date("2025-11-06"),
@@ -359,7 +358,8 @@ mod tests {
             offset_y: 70.,
         };
 
-        let rectangle: Rectangle = create_long_event_rectangle(&event, &first_date, &arguments);
+        let rectangle: Rectangle =
+            create_long_event_rectangle(&event, Color::BLACK, &first_date, &arguments);
 
         let expected_x: f32 = arguments.offset_x + arguments.column_width * 1.;
         assert_eq!(rectangle.at.x, expected_x);
@@ -387,7 +387,6 @@ mod tests {
     #[test]
     fn test_top_left_event() {
         let events = Vec::from_iter([EventRange {
-            calendar_color: Color::BLACK,
             start_date: create_date("2025-09-29"),
             start_time: create_time("00:00"),
             end_date: create_date("2025-09-29"),
@@ -414,6 +413,9 @@ mod tests {
             event_ranges: events,
             titles,
             lanes,
+            calendar_colors: Vec::from_iter([Color::BLACK]),
+            description_handles: Vec::from_iter([1]),
+            description_strings: Vec::from_iter([String::from("aorisent")]),
         };
 
         let ret: Rectangles =
@@ -434,9 +436,11 @@ mod tests {
                     ..
                 },
             ),
-            "the actual at {:?}, the actual size {:?}",
-            x.at,
-            x.size,
+            "the actual at (x = {:?}, y = {:?}), the actual size (w = {:?}, h = {:?})",
+            x.at.x,
+            x.at.y,
+            x.size.x,
+            x.size.y,
         );
     }
 }
