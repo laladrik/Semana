@@ -57,8 +57,11 @@ pub struct ObtainArguments<'s> {
 
 #[derive(Default)]
 struct Clash {
+    /// A lane is a set of calendar events staying one behind another.  They may have a gap
+    /// in-between.  The items in the array correspond to the [`lanes`] field.
     lane_ends: Vec<Minutes>,
     lanes: Vec<Lane>,
+    /// The longest lane end
     end: Minutes,
 }
 
