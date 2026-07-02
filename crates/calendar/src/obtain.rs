@@ -57,14 +57,14 @@ pub struct ObtainArguments<'s> {
 
 #[derive(Default)]
 struct Clash {
-    event_ends: Vec<Minutes>,
+    lane_ends: Vec<Minutes>,
     lanes: Vec<Lane>,
     end: Minutes,
 }
 
 impl Clash {
     fn flush(&mut self, into: &mut impl Extend<(Lane, Lane)>, lane_count: Lane) {
-        self.event_ends.clear();
+        self.lane_ends.clear();
         let iter = self.lanes.drain(..).map(|lane| (lane, lane_count));
         into.extend(iter);
         self.end = Minutes::default();
@@ -72,7 +72,11 @@ impl Clash {
 
     fn push(&mut self, event_end: Minutes, lane: Lane) {
         self.end = self.end.max(event_end);
-        self.event_ends.push(event_end);
+        if let Some(lane_end) = self.lane_ends.get_mut(lane as usize) {
+            *lane_end = event_end;
+        } else {
+            self.lane_ends.push(event_end);
+        }
         self.lanes.push(lane);
     }
 }
@@ -83,7 +87,7 @@ type Lane = u8;
 // return (n, Some(x)) -> stays in the lane n
 fn find_free_lane(new_event_begin_minutes: Minutes, clash: &Clash) -> Option<Lane> {
     let lane_index: Option<usize> = clash
-        .event_ends
+        .lane_ends
         .iter()
         .enumerate()
         .filter(|(_, end)| **end <= new_event_begin_minutes)
@@ -308,6 +312,23 @@ fn find_clashes(
     start_date: &Date,
     condition: ClashCondition,
 ) -> Vec<(Lane, Lane)> {
+    '_ensure_events_sorted_by_start_date: {
+        let mut prev: Option<&Event> = None;
+        for event in events {
+            if let Some(prev) = prev {
+                assert!(event.start_date >= prev.start_date);
+                if event.start_date == prev.start_date {
+                    assert!(event.start_time.hour >= prev.start_time.hour);
+                    if event.start_time.hour == prev.start_time.hour {
+                        assert!(event.start_time.minute >= prev.start_time.minute);
+                    }
+                }
+            }
+
+            prev = Some(event);
+        }
+    };
+
     let mut last_clash = Clash::default();
     let mut current_date: &Date = start_date;
     let mut lane_count = 0;
@@ -360,6 +381,46 @@ fn find_clashes(
     }
 
     last_clash.flush(&mut ret, lane_count);
+
+    '_ensure_no_overlapping_events: {
+        let overlap = |left: &Event, right: &Event| {
+            let date_overlap = (&right.start_date..&right.end_date).contains(&&left.start_date);
+            //let same_date = left.start_date == right.start_date;
+            let hour_overlap =
+                (right.start_time.hour..right.end_time.hour).contains(&left.start_time.hour);
+            let minute_overlap =
+                (right.start_time.minute..right.end_time.minute).contains(&left.start_time.minute);
+            date_overlap && hour_overlap && minute_overlap
+        };
+
+        let fmt = |ev: &Event| -> String {
+            alloc::format!(
+                "{:?} {:02}:{:02}-{:02}:{:02} {:?}",
+                ev.start_date,
+                ev.start_time.hour,
+                ev.start_time.minute,
+                ev.end_time.hour,
+                ev.end_time.minute,
+                ev.title
+            )
+        };
+
+        for (i, current) in events.iter().enumerate() {
+            let current_lane = ret[i].0;
+            for (j, other) in events.iter().enumerate().filter(|(j, _)| *j != i) {
+                let other_lane = ret[j].0;
+                if overlap(current, other) && current_lane == other_lane {
+                    panic!(
+                        "unresolved event clash\nlt = {}\nrt = {}",
+                        fmt(current),
+                        fmt(other)
+                    );
+                }
+            }
+        }
+        assert_eq!(ret.len(), events.len());
+    };
+
     ret
 }
 
