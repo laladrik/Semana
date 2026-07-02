@@ -36,14 +36,14 @@ pub struct JsonInputEvent {
 }
 
 pub struct Event {
-    description: u32,
+    pub description: u32,
     // FIXME(alex): store the string in a separated data storage
-    title: String,
-    start_date: date::Date,
-    start_time: date::Time,
-    end_date: date::Date,
-    end_time: date::Time,
-    calendar_color: Color,
+    pub title: String,
+    pub start_date: date::Date,
+    pub start_time: date::Time,
+    pub end_date: date::Date,
+    pub end_time: date::Time,
+    pub calendar_color: Color,
 }
 
 #[derive(Clone, Copy)]

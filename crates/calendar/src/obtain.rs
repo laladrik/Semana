@@ -302,15 +302,23 @@ pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
 
 type ClashCondition = fn(is_new_day: bool, event_end: Minutes, clash_end: Minutes) -> bool;
 
-fn short_event_clash_condition(is_new_day: bool, event_start: Minutes, clash_end: Minutes) -> bool {
+pub fn short_event_clash_condition(
+    is_new_day: bool,
+    event_start: Minutes,
+    clash_end: Minutes,
+) -> bool {
     event_start < clash_end && !is_new_day
 }
 
-fn long_event_clash_condition(_is_new_day: bool, event_start: Minutes, clash_end: Minutes) -> bool {
+pub fn long_event_clash_condition(
+    _is_new_day: bool,
+    event_start: Minutes,
+    clash_end: Minutes,
+) -> bool {
     event_start < clash_end
 }
 
-fn find_clashes(
+pub fn find_clashes(
     events: &[Event],
     start_date: &Date,
     condition: ClashCondition,

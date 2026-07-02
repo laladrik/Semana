@@ -1,0 +1,44 @@
+[package]
+name = "calendar-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1" }
+application = { path = "../crates/application" }
+
+[dependencies.calendar]
+path = "../crates/calendar"
+features = []
+version = "*"
+
+# Use independent workspace for fuzzers
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_time"
+path = "fuzz_targets/fuzz_time.rs"
+test = false
+doc = false
+bench = false
+
+
+[[bin]]
+name = "fuzz_date"
+path = "fuzz_targets/fuzz_date.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_find_clashes"
+path = "fuzz_targets/fuzz_find_clashes.rs"
+test = false
+doc = false
+bench = false

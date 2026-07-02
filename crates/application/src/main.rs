@@ -685,6 +685,7 @@ fn unsafe_main() {
                                         sdl::SDLK_EQUALS => {
                                             events
                                                 .push(state::Action::Zoom(config::GRID_SCALE_STEP));
+                                            // FIXME(alex): remover this
                                             app.calendar.request_render();
                                         }
                                         _ => (),
