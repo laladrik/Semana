@@ -354,7 +354,7 @@ fn find_clashes(
         let start_date_days: Minutes = Minutes(start_day_diff as u16 * MINUTES_PER_DAY);
         let total_event_start: Minutes = event.start_time.total_minutes().add(start_date_days);
         //let event_start: Minutes = event.start_time.total_minutes().add(days);
-        let (rect_lane, new_lane_count, does_replace): (Lane, Lane, bool) = {
+        let (rect_lane, new_lane_count, no_collisions): (Lane, Lane, bool) = {
             let clash: &Clash = &last_clash;
             let is_new_day = &event.start_date != current_date;
             if is_new_day {
@@ -374,7 +374,7 @@ fn find_clashes(
             }
         };
 
-        if does_replace {
+        if no_collisions {
             last_clash.flush(&mut ret, lane_count);
         }
 
