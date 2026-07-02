@@ -141,7 +141,6 @@ impl RenderWeekCaptionsArgs {
 pub struct Rectangle {
     pub at: FPoint,
     pub size: FSize,
-    //pub text: &'s str,
     pub color: Color,
 }
 

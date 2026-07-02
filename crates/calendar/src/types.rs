@@ -1,6 +1,6 @@
 #[cfg(not(feature = "sdl3-geometry"))]
 #[repr(C)]
-pub struct Rest {
+pub struct Rect {
     pub x: i32,
     pub y: i32,
     pub w: i32,
