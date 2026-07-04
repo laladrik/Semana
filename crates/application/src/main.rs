@@ -222,7 +222,7 @@ impl RenderedText {
 struct TextObjectRegistry<'font> {
     font: &'font RefCell<sdlext::Font>,
     text_engine: *mut sdl_ttf::TTF_TextEngine,
-    text_positions: Vec<sdl::SDL_FRect>,
+    text_viewports: Vec<sdl::SDL_FRect>,
     text_objects: Vec<sdlext::Text>,
 }
 
@@ -230,7 +230,7 @@ impl<'font> TextObjectRegistry<'font> {
     fn new(font: &'font RefCell<sdlext::Font>, text_engine: *mut sdl_ttf::TTF_TextEngine) -> Self {
         Self {
             font,
-            text_positions: Vec::new(),
+            text_viewports: Vec::new(),
             text_engine,
             text_objects: Vec::new(),
         }
@@ -244,19 +244,19 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
 
     fn clear(&mut self) {
         self.text_objects.clear();
-        self.text_positions.clear();
+        self.text_viewports.clear();
     }
 
     fn get(&self, index: usize) -> Option<&Self::TextObject> {
         self.text_objects.get(index)
     }
 
-    fn get_positions(&self) -> &[sdl3_sys::SDL_FRect] {
-        self.text_positions.as_slice()
+    fn get_viewports(&self) -> &[sdl3_sys::SDL_FRect] {
+        self.text_viewports.as_slice()
     }
 
-    fn get_positions_mut(&mut self) -> &mut [sdl3_sys::SDL_FRect] {
-        self.text_positions.as_mut_slice()
+    fn get_viewports_mut(&mut self) -> &mut [sdl3_sys::SDL_FRect] {
+        self.text_viewports.as_mut_slice()
     }
 
     fn set_wrap(&mut self, index: u32, width: f32) -> Result<(), Self::Error> {
@@ -285,7 +285,7 @@ impl<'font> state::TextObjectRegistry for TextObjectRegistry<'font> {
         let ret = sdlext::Text::try_new(self.text_engine, &mut self.font.borrow_mut(), &cstring)
             .expect("the text object hasn't been created");
         self.text_objects.push(ret);
-        self.text_positions.push(position);
+        self.text_viewports.push(position);
         Ok(())
     }
 }

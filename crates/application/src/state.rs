@@ -467,7 +467,7 @@ struct EventDetailsView {
     description_textbox: Option<Textbox>,
     event_index: u32,
     event_kind: CalendarEventKind,
-    /// The fields which stretch as the window does.
+    /// The fields which stretch as the window is resized.
     flexible_fields: Box<[u32]>,
     /// The strings which are rendered inside the text fields.
     texts: Box<[Box<str>]>,
@@ -1034,6 +1034,9 @@ impl<F: Frontend> App<F> {
     }
 
     fn create_event_view_render_data<'wdrect, 'frontend>(
+        // FIXME(alex): this is a loose dependency of the function.  It's used only for two things:
+        // 1. To provide the access to event_details_view.
+        // 2. To build the week_view when the Escape key is pressed.
         &'wdrect mut self,
         frontend: &'frontend mut F,
         window_size: Point,
@@ -1045,8 +1048,8 @@ impl<F: Frontend> App<F> {
                 Action::TextScroll { offset, x, y } => {
                     let offset = offset * TEXT_SCROLL_AMPLIFIER;
                     let registry = frontend.get_event_details_text_object_regirsty().borrow();
-                    let positions = registry.get_positions();
-                    if let Some((scrolled_text_index, position)) = positions
+                    let viewports = registry.get_viewports();
+                    if let Some((scrolled_text_index, position)) = viewports
                         .iter()
                         .enumerate()
                         .find(|(_, pos)| pos.covers_point(&FPoint { x, y }))
@@ -1109,7 +1112,7 @@ impl<F: Frontend> App<F> {
                     let Some(view) = self.event_details_view.as_mut() else {
                         continue;
                     };
-                    //if let Some(view) =  {
+
                     // As long as the user hasn't released the mouse button, the highlighting is
                     // on.
                     if let Some(textbox) = view
@@ -1212,9 +1215,9 @@ impl<F: Frontend> App<F> {
                             .map(|view| view.flexible_fields.as_ref());
                         if let Some(flexible_fields) = maybe_flexible_fields {
                             let mut regref = registry.borrow_mut();
-                            let positions: &mut _ = regref.get_positions_mut();
+                            let viewports: &mut _ = regref.get_viewports_mut();
                             for i in flexible_fields.iter() {
-                                positions[*i as usize].w = text_width;
+                                viewports[*i as usize].w = text_width;
                             }
                         }
                     }
@@ -1377,7 +1380,6 @@ impl<F: Frontend> Activities<F> {
         )?;
 
         vertical_offset += one_line_height;
-        // FIXME(alex): a long title is cropped
         event_details_text_object_regirsty.create(
             details.title,
             FRect {
@@ -1904,9 +1906,9 @@ pub trait TextObjectRegistry {
     /// Creates a text object from `text`.  The text object is stored within the registry.
     fn create(&mut self, text: impl Into<Vec<u8>>, position: FRect) -> Result<(), Self::Error>;
 
-    fn get_positions_mut(&mut self) -> &mut [FRect];
+    fn get_viewports_mut(&mut self) -> &mut [FRect];
     // NOT PLANNED
-    fn get_positions(&self) -> &[sdl3_sys::SDL_FRect];
+    fn get_viewports(&self) -> &[sdl3_sys::SDL_FRect];
 
     /// Sets the text wrap length
     fn set_wrap(&mut self, index: u32, width: f32) -> Result<(), Self::Error>;

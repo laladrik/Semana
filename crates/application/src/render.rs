@@ -56,7 +56,7 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
     renderer.clear()?;
     let frontend = data.frontend;
     let regref = frontend.event_details_text_object_regirsty.borrow();
-    let text_object_positions = &regref.text_positions;
+    let text_object_positions = &regref.text_viewports;
 
     '_render_text_fields: {
         renderer.set_render_draw_color(Color::from_rgb(config::TEXT_FIELD_BACKGROUND))?;
