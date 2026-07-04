@@ -15,7 +15,6 @@ pub enum RenderData<'rect, 'frontend, F> {
 
 pub struct EventViewRenderData<'rect, 'frontend, F> {
     pub frontend: &'frontend F,
-    pub textbox: Option<&'rect sdl::SDL_FRect>,
     /// a.k.a. caret.  The bar which is drawn in the text.  It tells you where the typed text would
     /// be inserted.
     pub cursor: Option<&'rect sdl::SDL_FRect>,
@@ -90,11 +89,6 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
                     .map_err(sdlext::Error::TtfError)
             })?
         }
-    }
-
-    if let Some(rect) = data.textbox {
-        renderer.set_render_draw_color(Color::WHITE)?;
-        renderer.render_rect(rect)?;
     }
 
     if let Some(rect) = data.cursor {

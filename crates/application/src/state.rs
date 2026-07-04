@@ -437,8 +437,7 @@ pub struct App<F: Frontend> {
     event_details_view: Option<EventDetailsView>,
 }
 
-struct Textbox {
-    border_rect: FRect,
+struct SelectionHighlight {
     cursor_rect: Option<FRect>,
     /// The following 3 fields allows the text to be selected (highlighted).  The field indicates
     /// that the text is being selected.
@@ -451,10 +450,9 @@ struct Textbox {
     highlight_end: i32,
 }
 
-impl Textbox {
-    fn new(rect: FRect) -> Textbox {
-        Textbox {
-            border_rect: rect,
+impl SelectionHighlight {
+    fn new() -> SelectionHighlight {
+        SelectionHighlight {
             cursor_rect: None,
             is_highlighting: false,
             highlight_start: -1,
@@ -464,7 +462,7 @@ impl Textbox {
 }
 
 struct EventDetailsView {
-    description_textbox: Option<Textbox>,
+    selection_highlight: Option<SelectionHighlight>,
     event_index: u32,
     event_kind: CalendarEventKind,
     /// The fields which stretch as the window is resized.
@@ -895,11 +893,10 @@ impl<F: Frontend> App<F> {
                             offsets: view.offsets.as_ref(),
                             highlight: Vec::new(),
                             frontend: &*frontend,
-                            textbox: view.description_textbox.as_ref().map(|tb| &tb.border_rect),
                             cursor: view
-                                .description_textbox
+                                .selection_highlight
                                 .as_ref()
-                                .and_then(|tb| tb.cursor_rect.as_ref()),
+                                .and_then(|sel| sel.cursor_rect.as_ref()),
                         }),
                     })
                 } else {
@@ -1115,26 +1112,27 @@ impl<F: Frontend> App<F> {
 
                     // As long as the user hasn't released the mouse button, the highlighting is
                     // on.
-                    if let Some(textbox) = view
-                        .description_textbox
+                    if let Some(text_selection) = view
+                        .selection_highlight
                         .as_mut()
                         .filter(|textbox| textbox.is_highlighting)
                     {
-                        assert!(textbox.highlight_start != -1);
-                        let registry = frontend.get_event_details_text_object_regirsty();
-                        if let Some(text_object) = registry.borrow().get(DESCRIPTION_TEXT_INDEX) {
+                        assert!(text_selection.highlight_start != -1);
+                        let registry = frontend.get_event_details_text_object_regirsty().borrow();
+                        let border_rect = registry.get_viewports()[DESCRIPTION_TEXT_INDEX];
+                        if let Some(text_object) = registry.get(DESCRIPTION_TEXT_INDEX) {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
                             let relative_position = FPoint {
-                                x: x - textbox.border_rect.x - view.text_field_padding.x,
-                                y: y - textbox.border_rect.y - view.text_field_padding.y,
+                                x: x - border_rect.x - view.text_field_padding.x,
+                                y: y - border_rect.y - view.text_field_padding.y,
                             };
 
                             if let Ok(offset) =
                                 text_engine.get_offset(text_object, &relative_position)
                             {
-                                textbox.highlight_end = offset;
+                                text_selection.highlight_end = offset;
                             }
                         }
                     }
@@ -1143,7 +1141,7 @@ impl<F: Frontend> App<F> {
                     let maybe_textbox = self
                         .event_details_view
                         .as_mut()
-                        .and_then(|view| view.description_textbox.as_mut());
+                        .and_then(|view| view.selection_highlight.as_mut());
                     if let Some(textbox) = maybe_textbox {
                         textbox.is_highlighting = false;
                     }
@@ -1152,48 +1150,56 @@ impl<F: Frontend> App<F> {
                     position,
                     button: MouseButton::Left,
                 } => {
-                    // reset the the second marker and set the state
-                    let maybe_textbox = self
+                    if let Some(view) = self.event_details_view.as_mut() {
+                        view.selection_highlight = Some(SelectionHighlight::new());
+                    }
+
+                    let text_sel = self
                         .event_details_view
                         .as_mut()
-                        .and_then(|view| view.description_textbox.as_mut());
+                        .and_then(|view| view.selection_highlight.as_mut());
 
-                    if let Some(textbox) = maybe_textbox {
+                    let registry = frontend.get_event_details_text_object_regirsty().borrow();
+                    let border_rect = registry.get_viewports().get(DESCRIPTION_TEXT_INDEX);
+                    if let Some(border_rect) = border_rect
+                        && let Some(text_selection) = text_sel
+                    {
                         let text_engine = frontend.get_text_engine();
-                        let registry = frontend.get_event_details_text_object_regirsty();
-                        if textbox.border_rect.covers_point(&position) {
+                        if border_rect.covers_point(&position) {
                             // FIXME(alex): The index should correspond the picked textbox when
                             // we have a few of them.
-                            if let Some(text_object) = registry.borrow().get(DESCRIPTION_TEXT_INDEX)
-                            {
-                                textbox.is_highlighting = true;
-                                textbox.highlight_end = -1;
+                            if let Some(text_object) = registry.get(DESCRIPTION_TEXT_INDEX) {
+                                text_selection.is_highlighting = true;
+                                text_selection.highlight_end = -1;
                                 // NOTE(alex): this might different if the text has some margin
                                 // around itself.
-                                let textrect = &textbox.border_rect;
                                 let relative_position: FPoint =
-                                    position.sub_fpoint(textrect.x, textrect.y);
+                                    position.sub_fpoint(border_rect.x, border_rect.y);
                                 if let Ok(offset) =
                                     text_engine.get_offset(text_object, &relative_position)
                                 {
-                                    textbox.highlight_start = offset;
+                                    text_selection.highlight_start = offset;
                                 }
                             }
                         }
                     };
                 }
                 Action::Yank => {
-                    let maybe_textbox: Option<&Textbox> = self
+                    let selection_highlight: Option<&SelectionHighlight> = self
                         .event_details_view
                         .as_ref()
-                        .and_then(|view| view.description_textbox.as_ref())
+                        .and_then(|view| view.selection_highlight.as_ref())
                         .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1);
 
-                    if let Some(textbox) = maybe_textbox
+                    if let Some(text_selection) = selection_highlight
                         && let Some(description) = self.get_selected_event_desription()
                     {
-                        let start = textbox.highlight_start.min(textbox.highlight_end);
-                        let end = textbox.highlight_start.max(textbox.highlight_end);
+                        let start = text_selection
+                            .highlight_start
+                            .min(text_selection.highlight_end);
+                        let end = text_selection
+                            .highlight_start
+                            .max(text_selection.highlight_end);
                         // NOTE(alex): end might be wrong. Prevent off by one error.
                         let copied_text: &str = &description[start as usize..end as usize];
                         frontend.set_clipboard(copied_text)?;
@@ -1224,15 +1230,13 @@ impl<F: Frontend> App<F> {
 
                     // The error is raised if the descrption does not exist or if SDL fails to set
                     // the wrapping
-                    let _ = registry
-                        .borrow_mut()
-                        .set_wrap(DESCRIPTION_TEXT_INDEX as u32, text_width);
-                    let maybe_textbox: Option<&mut Textbox> = self
-                        .event_details_view
-                        .as_mut()
-                        .and_then(|view| view.description_textbox.as_mut());
-                    if let Some(textbox) = maybe_textbox {
-                        textbox.border_rect.w = text_width;
+                    let mut registry_ref: core::cell::RefMut<_> = registry.borrow_mut();
+                    let _ = registry_ref.set_wrap(DESCRIPTION_TEXT_INDEX as u32, text_width);
+                    let maybe_viewport = registry_ref
+                        .get_viewports_mut()
+                        .get_mut(DESCRIPTION_TEXT_INDEX);
+                    if let Some(border_rect) = maybe_viewport {
+                        border_rect.w = text_width;
                     }
 
                     // NOT PLANNED
@@ -1252,58 +1256,65 @@ impl<F: Frontend> App<F> {
 
         let render_highlights: Vec<FRect> = {
             let view: &EventDetailsView = &*view_mut;
-            let maybe_textbox: Option<&Textbox> = view.description_textbox.as_ref();
+            let maybe_textbox: Option<&SelectionHighlight> = view.selection_highlight.as_ref();
             maybe_textbox
                 .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1)
-                .and_then(|textbox: &Textbox| {
-                    let registry = frontend.get_event_details_text_object_regirsty();
+                .and_then(|text_selection: &SelectionHighlight| {
+                    let registry = frontend.get_event_details_text_object_regirsty().borrow();
                     let text_engine = frontend.get_text_engine();
-                    registry
-                        .borrow()
-                        .get(DESCRIPTION_TEXT_INDEX)
-                        .and_then(|text_object| {
+                    let border_rect = registry.get_viewports().get(DESCRIPTION_TEXT_INDEX);
+                    let text_object = registry.get(DESCRIPTION_TEXT_INDEX);
+
+                    match (border_rect, text_object) {
+                        (Some(border_rect), Some(text_object)) => {
                             // normalizing for the case when the highlighting starts from right bottom
                             // to left top.
-                            let start = textbox.highlight_start.min(textbox.highlight_end);
-                            let end = textbox.highlight_start.max(textbox.highlight_end);
-                            let len = end - start;
-                            text_engine
-                                .calculate_highlights(text_object, start, len)
-                                .ok()
-                        })
-                        .map(|mut highlights: Vec<FRect>| {
-                            // shift the rectangles of highlighting to the coordinates relative to
-                            // the window.
-                            for item in highlights.iter_mut() {
-                                item.x += textbox.border_rect.x + view.text_field_padding.x;
-                                item.y += textbox.border_rect.y + view.text_field_padding.y;
+                            let mut highlights: Option<Vec<FRect>> = {
+                                let start = text_selection
+                                    .highlight_start
+                                    .min(text_selection.highlight_end);
+                                let end = text_selection
+                                    .highlight_start
+                                    .max(text_selection.highlight_end);
+                                let len = end - start;
+                                text_engine
+                                    .calculate_highlights(text_object, start, len)
+                                    .ok()
+                            };
+
+                            if let Some(highlights) = highlights.as_mut() {
+                                for item in highlights.iter_mut() {
+                                    item.x += border_rect.x + view.text_field_padding.x;
+                                    item.y += border_rect.y + view.text_field_padding.y;
+                                }
                             }
                             highlights
-                        })
+                        }
+                        _ => None,
+                    }
                 })
                 .unwrap_or_default()
         };
 
-        if let Some(textbox) = view_mut.description_textbox.as_mut() {
+        if let Some(textbox) = view_mut.selection_highlight.as_mut() {
             let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
                 (-1, -1) => None,
                 (x, -1) => Some(x),
                 (_x, y) => Some(y),
             };
 
-            if let Some(cursor) = cursor {
+            let registry = frontend.get_event_details_text_object_regirsty().borrow();
+            if let Some(cursor) = cursor
+                && let Some(border_rect) = registry.get_viewports().get(DESCRIPTION_TEXT_INDEX)
+            {
                 let text_engine = frontend.get_text_engine();
-                let registry = frontend.get_event_details_text_object_regirsty();
-                let rect = registry
-                    .borrow()
-                    .get(DESCRIPTION_TEXT_INDEX)
-                    .and_then(|descrption| {
-                        text_engine.calculate_highlights(descrption, cursor, 1).ok()
-                    });
+                let rect = registry.get(DESCRIPTION_TEXT_INDEX).and_then(|descrption| {
+                    text_engine.calculate_highlights(descrption, cursor, 1).ok()
+                });
 
                 if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
                     cursor_rect = cursor_rect
-                        .move_frect(textbox.border_rect.x, textbox.border_rect.y)
+                        .move_frect(border_rect.x, border_rect.y)
                         .move_frect(view_mut.text_field_padding.x, view_mut.text_field_padding.y);
                     textbox.cursor_rect = Some(cursor_rect)
                 }
@@ -1320,11 +1331,10 @@ impl<F: Frontend> App<F> {
                     offsets: view.offsets.as_ref(),
                     frontend,
                     highlight: render_highlights,
-                    textbox: view.description_textbox.as_ref().map(|tb| &tb.border_rect),
                     cursor: view
-                        .description_textbox
+                        .selection_highlight
                         .as_ref()
-                        .and_then(|tb| tb.cursor_rect.as_ref()),
+                        .and_then(|sel| sel.cursor_rect.as_ref()),
                 }),
             }
         })
@@ -1452,42 +1462,37 @@ impl<F: Frontend> Activities<F> {
 
         field_counter += 1;
 
-        let description_textbox: Option<Textbox> = if !details.description.is_empty() {
-            vertical_offset += 2f32 * one_line_height;
-            event_details_field_label_regirsty.create(
-                captions::event_details_view::DESCRIPTION,
-                label_color,
-                FRect {
-                    x: 100.0,
-                    y: vertical_offset,
-                    w: window_size.x as f32 - 200.0,
-                    h: one_line_height,
-                },
-            )?;
-
-            vertical_offset += one_line_height;
-            // FIXME(alex): a long description is cropped
-            let border_rect = FRect {
-                x: 150.0,
+        vertical_offset += 2f32 * one_line_height;
+        event_details_field_label_regirsty.create(
+            captions::event_details_view::DESCRIPTION,
+            label_color,
+            FRect {
+                x: 100.0,
                 y: vertical_offset,
                 w: window_size.x as f32 - 200.0,
-                h: window_size.y as f32 - vertical_offset,
-            };
-            event_details_text_object_regirsty.create(details.description, border_rect)?;
-            event_details_text_object_regirsty
-                .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
-            texts.push(Box::from(details.description));
+                h: one_line_height,
+            },
+        )?;
 
-            push_flexible_field(field_counter);
-            field_counter += 1;
-            Some(Textbox::new(border_rect))
-        } else {
-            None
+        vertical_offset += one_line_height;
+        // FIXME(alex): a long description is cropped
+        let border_rect = FRect {
+            x: 150.0,
+            y: vertical_offset,
+            w: window_size.x as f32 - 200.0,
+            h: window_size.y as f32 - vertical_offset,
         };
+        event_details_text_object_regirsty.create(details.description, border_rect)?;
+        event_details_text_object_regirsty
+            .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
+        texts.push(Box::from(details.description));
+
+        push_flexible_field(field_counter);
+        field_counter += 1;
 
         Ok(EventDetailsView {
             text_field_padding: EVENT_DETAILS_VIEW_PADDING,
-            description_textbox,
+            selection_highlight: None,
             event_index: details.index,
             event_kind: details.event_kind,
             flexible_fields: Box::from(&flexible_fields[..flexible_fields_cursor]),
