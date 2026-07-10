@@ -13,14 +13,19 @@ pub enum RenderData<'rect, 'frontend, F> {
     EventView(EventViewRenderData<'rect, 'frontend, F>),
 }
 
-pub struct EventViewRenderData<'rect, 'frontend, F> {
-    pub frontend: &'frontend F,
+pub struct TextSelection<'rect> {
     /// a.k.a. caret.  The bar which is drawn in the text.  It tells you where the typed text would
     /// be inserted.
-    pub cursor: Option<&'rect sdl::SDL_FRect>,
+    pub cursor: &'rect sdl::SDL_FRect,
     /// a.k.a. selection. The rectangles which allow you to tell you the selected text.
     pub highlight: Vec<sdl::SDL_FRect>,
     /// The offsets of the text objects rendered inside the fields
+    pub text_field: u32,
+}
+
+pub struct EventViewRenderData<'rect, 'frontend, F> {
+    pub frontend: &'frontend F,
+    pub text_selection: Option<TextSelection<'rect>>,
     pub offsets: &'rect [f32],
     pub text_field_padding: sdl::SDL_FPoint,
 }
@@ -69,11 +74,20 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
         .borrow()
         .render()?;
 
-    '_render_selection_highlighting: {
-        let highlight_color = Color::from_rgb(config::COLOR_TEXT_HIGHLIGHT);
-        renderer.set_render_draw_color(highlight_color)?;
-        for item in &data.highlight {
-            renderer.render_fill_rect(item)?;
+    '_render_selection_highlighting_within_fields: {
+        // render the cursor and the text selection inside the viewport of the active text field.
+        if let Some(text_selection) = data.text_selection.as_ref() {
+            let viewport = text_object_positions[text_selection.text_field as usize].as_rect();
+            set_render_viewport_context(renderer, &viewport, || {
+                let highlight_color = Color::from_rgb(config::COLOR_TEXT_HIGHLIGHT);
+                renderer.set_render_draw_color(highlight_color)?;
+                for item in &text_selection.highlight {
+                    renderer.render_fill_rect(item)?;
+                }
+
+                renderer.set_render_draw_color(Color::WHITE)?;
+                renderer.render_rect(text_selection.cursor)
+            })?;
         }
     }
 
@@ -91,10 +105,6 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
         }
     }
 
-    if let Some(rect) = data.cursor {
-        renderer.set_render_draw_color(Color::WHITE)?;
-        renderer.render_rect(rect)?;
-    }
     renderer.present()
 }
 

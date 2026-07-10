@@ -1,3 +1,4 @@
+use crate::render::TextSelection;
 use crate::render::{EventViewRenderData, RenderData, WeekViewRenderData};
 use core::cell::RefCell;
 
@@ -438,7 +439,7 @@ pub struct App<F: Frontend> {
 }
 
 struct SelectionHighlight {
-    cursor_rect: Option<FRect>,
+    cursor_rect: FRect,
     /// The following 3 fields allows the text to be selected (highlighted).  The field indicates
     /// that the text is being selected.
     ///
@@ -448,15 +449,22 @@ struct SelectionHighlight {
     is_highlighting: bool,
     highlight_start: i32,
     highlight_end: i32,
+    selected_text_field: i32,
 }
 
 impl SelectionHighlight {
     fn new() -> SelectionHighlight {
         SelectionHighlight {
-            cursor_rect: None,
+            cursor_rect: FRect {
+                x: 0.,
+                y: 0.,
+                w: 0.,
+                h: 0.,
+            },
             is_highlighting: false,
             highlight_start: -1,
             highlight_end: -1,
+            selected_text_field: -1,
         }
     }
 }
@@ -891,12 +899,14 @@ impl<F: Frontend> App<F> {
                         render_data: RenderData::EventView(EventViewRenderData {
                             text_field_padding: view.text_field_padding,
                             offsets: view.offsets.as_ref(),
-                            highlight: Vec::new(),
+                            text_selection: view.selection_highlight.as_ref().map(
+                                |sel: &SelectionHighlight| TextSelection {
+                                    highlight: Vec::new(),
+                                    cursor: &sel.cursor_rect,
+                                    text_field: sel.selected_text_field as u32,
+                                },
+                            ),
                             frontend: &*frontend,
-                            cursor: view
-                                .selection_highlight
-                                .as_ref()
-                                .and_then(|sel| sel.cursor_rect.as_ref()),
                         }),
                     })
                 } else {
@@ -1119,8 +1129,9 @@ impl<F: Frontend> App<F> {
                     {
                         assert!(text_selection.highlight_start != -1);
                         let registry = frontend.get_event_details_text_object_regirsty().borrow();
-                        let border_rect = registry.get_viewports()[DESCRIPTION_TEXT_INDEX];
-                        if let Some(text_object) = registry.get(DESCRIPTION_TEXT_INDEX) {
+                        let selected_text_field_index = text_selection.selected_text_field as usize;
+                        let border_rect = registry.get_viewports()[selected_text_field_index];
+                        if let Some(text_object) = registry.get(selected_text_field_index) {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
@@ -1147,42 +1158,66 @@ impl<F: Frontend> App<F> {
                     }
                 }
                 Action::MouseButtonDown {
-                    position,
+                    position: click_position,
                     button: MouseButton::Left,
                 } => {
-                    if let Some(view) = self.event_details_view.as_mut() {
-                        view.selection_highlight = Some(SelectionHighlight::new());
-                    }
-
-                    let text_sel = self
-                        .event_details_view
-                        .as_mut()
-                        .and_then(|view| view.selection_highlight.as_mut());
-
                     let registry = frontend.get_event_details_text_object_regirsty().borrow();
-                    let border_rect = registry.get_viewports().get(DESCRIPTION_TEXT_INDEX);
-                    if let Some(border_rect) = border_rect
-                        && let Some(text_selection) = text_sel
+                    let maybe_index_and_viewport = registry
+                        .get_viewports()
+                        .iter()
+                        .enumerate()
+                        .find(|(_, vp)| vp.covers_point(&click_position));
+                    // Set the cursor position relative to the text in the clicked text field. If
+                    // the mouse click didn't hit any of the text fields, the cursor is not set.
+                    // The cursor position is the index of the letter.  The actual coordinates for
+                    // rendering are computed based on that index.
+                    //
+                    // The text selection effectively does not exist yet.  At this point only the
+                    // cursor is set.  However, the cursor is the part of the selection which will
+                    // appear if the user moves the mouse.  See the handling of Action::MouseMove.
+                    //
+                    let maybe_selection: Option<SelectionHighlight> = match maybe_index_and_viewport
                     {
-                        let text_engine = frontend.get_text_engine();
-                        if border_rect.covers_point(&position) {
-                            // FIXME(alex): The index should correspond the picked textbox when
-                            // we have a few of them.
-                            if let Some(text_object) = registry.get(DESCRIPTION_TEXT_INDEX) {
-                                text_selection.is_highlighting = true;
-                                text_selection.highlight_end = -1;
-                                // NOTE(alex): this might different if the text has some margin
-                                // around itself.
-                                let relative_position: FPoint =
-                                    position.sub_fpoint(border_rect.x, border_rect.y);
-                                if let Ok(offset) =
-                                    text_engine.get_offset(text_object, &relative_position)
-                                {
-                                    text_selection.highlight_start = offset;
-                                }
+                        None => None,
+                        Some((field_position, text_field_viewport)) => {
+                            let mut text_selection = SelectionHighlight::new();
+                            let text_object = registry
+                                .get(field_position)
+                                .expect("the text object must exist because its viewport exists");
+                            text_selection.is_highlighting = true;
+                            text_selection.selected_text_field = field_position as i32;
+                            text_selection.highlight_end = -1;
+                            let view = self.event_details_view.as_ref().expect(
+                                "the view must exist if because its input event is being handled",
+                            );
+
+                            let scroll_offset: f32 =
+                                view.offsets.get(field_position).cloned().unwrap_or(0f32);
+                            // Translate the absolute coordinates of the mouse click the
+                            // coordinates relative to the text object.
+                            let text_relative_position: FPoint = click_position
+                                .sub_fpoint(text_field_viewport.x, text_field_viewport.y)
+                                .sub_fpoint(view.text_field_padding.x, view.text_field_padding.y)
+                                .sub_fpoint(scroll_offset, 0f32);
+
+                            // NOTE(alex):
+                            // text_relative_position.x or text_relative_position.y can be
+                            // _negative_ if the mouse click hits the room between the border of
+                            // the text field and the text itself.
+                            let text_engine = frontend.get_text_engine();
+                            if let Ok(offset) =
+                                text_engine.get_offset(text_object, &text_relative_position)
+                            {
+                                text_selection.highlight_start = offset;
                             }
+                            Some(text_selection)
                         }
                     };
+
+                    if let Some(view) = self.event_details_view.as_mut() {
+                        // maybe_selection being None means that the user has reset the selection.
+                        view.selection_highlight = maybe_selection;
+                    }
                 }
                 Action::Yank => {
                     let selection_highlight: Option<&SelectionHighlight> = self
@@ -1239,7 +1274,6 @@ impl<F: Frontend> App<F> {
                         border_rect.w = text_width;
                     }
 
-                    // NOT PLANNED
                     if let Some(offsets) =
                         self.event_details_view.as_mut().map(|v| v.offsets.as_mut())
                     {
@@ -1254,28 +1288,34 @@ impl<F: Frontend> App<F> {
             unreachable!("the Event Details View must be ready")
         };
 
+        // Compute the rectangles for the text selection highlighting.
         let render_highlights: Vec<FRect> = {
             let view: &EventDetailsView = &*view_mut;
-            let maybe_textbox: Option<&SelectionHighlight> = view.selection_highlight.as_ref();
-            maybe_textbox
+            let text_selection_highlight: Option<&SelectionHighlight> =
+                view.selection_highlight.as_ref();
+            text_selection_highlight
                 .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1)
                 .and_then(|text_selection: &SelectionHighlight| {
                     let registry = frontend.get_event_details_text_object_regirsty().borrow();
                     let text_engine = frontend.get_text_engine();
-                    let border_rect = registry.get_viewports().get(DESCRIPTION_TEXT_INDEX);
-                    let text_object = registry.get(DESCRIPTION_TEXT_INDEX);
+                    let selected_text_field_index = text_selection.selected_text_field as usize;
+                    let text_object = registry.get(selected_text_field_index);
 
-                    match (border_rect, text_object) {
-                        (Some(border_rect), Some(text_object)) => {
-                            // normalizing for the case when the highlighting starts from right bottom
-                            // to left top.
+                    match text_object {
+                        Some(text_object) => {
                             let mut highlights: Option<Vec<FRect>> = {
-                                let start = text_selection
-                                    .highlight_start
-                                    .min(text_selection.highlight_end);
-                                let end = text_selection
-                                    .highlight_start
-                                    .max(text_selection.highlight_end);
+                                // normalizing for the case when the highlighting starts from right bottom
+                                // to left top.
+                                let (start, end) = {
+                                    let start = text_selection
+                                        .highlight_start
+                                        .min(text_selection.highlight_end);
+                                    let end = text_selection
+                                        .highlight_start
+                                        .max(text_selection.highlight_end);
+                                    (start, end)
+                                };
+
                                 let len = end - start;
                                 text_engine
                                     .calculate_highlights(text_object, start, len)
@@ -1284,8 +1324,8 @@ impl<F: Frontend> App<F> {
 
                             if let Some(highlights) = highlights.as_mut() {
                                 for item in highlights.iter_mut() {
-                                    item.x += border_rect.x + view.text_field_padding.x;
-                                    item.y += border_rect.y + view.text_field_padding.y;
+                                    item.x += view.text_field_padding.x;
+                                    item.y += view.text_field_padding.y;
                                 }
                             }
                             highlights
@@ -1296,33 +1336,40 @@ impl<F: Frontend> App<F> {
                 .unwrap_or_default()
         };
 
-        if let Some(textbox) = view_mut.selection_highlight.as_mut() {
-            let cursor: Option<i32> = match (textbox.highlight_start, textbox.highlight_end) {
-                (-1, -1) => None,
-                (x, -1) => Some(x),
-                (_x, y) => Some(y),
-            };
+        // Compute the data to render the cursor position within the text fields.
+        if let Some(text_selection) = view_mut.selection_highlight.as_mut() {
+            let cursor: Option<i32> =
+                match (text_selection.highlight_start, text_selection.highlight_end) {
+                    (-1, -1) => None,
+                    (x, -1) => Some(x),
+                    (_x, y) => Some(y),
+                };
 
             let registry = frontend.get_event_details_text_object_regirsty().borrow();
-            if let Some(cursor) = cursor
-                && let Some(border_rect) = registry.get_viewports().get(DESCRIPTION_TEXT_INDEX)
-            {
+            let selected_text_field_index = text_selection.selected_text_field as usize;
+            if let Some(cursor) = cursor {
                 let text_engine = frontend.get_text_engine();
-                let rect = registry.get(DESCRIPTION_TEXT_INDEX).and_then(|descrption| {
-                    text_engine.calculate_highlights(descrption, cursor, 1).ok()
-                });
+                let selections_highlights =
+                    registry
+                        .get(selected_text_field_index)
+                        .and_then(|descrption| {
+                            text_engine.calculate_highlights(descrption, cursor, 1).ok()
+                        });
 
-                if let Some(mut cursor_rect) = rect.and_then(|r| r.into_iter().next()) {
+                if let Some(mut cursor_rect) =
+                    selections_highlights.and_then(|r| r.into_iter().next())
+                {
+                    // Adjust the position where the cursor is rendered.
                     cursor_rect = cursor_rect
-                        .move_frect(border_rect.x, border_rect.y)
-                        .move_frect(view_mut.text_field_padding.x, view_mut.text_field_padding.y);
-                    textbox.cursor_rect = Some(cursor_rect)
+                        .move_frect(view_mut.text_field_padding.x, view_mut.text_field_padding.y)
+                        .move_frect(view_mut.offsets[selected_text_field_index], 0f32);
+                    text_selection.cursor_rect = cursor_rect;
                 }
             }
         }
 
         Ok({
-            // The view is immutable later.
+            // The view is immutable later on.
             let view: &EventDetailsView = &*view_mut;
             NewState {
                 activity: Activity::EventView,
@@ -1330,11 +1377,16 @@ impl<F: Frontend> App<F> {
                     text_field_padding: view.text_field_padding,
                     offsets: view.offsets.as_ref(),
                     frontend,
-                    highlight: render_highlights,
-                    cursor: view
-                        .selection_highlight
-                        .as_ref()
-                        .and_then(|sel| sel.cursor_rect.as_ref()),
+                    text_selection: view.selection_highlight.as_ref().map(
+                        |sel: &SelectionHighlight| {
+                            assert!(sel.selected_text_field > -1);
+                            TextSelection {
+                                highlight: render_highlights,
+                                cursor: &sel.cursor_rect,
+                                text_field: sel.selected_text_field as u32,
+                            }
+                        },
+                    ),
                 }),
             }
         })
