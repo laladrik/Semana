@@ -1224,14 +1224,20 @@ impl<F: Frontend> App<F> {
                     }
                 }
                 Action::Yank => {
-                    let selection_highlight: Option<&SelectionHighlight> = self
-                        .event_details_view
-                        .as_ref()
-                        .and_then(|view| view.selection_highlight.as_ref())
-                        .filter(|tb| tb.highlight_start != -1 && tb.highlight_end != -1);
+                    let Some(view) = self.event_details_view.as_ref() else {
+                        continue;
+                    };
+
+                    let selection_highlight: Option<&SelectionHighlight> =
+                        view.selection_highlight.as_ref().filter(|sel| {
+                            sel.highlight_start != -1
+                                && sel.highlight_end != -1
+                                && sel.selected_text_field != -1
+                        });
 
                     if let Some(text_selection) = selection_highlight
-                        && let Some(description) = self.get_selected_event_desription()
+                        && let Some(text_field_content) =
+                            view.texts.get(text_selection.selected_text_field as usize)
                     {
                         let start = text_selection
                             .highlight_start
@@ -1240,7 +1246,7 @@ impl<F: Frontend> App<F> {
                             .highlight_start
                             .max(text_selection.highlight_end);
                         // NOTE(alex): end might be wrong. Prevent off by one error.
-                        let copied_text: &str = &description[start as usize..end as usize];
+                        let copied_text: &str = &text_field_content[start as usize..end as usize];
                         frontend.set_clipboard(copied_text)?;
                     }
                 }
