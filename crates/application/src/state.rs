@@ -1128,6 +1128,7 @@ impl<F: Frontend> App<F> {
                         .filter(|textbox| textbox.is_highlighting)
                     {
                         assert!(text_selection.highlight_start != -1);
+                        assert!(text_selection.selected_text_field != -1);
                         let registry = frontend.get_event_details_text_object_regirsty().borrow();
                         let selected_text_field_index = text_selection.selected_text_field as usize;
                         let border_rect = registry.get_viewports()[selected_text_field_index];
@@ -1135,8 +1136,12 @@ impl<F: Frontend> App<F> {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
+                            let offset = view.offsets[selected_text_field_index];
+                            // FIXME(alex): the _offset_ is only for the horizontal scrolling.
+                            // This does not work for the description field which will be scrolled
+                            // vertically.
                             let relative_position = FPoint {
-                                x: x - border_rect.x - view.text_field_padding.x,
+                                x: x - offset - border_rect.x - view.text_field_padding.x,
                                 y: y - border_rect.y - view.text_field_padding.y,
                             };
 
@@ -1186,7 +1191,6 @@ impl<F: Frontend> App<F> {
                                 .expect("the text object must exist because its viewport exists");
                             text_selection.is_highlighting = true;
                             text_selection.selected_text_field = field_position as i32;
-                            text_selection.highlight_end = -1;
                             let view = self.event_details_view.as_ref().expect(
                                 "the view must exist if because its input event is being handled",
                             );
@@ -1300,6 +1304,7 @@ impl<F: Frontend> App<F> {
                     let text_engine = frontend.get_text_engine();
                     let selected_text_field_index = text_selection.selected_text_field as usize;
                     let text_object = registry.get(selected_text_field_index);
+                    let offset = view.offsets[selected_text_field_index];
 
                     match text_object {
                         Some(text_object) => {
@@ -1323,8 +1328,11 @@ impl<F: Frontend> App<F> {
                             };
 
                             if let Some(highlights) = highlights.as_mut() {
+                                // FIXME(alex): the _offset_ is only for the horizontal scrolling.
+                                // This does not work for the description field which will be scrolled
+                                // vertically.
                                 for item in highlights.iter_mut() {
-                                    item.x += view.text_field_padding.x;
+                                    item.x += view.text_field_padding.x + offset;
                                     item.y += view.text_field_padding.y;
                                 }
                             }
