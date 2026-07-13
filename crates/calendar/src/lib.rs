@@ -99,6 +99,7 @@ pub struct EventRange {
     pub end_time: date::Time,
 }
 
+#[derive(Default)]
 pub struct EventTable {
     pub calendar_colors: Vec<Color>,
     pub event_ranges: Vec<EventRange>,

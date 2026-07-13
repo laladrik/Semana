@@ -25,19 +25,6 @@ impl JsonParser for NanoSerde {
     }
 }
 
-pub struct Event {
-    description: u32,
-    // FIXME(alex): store the string in a separated data storage
-    title: String,
-    start_date: Date,
-    start_time: Time,
-    end_date: Date,
-    end_time: Time,
-    calendar_color: Color,
-}
-
-pub type EventVec = Vec<Event>;
-
 #[derive(Debug)]
 pub enum Error<PE> {
     InvalidUnicode(core::str::Utf8Error),
@@ -143,17 +130,12 @@ pub fn parse_events<OutputParser>(
     bytes: &str,
     start_date: &Date,
     default_calendar_color: Color,
-) -> Result<Events, Error<OutputParser::Error>>
+) -> Result<WeekScheduleWithLanes, Error<OutputParser::Error>>
 where
     OutputParser: JsonParser,
 {
-    let mut week_schedule = Events {
-        short: Vec::new(),
-        long: Vec::new(),
-        long_event_descriptions: Vec::new(),
-        short_event_descriptions: Vec::new(),
-    };
-
+    let mut long_event_table = EventTable::default();
+    let mut short_event_table = EventTable::default();
     let date_stream = DateStream::new(start_date.clone()).take(7);
 
     let agendas = bytes
@@ -175,33 +157,33 @@ where
             // The end date of event is shortened down to the last day of the week for the case
             // when a long event DOES NOT end by the end of the current week.
             json_event.end_date = json_event.end_date.min(last_day_in_the_range.clone());
-
-            let description = core::mem::take(&mut json_event.description);
-            let description_handle: u32 = if is_short {
-                add_description(description, &mut week_schedule.short_event_descriptions)
+            let table_ref: &mut EventTable = if is_short {
+                &mut short_event_table
             } else {
-                add_description(description, &mut week_schedule.long_event_descriptions)
+                &mut long_event_table
             };
 
-            let event = Event {
-                description: description_handle,
-                title: json_event.title,
+            let description = core::mem::take(&mut json_event.description);
+            let description_handle: u32 =
+                add_description(description, &mut table_ref.description_strings);
+            table_ref.description_handles.push(description_handle);
+            table_ref.titles.push(json_event.title);
+            table_ref.event_ranges.push(EventRange {
                 start_date: json_event.start_date,
                 start_time: json_event.start_time,
                 end_date: json_event.end_date,
                 end_time: json_event.end_time,
-                calendar_color: json_event.calendar_color.unwrap_or(default_calendar_color),
-            };
+            });
 
-            if is_short {
-                week_schedule.short.push(event)
-            } else {
-                week_schedule.long.push(event)
-            }
+            let calendar_color = json_event.calendar_color.unwrap_or(default_calendar_color);
+            table_ref.calendar_colors.push(calendar_color);
         }
     }
 
-    Ok(week_schedule)
+    Ok(WeekScheduleWithLanes {
+        long: long_event_table,
+        short: short_event_table,
+    })
 }
 
 impl EventTable {
@@ -212,15 +194,6 @@ impl EventTable {
             .max()
             .unwrap_or(0)
     }
-}
-
-pub struct Events {
-    /// The array of events which span across multiple days.
-    long: EventVec,
-    /// The array of events which are within a day.
-    short: EventVec,
-    long_event_descriptions: Vec<String>,
-    short_event_descriptions: Vec<String>,
 }
 
 pub struct WeekScheduleWithLanes {
@@ -238,77 +211,24 @@ impl WeekScheduleWithLanes {
     }
 }
 
-pub fn get_lanes(events: Events, start_date: &Date) -> WeekScheduleWithLanes {
-    let long_lanes: Vec<(Lane, Lane)> =
-        find_clashes(&events.long, start_date, long_event_clash_condition);
+pub fn get_lanes(mut events: WeekScheduleWithLanes, start_date: &Date) -> WeekScheduleWithLanes {
+    let long_lanes: Vec<(Lane, Lane)> = find_clashes(
+        &events.long.event_ranges,
+        &events.long.titles,
+        start_date,
+        long_event_clash_condition,
+    );
 
-    let short_lanes: Vec<(Lane, Lane)> =
-        find_clashes(&events.short, start_date, short_event_clash_condition);
+    let short_lanes: Vec<(Lane, Lane)> = find_clashes(
+        &events.short.event_ranges,
+        &events.short.titles,
+        start_date,
+        short_event_clash_condition,
+    );
 
-    let create = |event: Event| -> (EventRange, String, u32, Color) {
-        let Event {
-            description,
-            title,
-            start_date,
-            start_time,
-            end_date,
-            end_time,
-            calendar_color,
-        } = event;
-        let range = EventRange {
-            start_date,
-            start_time,
-            end_date,
-            end_time,
-        };
-        (range, title, description, calendar_color)
-    };
-
-    let n = events.long.len();
-    let mut long_event_ranges: Vec<EventRange> = Vec::with_capacity(n);
-    let mut long_event_titles: Vec<String> = Vec::with_capacity(n);
-    let mut long_descriptions: Vec<u32> = Vec::with_capacity(n);
-    let mut long_calendar_colors: Vec<Color> = Vec::with_capacity(n);
-    for long_event in events.long.into_iter() {
-        let (range, title, description, calendar_color) = create(long_event);
-        long_event_ranges.push(range);
-        long_event_titles.push(title);
-        long_descriptions.push(description);
-        long_calendar_colors.push(calendar_color);
-    }
-
-    let n = events.short.len();
-    let mut short_event_ranges: Vec<EventRange> = Vec::with_capacity(n);
-    let mut short_event_titles: Vec<String> = Vec::with_capacity(n);
-    let mut short_descriptions: Vec<u32> = Vec::with_capacity(n);
-    let mut short_calendar_colors: Vec<Color> = Vec::with_capacity(n);
-    for short_event in events.short.into_iter() {
-        let (range, title, description, calendar_color) = create(short_event);
-        short_event_ranges.push(range);
-        short_event_titles.push(title);
-        short_descriptions.push(description);
-        short_calendar_colors.push(calendar_color);
-    }
-
-    WeekScheduleWithLanes {
-        long: EventTable {
-            event_ranges: long_event_ranges,
-            titles: long_event_titles,
-            lanes: long_lanes,
-            description_handles: long_descriptions,
-            description_strings: events.long_event_descriptions,
-            calendar_colors: long_calendar_colors,
-        },
-
-        short: EventTable {
-            event_ranges: short_event_ranges,
-            titles: short_event_titles,
-            lanes: short_lanes,
-            description_handles: short_descriptions,
-            description_strings: events.short_event_descriptions,
-            calendar_colors: short_calendar_colors,
-        },
-    }
+    events.long.lanes = long_lanes;
+    events.short.lanes = short_lanes;
+    events
 }
 
 type ClashCondition = fn(is_new_day: bool, event_end: Minutes, clash_end: Minutes) -> bool;
@@ -322,7 +242,8 @@ fn long_event_clash_condition(_is_new_day: bool, event_start: Minutes, clash_end
 }
 
 fn find_clashes(
-    events: &[Event],
+    events: &[EventRange],
+    titles: &[impl AsRef<str>],
     start_date: &Date,
     condition: ClashCondition,
 ) -> Vec<(Lane, Lane)> {
@@ -396,7 +317,7 @@ fn find_clashes(
     last_clash.flush(&mut ret, lane_count);
 
     '_ensure_no_overlapping_events: {
-        let overlap = |left: &Event, right: &Event| {
+        let overlap = |left: &EventRange, right: &EventRange| {
             let date_overlap = (&right.start_date..&right.end_date).contains(&&left.start_date);
             //let same_date = left.start_date == right.start_date;
             let hour_overlap =
@@ -406,7 +327,7 @@ fn find_clashes(
             date_overlap && hour_overlap && minute_overlap
         };
 
-        let fmt = |ev: &Event| -> String {
+        let fmt = |ev: &EventRange, title: &str| -> String {
             alloc::format!(
                 "{:?} {:02}:{:02}-{:02}:{:02} {:?}",
                 ev.start_date,
@@ -414,7 +335,7 @@ fn find_clashes(
                 ev.start_time.minute,
                 ev.end_time.hour,
                 ev.end_time.minute,
-                ev.title
+                title,
             )
         };
 
@@ -425,8 +346,8 @@ fn find_clashes(
                 if overlap(current, other) && current_lane == other_lane {
                     panic!(
                         "unresolved event clash\nlt = {}\nrt = {}",
-                        fmt(current),
-                        fmt(other)
+                        fmt(current, titles[i].as_ref()),
+                        fmt(other, titles[j].as_ref())
                     );
                 }
             }
@@ -563,7 +484,6 @@ pub struct WeekData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::borrow::ToOwned;
     use core::str::FromStr;
     #[track_caller]
     fn create_date(s: &str) -> Date {
@@ -583,25 +503,24 @@ mod tests {
 
     #[test]
     fn test_short_event_clash() {
-        let create_event = |title: &str, start_time: &str, end_time: &str| Event {
-            description: 0,
-            calendar_color: crate::Color::BLACK,
-            title: title.to_owned(),
+        let create_event = |start_time: &str, end_time: &str| EventRange {
             start_date: create_date("2025-11-03"),
             start_time: create_time(start_time),
             end_date: create_date("2025-11-03"),
             end_time: create_time(end_time),
         };
 
-        let events: Vec<Event> = Vec::from_iter([
-            create_event("first", "10:00", "11:00"),
-            create_event("second", "10:30", "11:30"),
-            create_event("third", "11:00", "12:00"),
-            create_event("separated", "12:00", "13:00"),
+        let events: Vec<EventRange> = Vec::from_iter([
+            create_event("10:00", "11:00"),
+            create_event("10:30", "11:30"),
+            create_event("11:00", "12:00"),
+            create_event("12:00", "13:00"),
         ]);
 
+        let titles: Vec<&str> = Vec::from_iter(["first", "second", "third", "separated"]);
+
         let start = create_date("2025-11-03");
-        let lanes = find_clashes(&events, &start, short_event_clash_condition);
+        let lanes = find_clashes(&events, &titles, &start, short_event_clash_condition);
         let [
             first_event_lane,
             second_event_lane,
