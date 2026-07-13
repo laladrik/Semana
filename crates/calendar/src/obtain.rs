@@ -3,7 +3,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::date::{Date, DateStream, MINUTES_PER_DAY, Minutes, Time};
-use super::{Event, EventTable, JsonInputEvent};
+use super::{EventTable, JsonInputEvent};
 pub trait JsonParser {
     type Error;
 
@@ -23,6 +23,17 @@ impl JsonParser for NanoSerde {
     ) -> Result<Vec<JsonInputEvent>, Self::Error> {
         nanoserde::DeJson::deserialize_json(bytes)
     }
+}
+
+pub struct Event {
+    description: u32,
+    // FIXME(alex): store the string in a separated data storage
+    title: String,
+    start_date: Date,
+    start_time: Time,
+    end_date: Date,
+    end_time: Time,
+    calendar_color: Color,
 }
 
 pub type EventVec = Vec<Event>;
@@ -130,7 +141,7 @@ fn add_description(item: String, storage: &mut Vec<String>) -> u32 {
 pub fn parse_events<OutputParser>(
     json_parser: &OutputParser,
     bytes: &str,
-    date: &Date,
+    start_date: &Date,
     default_calendar_color: Color,
 ) -> Result<Events, Error<OutputParser::Error>>
 where
@@ -143,7 +154,7 @@ where
         short_event_descriptions: Vec::new(),
     };
 
-    let date_stream = DateStream::new(date.clone()).take(7);
+    let date_stream = DateStream::new(start_date.clone()).take(7);
 
     let agendas = bytes
         .split('\n')
@@ -151,7 +162,7 @@ where
         .take_while(|p| !p.is_empty())
         .zip(date_stream);
 
-    let last_day_in_the_range: Date = date.add_days(6);
+    let last_day_in_the_range: Date = start_date.add_days(6);
     for item in agendas {
         let (agenda_json, date): (&str, Date) = item;
         let agenda: Vec<JsonInputEvent> = json_parser.parse(agenda_json).map_err(Error::Parse)?;
@@ -316,19 +327,18 @@ fn find_clashes(
     condition: ClashCondition,
 ) -> Vec<(Lane, Lane)> {
     '_ensure_events_sorted_by_start_date: {
-        let mut prev: Option<&Event> = None;
-        for event in events {
-            if let Some(prev) = prev {
-                assert!(event.start_date >= prev.start_date);
-                if event.start_date == prev.start_date {
-                    assert!(event.start_time.hour >= prev.start_time.hour);
-                    if event.start_time.hour == prev.start_time.hour {
-                        assert!(event.start_time.minute >= prev.start_time.minute);
-                    }
+        for pair in events.windows(2) {
+            let prev = &pair[0];
+            let event = &pair[1];
+            let current_start_date = &event.start_date;
+            let prev_start_date = &prev.start_date;
+            assert!(current_start_date >= prev_start_date);
+            if current_start_date == prev_start_date {
+                assert!(event.start_time.hour >= prev.start_time.hour);
+                if event.start_time.hour == prev.start_time.hour {
+                    assert!(event.start_time.minute >= prev.start_time.minute);
                 }
             }
-
-            prev = Some(event);
         }
     };
 

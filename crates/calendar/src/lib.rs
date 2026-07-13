@@ -35,17 +35,6 @@ pub struct JsonInputEvent {
     calendar_color: Option<Color>,
 }
 
-pub struct Event {
-    description: u32,
-    // FIXME(alex): store the string in a separated data storage
-    title: String,
-    start_date: date::Date,
-    start_time: date::Time,
-    end_date: date::Date,
-    end_time: date::Time,
-    calendar_color: Color,
-}
-
 #[derive(Clone, Copy)]
 pub struct ColorDiff(pub [f32; 3]);
 
