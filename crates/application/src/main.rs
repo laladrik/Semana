@@ -661,6 +661,17 @@ fn unsafe_main() {
                                         {
                                             events.push(state::Action::Yank);
                                         }
+                                        sdl::SDLK_TAB => {
+                                            let cond =
+                                                (event.key.mod_ as u32 & sdl::SDL_KMOD_SHIFT) > 0;
+                                            let action = if cond {
+                                                state::Action::PreviousField
+                                            } else {
+                                                state::Action::NextField
+                                            };
+
+                                            events.push(action)
+                                        }
                                         sdl::SDLK_UP => {
                                             events.push(state::Action::Scroll {
                                                 offset: -config::GRID_OFFSET_STEP,

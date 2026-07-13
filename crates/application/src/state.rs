@@ -1290,6 +1290,26 @@ impl<F: Frontend> App<F> {
                         offsets.fill(0f32);
                     }
                 }
+                next_or_previous @ (Action::NextField | Action::PreviousField) => {
+                    let Some(view) = self.event_details_view.as_mut() else {
+                        continue;
+                    };
+
+                    let shift = match next_or_previous {
+                        Action::NextField => 1,
+                        Action::PreviousField => -1,
+                        _ => unreachable!(),
+                    };
+
+                    let next_field_index = match view.selection_highlight.as_ref() {
+                        Some(x) => (x.selected_text_field + shift) % (view.texts.len() as i32),
+                        None => 0,
+                    };
+
+                    let mut selection_highlight = SelectionHighlight::new();
+                    selection_highlight.selected_text_field = next_field_index;
+                    view.selection_highlight = Some(selection_highlight);
+                }
                 _ => (),
             }
         }
@@ -1809,6 +1829,8 @@ pub enum Action {
         position: FPoint,
         button: MouseButton,
     },
+    NextField,
+    PreviousField,
 }
 
 pub enum MouseButton {
