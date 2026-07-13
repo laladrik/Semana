@@ -1301,8 +1301,13 @@ impl<F: Frontend> App<F> {
                         _ => unreachable!(),
                     };
 
+                    let len = view.texts.len() as i32;
                     let next_field_index = match view.selection_highlight.as_ref() {
-                        Some(x) => (x.selected_text_field + shift) % (view.texts.len() as i32),
+                        Some(x) => {
+                            let expected = x.selected_text_field + shift;
+                            let rotation = (len + (expected - x.selected_text_field)) % len;
+                            (x.selected_text_field + rotation) % len
+                        }
                         None => 0,
                     };
 
