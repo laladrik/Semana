@@ -88,6 +88,9 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
                 renderer.set_render_draw_color(Color::WHITE)?;
                 renderer.render_rect(text_selection.cursor)
             })?;
+
+            renderer.set_render_draw_color(Color::GREEN)?;
+            renderer.render_rect(&text_object_positions[text_selection.text_field as usize])?;
         }
     }
 
