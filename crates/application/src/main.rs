@@ -656,6 +656,11 @@ fn unsafe_main() {
                                     sdl::SDL_EVENT_KEY_DOWN => match event.key.key {
                                         // FIXME(alex): the key handling should be within the
                                         // application logic rather than platform.
+                                        sdl::SDLK_A
+                                            if (event.key.mod_ as u32 & sdl::SDL_KMOD_CTRL) > 0 =>
+                                        {
+                                            events.push(state::Action::SelectAll)
+                                        }
                                         sdl::SDLK_C
                                             if (event.key.mod_ as u32 & sdl::SDL_KMOD_CTRL) > 0 =>
                                         {

@@ -1310,6 +1310,22 @@ impl<F: Frontend> App<F> {
                     selection_highlight.selected_text_field = next_field_index;
                     view.selection_highlight = Some(selection_highlight);
                 }
+                Action::SelectAll => {
+                    let Some(view) = self.event_details_view.as_mut() else {
+                        continue;
+                    };
+
+                    let Some(selection) = view.selection_highlight.as_mut() else {
+                        continue;
+                    };
+
+                    let Some(text) = view.texts.get(selection.selected_text_field as usize) else {
+                        continue;
+                    };
+
+                    selection.highlight_start = 0;
+                    selection.highlight_end = text.chars().count() as i32;
+                }
                 _ => (),
             }
         }
@@ -1831,6 +1847,7 @@ pub enum Action {
     },
     NextField,
     PreviousField,
+    SelectAll,
 }
 
 pub enum MouseButton {
