@@ -20,7 +20,7 @@ use sdl3_sys::{SDL_FPoint as FPoint, SDL_FRect as FRect, SDL_Point as Point, SDL
 use sdlext::Color;
 
 // FIXME(alex): remove this ASAP
-const DESCRIPTION_TEXT_INDEX: usize = 3;
+const DESCRIPTION_TEXT_INDEX: usize = 4;
 const TEXT_SCROLL_AMPLIFIER: f32 = 10.0;
 const EVENT_DETAILS_VIEW_PADDING: FPoint = FPoint { x: 3., y: 2. };
 
@@ -30,6 +30,7 @@ mod captions {
         pub const DESCRIPTION: &str = "Description:";
         pub const FROM: &str = "From:";
         pub const UNTIL: &str = "Until:";
+        pub const URL: &str = "URL:";
     }
 }
 
@@ -868,6 +869,7 @@ impl<F: Frontend> App<F> {
                 let title = table.obtain_title(event as u32)?;
                 let range = table.obtain_range(event as u32)?;
                 let description = table.obtain_description(event as u32)?;
+                let url = table.obtain_url(event as u32)?;
                 Some(EventDetails {
                     title,
                     description,
@@ -875,6 +877,7 @@ impl<F: Frontend> App<F> {
                     // FIXME(alex): make a special type for the indexes of events.
                     index: event as u32,
                     range,
+                    url,
                 })
             })
         });
@@ -1569,6 +1572,33 @@ impl<F: Frontend> Activities<F> {
 
         field_counter += 1;
 
+        vertical_offset += one_line_height * 2.;
+        event_details_field_label_regirsty.create(
+            captions::event_details_view::URL,
+            label_color,
+            FRect {
+                x: 100.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+
+        vertical_offset += one_line_height;
+        event_details_text_object_regirsty.create(
+            details.url,
+            FRect {
+                x: 150.0,
+                y: vertical_offset,
+                w: window_size.x as f32 - 200.0,
+                h: one_line_height,
+            },
+        )?;
+        texts.push(Box::from(details.url));
+
+        push_flexible_field(field_counter);
+        field_counter += 1;
+
         vertical_offset += 2f32 * one_line_height;
         event_details_field_label_regirsty.create(
             captions::event_details_view::DESCRIPTION,
@@ -1615,6 +1645,7 @@ struct EventDetails<'event> {
     index: u32,
     event_kind: CalendarEventKind,
     range: &'event calendar::EventRange,
+    url: &'event str,
 }
 
 // If mouse_position is within the surface of the long events or the short events then
