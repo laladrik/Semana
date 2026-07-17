@@ -501,6 +501,8 @@ impl AgendaSource for KhalAgendaSource {
                 "calendar-color",
                 "--json",
                 "description",
+                "--json",
+                "url",
                 from.as_str(),
                 &format!("{}d", arguments.duration_days),
             ];

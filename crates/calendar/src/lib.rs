@@ -33,6 +33,7 @@ pub struct JsonInputEvent {
     all_day: String,
     #[nserde(rename = "calendar-color")]
     calendar_color: Option<Color>,
+    url: String,
 }
 
 #[derive(Clone, Copy)]
@@ -104,9 +105,15 @@ pub struct EventTable {
     pub calendar_colors: Vec<Color>,
     pub event_ranges: Vec<EventRange>,
     pub titles: Vec<String>,
+    // FIXME(alex):
+    // use a handle instead of u32
     pub description_handles: Vec<u32>,
     pub description_strings: Vec<String>,
     pub lanes: Vec<(Lane, Lane)>,
+    // FIXME(alex):
+    // use a handle instead of u32
+    pub url_handles: Vec<u32>,
+    pub url_strings: Vec<String>,
 }
 
 impl EventTable {
@@ -123,6 +130,13 @@ impl EventTable {
 
     pub fn obtain_range(&self, event: u32) -> Option<&EventRange> {
         self.event_ranges.get(event as usize)
+    }
+
+    pub fn obtain_url(&self, event: u32) -> Option<&str> {
+        self.url_handles
+            .get(event as usize)
+            .and_then(|handle: &u32| self.url_strings.get(*handle as usize))
+            .map(String::as_str)
     }
 }
 

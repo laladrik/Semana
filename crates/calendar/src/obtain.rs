@@ -116,8 +116,11 @@ fn find_free_lane(new_event_begin_minutes: Minutes, clash: &Clash) -> Option<Lan
     lane_index.map(|i| unsafe { *clash.lanes.get_unchecked(i) })
 }
 
-fn add_description(item: String, storage: &mut Vec<String>) -> u32 {
+fn intern_string(item: String, storage: &mut Vec<String>) -> u32 {
     assert!(storage.len() < u32::MAX as usize);
+    // FIXME(alex):
+    // This fails when a calendar event which repeats and other events are inserted between the
+    // occurrences of the event.
     if storage.last().filter(|last| last == &&item).is_none() {
         storage.push(item);
     }
@@ -163,9 +166,14 @@ where
                 &mut long_event_table
             };
 
+            // FIXME(alex): Don't add empty descrptions.  If an event doesn't have a description
+            // its points to -1.  That means that the handles should either negative or optional.
+            // _Alternative way_: implement a hashmap of strings.  This eliminates the unnecessary
+            // indexes.  However, the hashes probably would take more memory than all of the
+            // indexes in a given week.
             let description = core::mem::take(&mut json_event.description);
             let description_handle: u32 =
-                add_description(description, &mut table_ref.description_strings);
+                intern_string(description, &mut table_ref.description_strings);
             table_ref.description_handles.push(description_handle);
             table_ref.titles.push(json_event.title);
             table_ref.event_ranges.push(EventRange {
@@ -177,6 +185,10 @@ where
 
             let calendar_color = json_event.calendar_color.unwrap_or(default_calendar_color);
             table_ref.calendar_colors.push(calendar_color);
+
+            let url = core::mem::take(&mut json_event.url);
+            let url_handle: u32 = intern_string(url, &mut table_ref.url_strings);
+            table_ref.url_handles.push(url_handle);
         }
     }
 
@@ -435,6 +447,7 @@ fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
             title: event.title,
             all_day: event.all_day,
             calendar_color: event.calendar_color,
+            url: event.url,
         }
     } else if date == &event.end_date {
         JsonInputEvent {
@@ -446,6 +459,7 @@ fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
             description: event.description,
             all_day: event.all_day,
             calendar_color: event.calendar_color,
+            url: event.url,
         }
     } else {
         panic!("only an event which shorter than 24 hours can be cropped")
