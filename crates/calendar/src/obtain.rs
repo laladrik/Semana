@@ -166,31 +166,40 @@ where
                 &mut long_event_table
             };
 
+            let JsonInputEvent {
+                description,
+                title,
+                start_date,
+                start_time,
+                end_date,
+                end_time,
+                all_day: _,
+                calendar_color,
+                url,
+                location,
+            } = json_event;
             // FIXME(alex): Don't add empty descrptions.  If an event doesn't have a description
             // its points to -1.  That means that the handles should either negative or optional.
             // _Alternative way_: implement a hashmap of strings.  This eliminates the unnecessary
             // indexes.  However, the hashes probably would take more memory than all of the
             // indexes in a given week.
-            let description = core::mem::take(&mut json_event.description);
             let description_handle: u32 =
                 intern_string(description, &mut table_ref.description_strings);
             table_ref.description_handles.push(description_handle);
-            table_ref.titles.push(json_event.title);
+            table_ref.titles.push(title);
             table_ref.event_ranges.push(EventRange {
-                start_date: json_event.start_date,
-                start_time: json_event.start_time,
-                end_date: json_event.end_date,
-                end_time: json_event.end_time,
+                start_date,
+                start_time,
+                end_date,
+                end_time,
             });
 
-            let calendar_color = json_event.calendar_color.unwrap_or(default_calendar_color);
+            let calendar_color = calendar_color.unwrap_or(default_calendar_color);
             table_ref.calendar_colors.push(calendar_color);
 
-            let url = core::mem::take(&mut json_event.url);
             let url_handle: u32 = intern_string(url, &mut table_ref.url_strings);
             table_ref.url_handles.push(url_handle);
 
-            let location = core::mem::take(&mut json_event.location);
             let location_handle: u32 = intern_string(location, &mut table_ref.location_strings);
             table_ref.location_handles.push(location_handle);
         }
