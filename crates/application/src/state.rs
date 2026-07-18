@@ -1478,6 +1478,8 @@ impl<F: Frontend> Activities<F> {
         const MAX_FIELDS: usize = 10;
         const LABEL_LEFT_OFFSET: f32 = 100.;
         const TEXT_FIELD_LEFT_OFFSET: f32 = 150.;
+        const DATE_TIME_FIELD_WIDTH: f32 = 220.0;
+        let one_line_height = 30f32;
         let mut texts: Vec<Box<str>> = Vec::with_capacity(MAX_FIELDS);
         let mut flexible_fields: [u32; MAX_FIELDS] = [0; MAX_FIELDS];
         let mut flexible_fields_cursor: usize = 0;
@@ -1486,148 +1488,129 @@ impl<F: Frontend> Activities<F> {
             flexible_fields_cursor += 1;
         };
 
-        // FIXME(alex): this should be based on the font line height
-        let one_line_height = 30f32;
-        let top_offset = 100f32;
-        let mut vertical_offset = top_offset;
-        event_details_field_label_regirsty.create(
-            captions::event_details_view::TITLE,
-            label_color,
-            FRect {
-                x: LABEL_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
+        let create_label = |vertical_offset| FRect {
+            x: LABEL_LEFT_OFFSET,
+            y: vertical_offset,
+            w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
+            h: one_line_height,
+        };
 
-        vertical_offset += one_line_height;
-        event_details_text_object_regirsty.create(
-            details.title,
-            FRect {
-                x: TEXT_FIELD_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
-        texts.push(Box::from(details.title));
-
-        push_flexible_field(field_counter);
-        field_counter += 1;
-
-        vertical_offset += one_line_height * 2.;
-        event_details_field_label_regirsty.create(
-            captions::event_details_view::FROM,
-            label_color,
-            FRect {
-                x: LABEL_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
-
-        vertical_offset += one_line_height;
-        // FIXME(alex): the width of the field should be based on the size of the font.
-        const DATE_TIME_FIELD_WIDTH: f32 = 220.0;
-        let start = format_date_time(&details.range.start_date, &details.range.start_time);
-        texts.push(Box::from(start));
-        event_details_text_object_regirsty.create(
-            // FIXME(alex): the date should be formatted according the locale chosen by the user
-            texts.last().unwrap().as_ref(),
-            FRect {
-                x: TEXT_FIELD_LEFT_OFFSET,
-                y: vertical_offset,
-                w: DATE_TIME_FIELD_WIDTH,
-                h: one_line_height,
-            },
-        )?;
-
-        field_counter += 1;
-
-        vertical_offset += one_line_height;
-        event_details_field_label_regirsty.create(
-            captions::event_details_view::UNTIL,
-            label_color,
-            FRect {
-                x: LABEL_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
-
-        vertical_offset += one_line_height;
-        let until = format_date_time(&details.range.end_date, &details.range.end_time);
-        texts.push(Box::from(until));
-        event_details_text_object_regirsty.create(
-            // FIXME(alex): the date should be formatted according the locale chosen by the user
-            texts.last().unwrap().as_ref(),
-            FRect {
-                x: TEXT_FIELD_LEFT_OFFSET,
-                y: vertical_offset,
-                w: DATE_TIME_FIELD_WIDTH,
-                h: one_line_height,
-            },
-        )?;
-
-        field_counter += 1;
-
-        vertical_offset += one_line_height * 2.;
-        event_details_field_label_regirsty.create(
-            captions::event_details_view::URL,
-            label_color,
-            FRect {
-                x: LABEL_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
-
-        vertical_offset += one_line_height;
-        event_details_text_object_regirsty.create(
-            details.url,
-            FRect {
-                x: TEXT_FIELD_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
-        texts.push(Box::from(details.url));
-
-        push_flexible_field(field_counter);
-        field_counter += 1;
-
-        vertical_offset += 2f32 * one_line_height;
-        event_details_field_label_regirsty.create(
-            captions::event_details_view::DESCRIPTION,
-            label_color,
-            FRect {
-                x: LABEL_LEFT_OFFSET,
-                y: vertical_offset,
-                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: one_line_height,
-            },
-        )?;
-
-        vertical_offset += one_line_height;
-        // FIXME(alex): a long description is cropped
-        let border_rect = FRect {
+        let create_flexible_text_field = |vertical_offset| FRect {
             x: TEXT_FIELD_LEFT_OFFSET,
             y: vertical_offset,
             w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-            h: window_size.y as f32 - vertical_offset,
+            h: one_line_height,
         };
-        event_details_text_object_regirsty.create(details.description, border_rect)?;
-        event_details_text_object_regirsty
-            .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
-        texts.push(Box::from(details.description));
 
-        push_flexible_field(field_counter);
-        field_counter += 1;
+        let create_static_text_field = |vertical_offset, width| FRect {
+            x: TEXT_FIELD_LEFT_OFFSET,
+            y: vertical_offset,
+            w: width,
+            h: one_line_height,
+        };
+
+        // FIXME(alex): this should be based on the font line height
+        let top_offset = 100f32;
+        let mut vertical_offset = top_offset;
+
+        '_create_title: {
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::TITLE,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+
+            vertical_offset += one_line_height;
+            event_details_text_object_regirsty
+                .create(details.title, create_flexible_text_field(vertical_offset))?;
+            texts.push(Box::from(details.title));
+
+            push_flexible_field(field_counter);
+            field_counter += 1;
+        }
+
+        '_create_from: {
+            vertical_offset += one_line_height * 2.;
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::FROM,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+
+            vertical_offset += one_line_height;
+            // FIXME(alex): the width of the field should be based on the size of the font.
+            let start = format_date_time(&details.range.start_date, &details.range.start_time);
+            texts.push(Box::from(start));
+            event_details_text_object_regirsty.create(
+                // FIXME(alex): the date should be formatted according the locale chosen by the user
+                texts.last().unwrap().as_ref(),
+                create_static_text_field(vertical_offset, DATE_TIME_FIELD_WIDTH),
+            )?;
+
+            field_counter += 1;
+        }
+
+        '_create_until: {
+            vertical_offset += one_line_height;
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::UNTIL,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+
+            vertical_offset += one_line_height;
+            let until = format_date_time(&details.range.end_date, &details.range.end_time);
+            texts.push(Box::from(until));
+            event_details_text_object_regirsty.create(
+                // FIXME(alex): the date should be formatted according the locale chosen by the user
+                texts.last().unwrap().as_ref(),
+                create_static_text_field(vertical_offset, DATE_TIME_FIELD_WIDTH),
+            )?;
+
+            field_counter += 1;
+        }
+
+        '_create_url: {
+            vertical_offset += one_line_height * 2.;
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::URL,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+
+            vertical_offset += one_line_height;
+            event_details_text_object_regirsty
+                .create(details.url, create_flexible_text_field(vertical_offset))?;
+            texts.push(Box::from(details.url));
+
+            push_flexible_field(field_counter);
+            field_counter += 1;
+
+            vertical_offset += 2f32 * one_line_height;
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::DESCRIPTION,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+        }
+
+        '_create_description: {
+            vertical_offset += one_line_height;
+            // FIXME(alex): a long description is cropped
+            let border_rect = FRect {
+                x: TEXT_FIELD_LEFT_OFFSET,
+                y: vertical_offset,
+                w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
+                h: window_size.y as f32 - vertical_offset,
+            };
+            event_details_text_object_regirsty.create(details.description, border_rect)?;
+            event_details_text_object_regirsty
+                .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
+            texts.push(Box::from(details.description));
+
+            push_flexible_field(field_counter);
+            field_counter += 1;
+        }
 
         Ok(EventDetailsView {
             text_field_padding: EVENT_DETAILS_VIEW_PADDING,
