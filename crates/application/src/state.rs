@@ -20,7 +20,7 @@ use sdl3_sys::{SDL_FPoint as FPoint, SDL_FRect as FRect, SDL_Point as Point, SDL
 use sdlext::Color;
 
 // FIXME(alex): remove this ASAP
-const DESCRIPTION_TEXT_INDEX: usize = 4;
+const DESCRIPTION_TEXT_INDEX: usize = 5;
 const TEXT_SCROLL_AMPLIFIER: f32 = 10.0;
 const EVENT_DETAILS_VIEW_PADDING: FPoint = FPoint { x: 3., y: 2. };
 const EVENT_DETAILS_RIGHT_OFFSET: f32 = 300.;
@@ -32,6 +32,7 @@ mod captions {
         pub const FROM: &str = "From:";
         pub const UNTIL: &str = "Until:";
         pub const URL: &str = "URL:";
+        pub const LOCATION: &str = "Location:";
     }
 }
 
@@ -871,6 +872,7 @@ impl<F: Frontend> App<F> {
                 let range = table.obtain_range(event as u32)?;
                 let description = table.obtain_description(event as u32)?;
                 let url = table.obtain_url(event as u32)?;
+                let location = table.obtain_location(event as u32)?;
                 Some(EventDetails {
                     title,
                     description,
@@ -879,6 +881,7 @@ impl<F: Frontend> App<F> {
                     index: event as u32,
                     range,
                     url,
+                    location,
                 })
             })
         });
@@ -1585,16 +1588,35 @@ impl<F: Frontend> Activities<F> {
 
             push_flexible_field(field_counter);
             field_counter += 1;
+        }
 
+        '_create_location: {
+            vertical_offset += one_line_height * 2.;
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::LOCATION,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+
+            vertical_offset += one_line_height;
+            event_details_text_object_regirsty.create(
+                details.location,
+                create_flexible_text_field(vertical_offset),
+            )?;
+            texts.push(Box::from(details.location));
+
+            push_flexible_field(field_counter);
+            field_counter += 1;
+        }
+
+        '_create_description: {
             vertical_offset += 2f32 * one_line_height;
             event_details_field_label_regirsty.create(
                 captions::event_details_view::DESCRIPTION,
                 label_color,
                 create_label(vertical_offset),
             )?;
-        }
 
-        '_create_description: {
             vertical_offset += one_line_height;
             // FIXME(alex): a long description is cropped
             let border_rect = FRect {
@@ -1631,6 +1653,7 @@ struct EventDetails<'event> {
     event_kind: CalendarEventKind,
     range: &'event calendar::EventRange,
     url: &'event str,
+    location: &'event str,
 }
 
 // If mouse_position is within the surface of the long events or the short events then
