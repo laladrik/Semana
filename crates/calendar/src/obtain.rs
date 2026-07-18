@@ -189,6 +189,10 @@ where
             let url = core::mem::take(&mut json_event.url);
             let url_handle: u32 = intern_string(url, &mut table_ref.url_strings);
             table_ref.url_handles.push(url_handle);
+
+            let location = core::mem::take(&mut json_event.location);
+            let location_handle: u32 = intern_string(location, &mut table_ref.location_strings);
+            table_ref.location_handles.push(location_handle);
         }
     }
 
@@ -448,6 +452,7 @@ fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
             all_day: event.all_day,
             calendar_color: event.calendar_color,
             url: event.url,
+            location: event.location,
         }
     } else if date == &event.end_date {
         JsonInputEvent {
@@ -460,6 +465,7 @@ fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
             all_day: event.all_day,
             calendar_color: event.calendar_color,
             url: event.url,
+            location: event.location,
         }
     } else {
         panic!("only an event which shorter than 24 hours can be cropped")

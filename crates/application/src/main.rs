@@ -503,6 +503,8 @@ impl AgendaSource for KhalAgendaSource {
                 "description",
                 "--json",
                 "url",
+                "--json",
+                "location",
                 from.as_str(),
                 &format!("{}d", arguments.duration_days),
             ];

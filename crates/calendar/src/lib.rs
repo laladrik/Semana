@@ -34,6 +34,7 @@ pub struct JsonInputEvent {
     #[nserde(rename = "calendar-color")]
     calendar_color: Option<Color>,
     url: String,
+    location: String,
 }
 
 #[derive(Clone, Copy)]
@@ -114,14 +115,16 @@ pub struct EventTable {
     // use a handle instead of u32
     pub url_handles: Vec<u32>,
     pub url_strings: Vec<String>,
+    // FIXME(alex):
+    // use a handle instead of u32
+    pub location_handles: Vec<u32>,
+    pub location_strings: Vec<String>,
 }
 
 impl EventTable {
     pub fn obtain_description(&self, event: u32) -> Option<&str> {
-        self.description_handles
-            .get(event as usize)
-            .and_then(|handle: &u32| self.description_strings.get(*handle as usize))
-            .map(String::as_str)
+        let (h, s) = (&self.description_handles, &self.description_strings);
+        Self::obtain_sparse_string(event as usize, h, s)
     }
 
     pub fn obtain_title(&self, event: u32) -> Option<&str> {
@@ -133,9 +136,23 @@ impl EventTable {
     }
 
     pub fn obtain_url(&self, event: u32) -> Option<&str> {
-        self.url_handles
-            .get(event as usize)
-            .and_then(|handle: &u32| self.url_strings.get(*handle as usize))
+        let (h, s) = (&self.url_handles, &self.url_strings);
+        Self::obtain_sparse_string(event as usize, h, s)
+    }
+
+    pub fn obtain_location(&self, event: u32) -> Option<&str> {
+        let (h, s) = (&self.location_handles, &self.location_strings);
+        Self::obtain_sparse_string(event as usize, h, s)
+    }
+
+    fn obtain_sparse_string<'a>(
+        handle: usize,
+        handles: &'a [u32],
+        strings: &'a [String],
+    ) -> Option<&'a str> {
+        handles
+            .get(handle)
+            .and_then(|handle: &u32| strings.get(*handle as usize))
             .map(String::as_str)
     }
 }
