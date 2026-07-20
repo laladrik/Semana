@@ -177,6 +177,7 @@ where
                 calendar_color,
                 url,
                 location,
+                calendar,
             } = json_event;
             // FIXME(alex): Don't add empty descrptions.  If an event doesn't have a description
             // its points to -1.  That means that the handles should either negative or optional.
@@ -202,6 +203,12 @@ where
 
             let location_handle: u32 = intern_string(location, &mut table_ref.location_strings);
             table_ref.location_handles.push(location_handle);
+
+            let handle = table_ref
+                .calendar_table
+                .get_handle(&calendar)
+                .unwrap_or_else(|| table_ref.calendar_table.push(&calendar));
+            table_ref.calendar_handles.push(handle);
         }
     }
 
@@ -462,6 +469,7 @@ fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
             calendar_color: event.calendar_color,
             url: event.url,
             location: event.location,
+            calendar: event.calendar,
         }
     } else if date == &event.end_date {
         JsonInputEvent {
@@ -475,6 +483,7 @@ fn crop_event(date: &Date, event: JsonInputEvent) -> JsonInputEvent {
             calendar_color: event.calendar_color,
             url: event.url,
             location: event.location,
+            calendar: event.calendar,
         }
     } else {
         panic!("only an event which shorter than 24 hours can be cropped")

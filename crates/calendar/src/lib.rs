@@ -7,6 +7,8 @@ pub mod render;
 pub mod types;
 pub mod ui;
 extern crate alloc;
+use core::ops::Range;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -35,6 +37,7 @@ pub struct JsonInputEvent {
     calendar_color: Option<Color>,
     url: String,
     location: String,
+    calendar: String,
 }
 
 #[derive(Clone, Copy)]
@@ -102,6 +105,49 @@ pub struct EventRange {
 }
 
 #[derive(Default)]
+pub struct CalendarTable {
+    // Would it cause fewer cache misses if the type is u8?
+    indexes: Vec<u32>,
+    names: String,
+}
+
+impl CalendarTable {
+    fn get_name(&self, index_handle: u32) -> Option<&str> {
+        self.indexes.get(index_handle as usize).map(|index| {
+            let end: u32 = self
+                .indexes
+                .get(index_handle as usize + 1)
+                .cloned()
+                .unwrap_or(self.names.len() as u32);
+            assert!((end as usize) <= self.names.len());
+            &self.names[*index as usize..end as usize]
+        })
+    }
+
+    fn get_handle(&self, name: &str) -> Option<u32> {
+        for (count, index_pair) in self.indexes.windows(2).enumerate() {
+            let range: Range<usize> = match index_pair {
+                [x, y] => (*x as usize)..(*y as usize),
+                [x] => (*x as usize)..self.names.len(),
+                _ => return None,
+            };
+
+            if &self.names[range] == name {
+                return Some(count as u32);
+            }
+        }
+        None
+    }
+
+    fn push(&mut self, name: &str) -> u32 {
+        let ret = self.indexes.len() as u32;
+        self.indexes.push(self.names.len() as u32);
+        self.names.push_str(name);
+        ret
+    }
+}
+
+#[derive(Default)]
 pub struct EventTable {
     pub calendar_colors: Vec<Color>,
     pub event_ranges: Vec<EventRange>,
@@ -119,6 +165,10 @@ pub struct EventTable {
     // use a handle instead of u32
     pub location_handles: Vec<u32>,
     pub location_strings: Vec<String>,
+    // FIXME(alex):
+    // use a handle instead of u32
+    pub calendar_handles: Vec<u32>,
+    pub calendar_table: CalendarTable,
 }
 
 impl EventTable {
@@ -143,6 +193,12 @@ impl EventTable {
     pub fn obtain_location(&self, event: u32) -> Option<&str> {
         let (h, s) = (&self.location_handles, &self.location_strings);
         Self::obtain_sparse_string(event as usize, h, s)
+    }
+
+    pub fn obtain_calednar(&self, event: u32) -> Option<&str> {
+        self.calendar_handles
+            .get(event as usize)
+            .and_then(|h| self.calendar_table.get_name(*h))
     }
 
     fn obtain_sparse_string<'a>(

@@ -873,6 +873,8 @@ impl<F: Frontend> App<F> {
                 let description = table.obtain_description(event as u32)?;
                 let url = table.obtain_url(event as u32)?;
                 let location = table.obtain_location(event as u32)?;
+                let calendar = table.obtain_calednar(event as u32)?;
+                println!("{}", calendar);
                 Some(EventDetails {
                     title,
                     description,
