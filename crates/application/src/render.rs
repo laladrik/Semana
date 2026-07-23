@@ -28,6 +28,10 @@ pub struct EventViewRenderData<'rect, 'frontend, F> {
     pub text_selection: Option<TextSelection<'rect>>,
     pub offsets: &'rect [f32],
     pub text_field_padding: sdl::SDL_FPoint,
+    pub calendar_color: Color,
+    pub calendar_color_rectangle: sdl::SDL_FRect,
+    pub calendar_color_border: Color,
+    pub calendar_base_rectangle: sdl::SDL_FRect,
 }
 
 type EventView<'renderer, 'rect, 'frontend, 'font> =
@@ -67,6 +71,22 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
         renderer.render_fill_rects(text_object_positions)?;
         renderer.set_render_draw_color(Color::WHITE)?;
         renderer.render_rects(text_object_positions)?;
+    }
+
+    '_render_calendar_field: {
+        '_background: {
+            renderer.set_render_draw_color(Color::from_rgb(config::TEXT_FIELD_BACKGROUND))?;
+            renderer.render_fill_rect(&data.calendar_base_rectangle)?;
+            renderer.set_render_draw_color(Color::WHITE)?;
+            renderer.render_rect(&data.calendar_base_rectangle)?;
+        }
+
+        '_color_indicator: {
+            renderer.set_render_draw_color(data.calendar_color)?;
+            renderer.render_fill_rect(&data.calendar_color_rectangle)?;
+            renderer.set_render_draw_color(data.calendar_color_border)?;
+            renderer.render_rect(&data.calendar_color_rectangle)?;
+        }
     }
 
     frontend

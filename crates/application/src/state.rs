@@ -33,6 +33,7 @@ mod captions {
         pub const UNTIL: &str = "Until:";
         pub const URL: &str = "URL:";
         pub const LOCATION: &str = "Location:";
+        pub const CALENDAR: &str = "Calendar:";
     }
 }
 
@@ -484,6 +485,8 @@ struct EventDetailsView {
     /// its field (a.k.a. viewport).
     offsets: Box<[f32]>,
     text_field_padding: FPoint,
+    calendar_color_rectangle: FRect,
+    calendar_base_rectangle: FRect,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -873,8 +876,7 @@ impl<F: Frontend> App<F> {
                 let description = table.obtain_description(event as u32)?;
                 let url = table.obtain_url(event as u32)?;
                 let location = table.obtain_location(event as u32)?;
-                let calendar = table.obtain_calendar(event as u32)?;
-                println!("{}", calendar);
+                let calendar_name = table.obtain_calendar(event as u32)?;
                 Some(EventDetails {
                     title,
                     description,
@@ -884,6 +886,7 @@ impl<F: Frontend> App<F> {
                     range,
                     url,
                     location,
+                    calendar_name,
                 })
             })
         });
@@ -902,7 +905,17 @@ impl<F: Frontend> App<F> {
                     Color::WHITE,
                 )?
                 .into();
+
                 if let Some(view) = self.event_details_view.as_ref() {
+                    let calendar_color = self
+                        .calendar
+                        .state
+                        .get_event_table(view.event_kind.is_long())
+                        .and_then(|table| table.calendar_colors.get(view.event_index as usize))
+                        .expect(
+                            "fail to get the event table.  An invalid data within the EventDetailsView?",
+                        );
+
                     Ok(NewState {
                         activity: Activity::EventView,
                         render_data: RenderData::EventView(EventViewRenderData {
@@ -916,6 +929,13 @@ impl<F: Frontend> App<F> {
                                 },
                             ),
                             frontend: &*frontend,
+                            // FIXME(alex):
+                            // Replace calendar_color_2_to_sdl_color with some common ground
+                            // format.  A tuple of 3 values?
+                            calendar_color: calendar_color_2_to_sdl_color(*calendar_color),
+                            calendar_color_rectangle: view.calendar_color_rectangle,
+                            calendar_color_border: Color::WHITE,
+                            calendar_base_rectangle: view.calendar_base_rectangle,
                         }),
                     })
                 } else {
@@ -1123,6 +1143,7 @@ impl<F: Frontend> App<F> {
                 Action::MouseMove {
                     x,
                     y,
+                    // FIXME(alex): this should check whether any button is pressed
                     pressed_button: _,
                 } => {
                     let Some(view) = self.event_details_view.as_mut() else {
@@ -1434,6 +1455,15 @@ impl<F: Frontend> App<F> {
         Ok({
             // The view is immutable later on.
             let view: &EventDetailsView = &*view_mut;
+            let calendar_color = self
+                .calendar
+                .state
+                .get_event_table(view.event_kind.is_long())
+                .and_then(|table| table.calendar_colors.get(view.event_index as usize))
+                .expect(
+                    "fail to get the event table.  An invalid data within the EventDetailsView?",
+                );
+
             NewState {
                 activity: Activity::EventView,
                 render_data: RenderData::EventView(EventViewRenderData {
@@ -1450,6 +1480,11 @@ impl<F: Frontend> App<F> {
                             }
                         },
                     ),
+
+                    calendar_color: calendar_color_2_to_sdl_color(*calendar_color),
+                    calendar_color_rectangle: view.calendar_color_rectangle,
+                    calendar_color_border: Color::WHITE,
+                    calendar_base_rectangle: view.calendar_base_rectangle,
                 }),
             }
         })
@@ -1612,6 +1647,40 @@ impl<F: Frontend> Activities<F> {
             field_counter += 1;
         }
 
+        let calendar_color_rectangle;
+        let calendar_base_rectangle;
+        '_create_calendar: {
+            vertical_offset += 2f32 * one_line_height;
+            event_details_field_label_regirsty.create(
+                captions::event_details_view::CALENDAR,
+                label_color,
+                create_label(vertical_offset),
+            )?;
+
+            vertical_offset += one_line_height;
+
+            calendar_base_rectangle =
+                create_static_text_field(vertical_offset, DATE_TIME_FIELD_WIDTH);
+            const COLOR_OFFSET_X: f32 = 10.;
+            calendar_color_rectangle = FRect {
+                x: calendar_base_rectangle.x + COLOR_OFFSET_X,
+                y: calendar_base_rectangle.y + 7.,
+                w: 15.,
+                h: 15.,
+            };
+
+            event_details_field_label_regirsty.create(
+                details.calendar_name,
+                label_color,
+                FRect {
+                    x: calendar_base_rectangle.x + calendar_color_rectangle.w + COLOR_OFFSET_X * 2.,
+                    y: vertical_offset + 1.,
+                    w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
+                    h: one_line_height,
+                },
+            )?;
+        }
+
         '_create_description: {
             vertical_offset += 2f32 * one_line_height;
             event_details_field_label_regirsty.create(
@@ -1645,6 +1714,8 @@ impl<F: Frontend> Activities<F> {
             flexible_fields: Box::from(&flexible_fields[..flexible_fields_cursor]),
             texts: texts.into_boxed_slice(),
             offsets: (0..field_counter).map(|_| 0f32).collect(),
+            calendar_color_rectangle,
+            calendar_base_rectangle,
         })
     }
 }
@@ -1657,6 +1728,7 @@ struct EventDetails<'event> {
     range: &'event calendar::EventRange,
     url: &'event str,
     location: &'event str,
+    calendar_name: &'event str,
 }
 
 // If mouse_position is within the surface of the long events or the short events then
@@ -2099,4 +2171,15 @@ where
         text_registry.create(title.as_ref(), Color::BLACK, dstrect)?;
     }
     Ok(())
+}
+
+#[inline]
+fn calendar_color_2_to_sdl_color(value: calendar::Color) -> sdlext::Color {
+    let value = u32::from(value);
+    sdlext::Color {
+        r: (value >> 24) as u8,
+        g: (value >> 16) as u8,
+        b: (value >> 8) as u8,
+        a: 0xff,
+    }
 }
