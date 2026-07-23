@@ -195,7 +195,7 @@ impl EventTable {
         Self::obtain_sparse_string(event as usize, h, s)
     }
 
-    pub fn obtain_calednar(&self, event: u32) -> Option<&str> {
+    pub fn obtain_calendar(&self, event: u32) -> Option<&str> {
         self.calendar_handles
             .get(event as usize)
             .and_then(|h| self.calendar_table.get_name(*h))
