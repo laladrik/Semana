@@ -929,10 +929,7 @@ impl<F: Frontend> App<F> {
                                 },
                             ),
                             frontend: &*frontend,
-                            // FIXME(alex):
-                            // Replace calendar_color_2_to_sdl_color with some common ground
-                            // format.  A tuple of 3 values?
-                            calendar_color: calendar_color_2_to_sdl_color(*calendar_color),
+                            calendar_color: sdlext::Color::from_rgba(calendar_color.0),
                             calendar_color_rectangle: view.calendar_color_rectangle,
                             calendar_color_border: Color::WHITE,
                             calendar_base_rectangle: view.calendar_base_rectangle,
@@ -1481,7 +1478,7 @@ impl<F: Frontend> App<F> {
                         },
                     ),
 
-                    calendar_color: calendar_color_2_to_sdl_color(*calendar_color),
+                    calendar_color: sdlext::Color::from_rgba(calendar_color.0),
                     calendar_color_rectangle: view.calendar_color_rectangle,
                     calendar_color_border: Color::WHITE,
                     calendar_base_rectangle: view.calendar_base_rectangle,
@@ -2171,15 +2168,4 @@ where
         text_registry.create(title.as_ref(), Color::BLACK, dstrect)?;
     }
     Ok(())
-}
-
-#[inline]
-fn calendar_color_2_to_sdl_color(value: calendar::Color) -> sdlext::Color {
-    let value = u32::from(value);
-    sdlext::Color {
-        r: (value >> 24) as u8,
-        g: (value >> 16) as u8,
-        b: (value >> 8) as u8,
-        a: 0xff,
-    }
 }

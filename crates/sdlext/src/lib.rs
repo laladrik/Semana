@@ -207,6 +207,15 @@ impl Color {
         a: 0xff,
     };
 
+    pub const fn from_rgba(value: u32) -> Self {
+        Self {
+            r: (value >> 24) as u8,
+            g: (value >> 16) as u8,
+            b: (value >> 8) as u8,
+            a: value as u8,
+        }
+    }
+
     pub const fn from_rgb(value: u32) -> Self {
         Self {
             r: (value >> 16) as u8,

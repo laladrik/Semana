@@ -828,7 +828,7 @@ impl<'a> calendar::render::RenderRectangles for RectangleRender<'a> {
     {
         for rect in rectangles {
             self.renderer
-                .set_render_draw_color(calendar_color_2_to_sdl_color(rect.color))?;
+                .set_render_draw_color(sdlext::Color::from_rgba(rect.color.0))?;
             let sdl_rect = create_sdl_frect(rect);
             self.renderer.render_fill_rect(&sdl_rect)?;
 
@@ -858,16 +858,6 @@ fn create_sdl_frect(from: &calendar::render::Rectangle) -> sdl::SDL_FRect {
 
 fn main() {
     unsafe_main();
-}
-
-fn calendar_color_2_to_sdl_color(value: calendar::Color) -> sdlext::Color {
-    let value = u32::from(value);
-    sdlext::Color {
-        r: (value >> 24) as u8,
-        g: (value >> 16) as u8,
-        b: (value >> 8) as u8,
-        a: 0xff,
-    }
 }
 
 #[cfg(test)]
