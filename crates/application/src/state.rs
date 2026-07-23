@@ -1478,6 +1478,7 @@ impl<F: Frontend> Activities<F> {
         label_color: Color,
     ) -> Result<EventDetailsView, F::Error> {
         event_details_text_object_regirsty.clear();
+        event_details_field_label_regirsty.clear();
         let mut field_counter = 0;
         // Assuming that 10 is the maximum possible number of field for a calendar event.
         const MAX_FIELDS: usize = 10;
