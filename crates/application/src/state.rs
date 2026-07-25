@@ -4,7 +4,7 @@ use core::cell::RefCell;
 
 mod calendar_state;
 use calendar::types::{
-    AddFPoint, AsFPoint, CoversPoint, MoveFRect, SubFPoint, is_fpoint_between_points,
+    AddFPoint, AddXy, AsFPoint, CoversPoint, MoveFRect, SubFPoint, SubXy, is_fpoint_between_points,
 };
 
 use calendar_state::CalendarState;
@@ -341,10 +341,10 @@ struct ShortEventViewport {
 impl ShortEventViewport {
     fn new(event_offset: &FPoint, window_size: &Point, long_event_surface_height: f32) -> Self {
         let short_event_viewport_offset: FPoint =
-            event_offset.add_fpoint(0f32, long_event_surface_height);
+            event_offset.add_xy(0f32, long_event_surface_height);
         let short_event_viewport_size: FPoint = window_size
             .as_fpoint()
-            .sub_fpoint(short_event_viewport_offset.x, short_event_viewport_offset.y);
+            .sub_fpoint(short_event_viewport_offset);
         Self {
             offset: short_event_viewport_offset,
             size: short_event_viewport_size,
@@ -485,7 +485,7 @@ struct EventDetailsView {
     texts: Box<[Box<str>]>,
     /// The offsets of the text objects.  They are used for the case when a string is longer than
     /// its field (a.k.a. viewport).
-    offsets: Box<[f32]>,
+    offsets: Box<[FPoint]>,
     text_field_padding: FPoint,
     calendar_color_rectangle: FRect,
     calendar_base_rectangle: FRect,
@@ -543,7 +543,7 @@ impl<F: Frontend> App<F> {
         long_event_surface_height: f32,
     ) -> FPoint {
         let yoffset = event_offset.y + long_event_surface_height;
-        window_size.as_fpoint().sub_fpoint(event_offset.x, yoffset)
+        window_size.as_fpoint().sub_xy(event_offset.x, yoffset)
     }
 
     fn create_view(
@@ -1079,6 +1079,13 @@ impl<F: Frontend> App<F> {
     ) -> Result<NewState<'wdrect, 'frontend, F>, F::Error> {
         for event in events {
             match event {
+                // TODO(alex):
+                // Add Action::Scroll.  The action changes the offset of the description.
+                // 1. Check that the mouse is over the field with the description
+                // 2. Get the height of EventDetailsView
+                // 3. Get the height of the text object
+                // 4. Adjust the vertical offset of the description
+
                 // Scrolling a single line text which doesn't fit its field (a.k.a. viewport).
                 Action::TextScroll { offset, x, y } => {
                     let offset = offset * TEXT_SCROLL_AMPLIFIER;
@@ -1097,7 +1104,7 @@ impl<F: Frontend> App<F> {
                             let current_offset = view
                                 .offsets
                                 .get(scrolled_text_index)
-                                .cloned()
+                                .map(|o| o.x)
                                 .unwrap_or_default();
                             new_offset = current_offset;
 
@@ -1128,7 +1135,7 @@ impl<F: Frontend> App<F> {
                             .as_mut()
                             .and_then(|view| view.offsets.get_mut(scrolled_text_index))
                         {
-                            *offset = new_offset;
+                            offset.x = new_offset;
                         }
                     }
                 }
@@ -1169,10 +1176,10 @@ impl<F: Frontend> App<F> {
                             // FIXME(alex): the _offset_ is only for the horizontal scrolling.
                             // This does not work for the description field which will be scrolled
                             // vertically.
-                            let relative_position = FPoint {
-                                x: x - offset - border_rect.x - view.text_field_padding.x,
-                                y: y - border_rect.y - view.text_field_padding.y,
-                            };
+                            let relative_position = FPoint { x, y }
+                                .sub_xy(border_rect.x, border_rect.y)
+                                .sub_fpoint(offset)
+                                .sub_fpoint(view.text_field_padding);
 
                             if let Ok(offset) =
                                 text_engine.get_offset(text_object, &relative_position)
@@ -1224,14 +1231,17 @@ impl<F: Frontend> App<F> {
                                 "the view must exist if because its input event is being handled",
                             );
 
-                            let scroll_offset: f32 =
-                                view.offsets.get(field_position).cloned().unwrap_or(0f32);
+                            let scroll_offset: FPoint = view
+                                .offsets
+                                .get(field_position)
+                                .cloned()
+                                .unwrap_or(FPoint { x: 0., y: 0. });
                             // Translate the absolute coordinates of the mouse click the
                             // coordinates relative to the text object.
                             let text_relative_position: FPoint = click_position
-                                .sub_fpoint(text_field_viewport.x, text_field_viewport.y)
-                                .sub_fpoint(view.text_field_padding.x, view.text_field_padding.y)
-                                .sub_fpoint(scroll_offset, 0f32);
+                                .sub_xy(text_field_viewport.x, text_field_viewport.y)
+                                .sub_fpoint(view.text_field_padding)
+                                .sub_fpoint(scroll_offset);
 
                             // NOTE(alex):
                             // text_relative_position.x or text_relative_position.y can be
@@ -1317,7 +1327,7 @@ impl<F: Frontend> App<F> {
                     if let Some(offsets) =
                         self.event_details_view.as_mut().map(|v| v.offsets.as_mut())
                     {
-                        offsets.fill(0f32);
+                        offsets.fill(FPoint { x: 0., y: 0. });
                     }
                 }
                 next_or_previous @ (Action::NextField | Action::PreviousField) => {
@@ -1404,13 +1414,14 @@ impl<F: Frontend> App<F> {
                                     .ok()
                             };
 
+                            let item_offset = view.text_field_padding.add_fpoint(offset);
                             if let Some(highlights) = highlights.as_mut() {
                                 // FIXME(alex): the _offset_ is only for the horizontal scrolling.
                                 // This does not work for the description field which will be scrolled
                                 // vertically.
                                 for item in highlights.iter_mut() {
-                                    item.x += view.text_field_padding.x + offset;
-                                    item.y += view.text_field_padding.y;
+                                    item.x += item_offset.x;
+                                    item.y += item_offset.y;
                                 }
                             }
                             highlights
@@ -1445,9 +1456,10 @@ impl<F: Frontend> App<F> {
                     selections_highlights.and_then(|r| r.into_iter().next())
                 {
                     // Adjust the position where the cursor is rendered.
+                    let offset = view_mut.offsets[selected_text_field_index];
                     cursor_rect = cursor_rect
                         .move_frect(view_mut.text_field_padding.x, view_mut.text_field_padding.y)
-                        .move_frect(view_mut.offsets[selected_text_field_index], 0f32);
+                        .move_frect(offset.x, offset.y);
                     text_selection.cursor_rect = cursor_rect;
                 }
             }
@@ -1717,7 +1729,9 @@ impl<F: Frontend> Activities<F> {
             event_kind: details.event_kind,
             flexible_fields: Box::from(&flexible_fields[..flexible_fields_cursor]),
             texts: texts.into_boxed_slice(),
-            offsets: (0..field_counter).map(|_| 0f32).collect(),
+            offsets: (0..field_counter)
+                .map(|_| FPoint { x: 0., y: 0. })
+                .collect(),
             calendar_color_rectangle,
             calendar_base_rectangle,
         })
@@ -1750,7 +1764,7 @@ fn try_register_mouse_click(
         is_fpoint_between_points(
             mouse_position,
             long_event_surface.offset,
-            long_event_surface.offset.add_fpoint(size.x, size.y),
+            long_event_surface.offset.add_fpoint(size),
         )
     };
 
@@ -1759,7 +1773,7 @@ fn try_register_mouse_click(
         is_fpoint_between_points(
             mouse_position,
             short_event_viewport.offset,
-            short_event_viewport.offset.add_fpoint(size.x, size.y),
+            short_event_viewport.offset.add_fpoint(size),
         )
     };
 
@@ -1770,7 +1784,7 @@ fn try_register_mouse_click(
         })
     } else if is_short_event_click {
         let offset = short_event_viewport.offset;
-        let position = mouse_position.sub_fpoint(offset.x, offset.y);
+        let position = mouse_position.sub_fpoint(offset);
         Some(MouseEventClick {
             event_kind: CalendarEventKind::Short,
             position,
@@ -1791,7 +1805,7 @@ fn find_clicked_event(
 ) -> Option<usize> {
     rectangles.iter().position(|rect| {
         let left_top = rect.at;
-        let bottom_right = rect.at.add_fpoint(rect.size.x, rect.size.y);
+        let bottom_right = rect.at.add_fpoint(rect.size);
         is_fpoint_between_points(position, left_top, bottom_right)
     })
 }
@@ -1871,8 +1885,7 @@ fn compute_cursor_adjustment(
     let is_within = is_fpoint_between_points(
         mouse,
         short_event_viewport_offset,
-        short_event_viewport_offset
-            .add_fpoint(short_event_viewport_size.x, short_event_viewport_size.y),
+        short_event_viewport_offset.add_fpoint(short_event_viewport_size),
     );
     // if the mouse cursor is within the viewport
     if is_within {

@@ -26,7 +26,7 @@ pub struct TextSelection<'rect> {
 pub struct EventViewRenderData<'rect, 'frontend, F> {
     pub frontend: &'frontend F,
     pub text_selection: Option<TextSelection<'rect>>,
-    pub offsets: &'rect [f32],
+    pub offsets: &'rect [sdl::SDL_FPoint],
     pub text_field_padding: sdl::SDL_FPoint,
     pub calendar_color: Color,
     pub calendar_color_rectangle: sdl::SDL_FRect,
@@ -121,9 +121,9 @@ fn render_event_view(renderer: &sdlext::Renderer, data: &EventView) -> sdlext::R
             let viewport = text_object_positions[i].as_rect();
             let offset = data.offsets[i];
             set_render_viewport_context(renderer, &viewport, || {
-                let x = data.text_field_padding.x + offset;
-                sdlext::ttf_draw_renderer_text(text, x, data.text_field_padding.y)
-                    .map_err(sdlext::Error::TtfError)
+                let x = data.text_field_padding.x + offset.x;
+                let y = data.text_field_padding.y + offset.y;
+                sdlext::ttf_draw_renderer_text(text, x, y).map_err(sdlext::Error::TtfError)
             })?
         }
     }
