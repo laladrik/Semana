@@ -2044,6 +2044,8 @@ pub trait TextEngine {
         start: i32,
         len: i32,
     ) -> Result<Vec<FRect>, Self::Error>;
+
+    fn calculate_height(&self, text_object: &Self::TextObject) -> Result<i32, Self::Error>;
 }
 
 /// The trait provides the platform dependant functionality.  The main purpose of the abstraction

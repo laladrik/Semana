@@ -17,7 +17,8 @@ impl From<FrontendError> for Error {
             FrontendError::WeekStartIsNotObtained(e) => Error::from(sdlext::Error::from(e)),
             FrontendError::CStringIsNotCreated(_nul_error) => todo!("handle zeroes in UTF-8"),
             FrontendError::TextObjectIsNotRegistered(e)
-            | FrontendError::CursorClickHandlingFailure(e)
+            | FrontendError::CantGetHeightOfText(e)
+            | FrontendError::HighlightSelectionIsNotCalculated(e)
             | FrontendError::ClipboardIsBroken(e) => Error::from(e),
             FrontendError::AgendaSourceFailed(e) => Error::from(e),
             FrontendError::TextObjectNotFound => todo!("handle the error of absent text object"),
@@ -51,7 +52,8 @@ pub enum FrontendError {
     // FIXME(alex): this errors don't seem useful.  Sqaush them into something like PlatformIssue
     // which would wrap an SDL error.
     TextObjectIsNotRegistered(sdlext::Error),
-    CursorClickHandlingFailure(sdlext::Error),
+    CantGetHeightOfText(sdlext::Error),
+    HighlightSelectionIsNotCalculated(sdlext::Error),
     ClipboardIsBroken(sdlext::Error),
     TextObjectNotFound,
 }

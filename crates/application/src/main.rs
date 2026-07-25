@@ -326,6 +326,36 @@ struct TextEngine {
     window: *mut sdl::SDL_Window,
 }
 
+impl TextEngine {
+    // FIXME(alex):
+    // move it to sdlext
+    //
+    // 1. This function is safe to call as long the TTF_TextEngine is created.  Given that, this
+    //    function probably should take it by design.  As a result, that requires to make a wrapper
+    //    around TTF_TextEngine to have Rust pointers with the lifetimes.  The lifetimes would allow
+    //    the relation between the TTF_TextEngine and the function to be explicit.
+    // 2. The resulting type should be a collection probably instead of the pointer onto pointers.
+    //    The collection could be a box with a slice of the pointers.  However, the extra 8 bytes
+    //    are for the size of the box.  Alternative could be an iterator or a structure which
+    //    simply controls the access to the pointers
+    unsafe fn get_text_bus_strings_for_range(
+        text_object: &sdlext::Text,
+        start: i32,
+        len: i32,
+    ) -> Result<(i32, NonNull<*mut sdl_ttf::TTF_SubString>), sdlext::Error> {
+        unsafe {
+            let mut count: i32 = 0;
+            let ret: *mut *mut sdl_ttf::TTF_SubString =
+                sdl_ttf::TTF_GetTextSubStringsForRange(text_object.ptr(), start, len, &mut count);
+            NonNull::new(ret)
+                .ok_or(sdlext::Error::TtfError(
+                    sdlext::TtfError::NoSubstringForPoint,
+                ))
+                .map(|ptr| (count, ptr))
+        }
+    }
+}
+
 impl state::TextEngine for TextEngine {
     type TextObject = sdlext::Text;
 
@@ -348,7 +378,7 @@ impl state::TextEngine for TextEngine {
                 position.y as i32,
                 substring.as_mut_ptr(),
             ) {
-                return Err(FrontendError::CursorClickHandlingFailure(
+                return Err(FrontendError::HighlightSelectionIsNotCalculated(
                     sdlext::Error::TtfError(sdlext::TtfError::NoSubstringForPoint),
                 ));
             }
@@ -357,6 +387,24 @@ impl state::TextEngine for TextEngine {
         };
 
         Ok(substring.offset)
+    }
+
+    /// Returns the height of the entire text_object.
+    fn calculate_height(&self, text_object: &Self::TextObject) -> Result<i32, Self::Error> {
+        unsafe {
+            let (count, ret): (i32, NonNull<*mut _>) =
+                Self::get_text_bus_strings_for_range(text_object, 0, -1)
+                    .map_err(FrontendError::CantGetHeightOfText)?;
+            // Returning zero is fine because it means that no string is returned.
+            let mut height = 0;
+
+            let substring: *mut sdl_ttf::TTF_SubString = *ret.as_ptr();
+            if !substring.is_null() {
+                let rect: sdl3_ttf_sys::SDL_Rect = (*substring).rect as _;
+                height = rect.h * count;
+            }
+            Ok(height)
+        }
     }
 
     /// Returns the rectangles highlighting the text of the given `text_object`.  Each rectangle
@@ -369,37 +417,28 @@ impl state::TextEngine for TextEngine {
         len: i32,
     ) -> Result<Vec<sdl::SDL_FRect>, Self::Error> {
         unsafe {
-            let ret: *mut *mut sdl_ttf::TTF_SubString = sdl_ttf::TTF_GetTextSubStringsForRange(
-                text_object.ptr(),
-                start,
-                len,
-                core::ptr::null_mut(),
-            );
-            if ret.is_null() {
-                Err(FrontendError::CursorClickHandlingFailure(
-                    sdlext::Error::TtfError(sdlext::TtfError::NoSubstringForPoint),
-                ))
-            } else {
-                let mut outvec = Vec::new();
-                let mut cursor = 0;
-                while !ret.add(cursor).is_null() {
-                    let substring: *mut sdl_ttf::TTF_SubString = *ret.add(cursor);
-                    if substring.is_null() {
-                        break;
-                    }
-
-                    let rect: sdl3_ttf_sys::SDL_Rect = (*substring).rect as _;
-                    let out = sdl::SDL_FRect {
-                        x: rect.x as f32,
-                        y: rect.y as f32,
-                        w: rect.w as f32,
-                        h: rect.h as f32,
-                    };
-                    outvec.push(out);
-                    cursor += 1;
+            let (_, ret): (i32, NonNull<*mut _>) =
+                Self::get_text_bus_strings_for_range(text_object, start, len)
+                    .map_err(FrontendError::HighlightSelectionIsNotCalculated)?;
+            let mut outvec = Vec::new();
+            let mut cursor = 0;
+            while !ret.as_ptr().add(cursor).is_null() {
+                let substring: *mut sdl_ttf::TTF_SubString = *(ret.as_ptr().add(cursor));
+                if substring.is_null() {
+                    break;
                 }
-                Ok(outvec)
+
+                let rect: sdl3_ttf_sys::SDL_Rect = (*substring).rect as _;
+                let out = sdl::SDL_FRect {
+                    x: rect.x as f32,
+                    y: rect.y as f32,
+                    w: rect.w as f32,
+                    h: rect.h as f32,
+                };
+                outvec.push(out);
+                cursor += 1;
             }
+            Ok(outvec)
         }
     }
 }
