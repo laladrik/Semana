@@ -5,6 +5,7 @@ mod state;
 
 use core::cell::RefCell;
 use core::mem::MaybeUninit;
+use core::ptr::NonNull;
 
 use sdl3_sys as sdl;
 use sdl3_ttf_sys as sdl_ttf;
@@ -221,13 +222,16 @@ impl RenderedText {
 
 struct TextObjectRegistry<'font> {
     font: &'font RefCell<sdlext::Font>,
-    text_engine: *mut sdl_ttf::TTF_TextEngine,
+    text_engine: NonNull<sdl_ttf::TTF_TextEngine>,
     text_viewports: Vec<sdl::SDL_FRect>,
     text_objects: Vec<sdlext::Text>,
 }
 
 impl<'font> TextObjectRegistry<'font> {
-    fn new(font: &'font RefCell<sdlext::Font>, text_engine: *mut sdl_ttf::TTF_TextEngine) -> Self {
+    fn new(
+        font: &'font RefCell<sdlext::Font>,
+        text_engine: NonNull<sdl_ttf::TTF_TextEngine>,
+    ) -> Self {
         Self {
             font,
             text_viewports: Vec::new(),
@@ -592,7 +596,7 @@ fn unsafe_main() {
 
                 sdl_ttf_init(
                     renderer,
-                    move |engine: *mut sdl_ttf::TTF_TextEngine| -> Result<(), Error> {
+                    move |engine: NonNull<sdl_ttf::TTF_TextEngine>| -> Result<(), Error> {
                         let fonts = Fonts::from_bytes(config::FONT_CONTENT, config::FONT_CONTENT)?;
                         let title_font_height: std::ffi::c_int =
                             sdl_ttf::TTF_GetFontHeight(fonts.title.borrow_mut().ptr());

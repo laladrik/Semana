@@ -102,9 +102,11 @@ impl Drop for Font {
     }
 }
 
+/// # Safety
+/// The functoin is to be called within sdl_init only
 pub unsafe fn sdl_ttf_init<R, E>(
     renderer: &Renderer,
-    body: impl FnOnce(*mut sdl_ttf::TTF_TextEngine) -> std::result::Result<R, E>,
+    body: impl FnOnce(NonNull<sdl_ttf::TTF_TextEngine>) -> std::result::Result<R, E>,
 ) -> std::result::Result<R, E>
 where
     E: From<Error>,
@@ -114,14 +116,12 @@ where
             panic!("ttf is not initialized");
         }
 
-        let engine: *mut sdl_ttf::TTF_TextEngine =
+        let engine_raw: *mut sdl_ttf::TTF_TextEngine =
             sdl_ttf::TTF_CreateRendererTextEngine(renderer.ptr().cast());
-        if engine.is_null() {
-            return Err(Error::from(TtfError::EngineIsNotCreated))?;
-        }
-
-        let r = body(engine);
-        sdl_ttf::TTF_DestroyRendererTextEngine(engine);
+        let mut engine_non_null =
+            NonNull::new(engine_raw).ok_or(Error::from(TtfError::EngineIsNotCreated))?;
+        let r = body(engine_non_null);
+        sdl_ttf::TTF_DestroyRendererTextEngine(engine_non_null.as_mut());
         r
     }
 }
@@ -263,13 +263,17 @@ impl Text {
     }
 
     pub fn try_new(
-        engine: *mut sdl_ttf::TTF_TextEngine,
+        mut engine: NonNull<sdl_ttf::TTF_TextEngine>,
         font: &mut Font,
         text: &std::ffi::CStr,
     ) -> std::result::Result<Self, TtfError> {
         unsafe {
-            let ptr =
-                sdl_ttf::TTF_CreateText(engine, font.ptr(), text.as_ptr(), text.count_bytes());
+            let ptr = sdl_ttf::TTF_CreateText(
+                engine.as_mut(),
+                font.ptr(),
+                text.as_ptr(),
+                text.count_bytes(),
+            );
             NonNull::new(ptr)
                 .ok_or(TtfError::TextIsNotCreated)
                 .map(Self::new)
