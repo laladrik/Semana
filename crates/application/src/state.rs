@@ -24,6 +24,8 @@ const DESCRIPTION_TEXT_INDEX: usize = 5;
 const TEXT_SCROLL_AMPLIFIER: f32 = 10.0;
 const EVENT_DETAILS_VIEW_PADDING: FPoint = FPoint { x: 3., y: 2. };
 const EVENT_DETAILS_RIGHT_OFFSET: f32 = 300.;
+const BOTTOM_SPACE: f32 = 50f32;
+const DESCRIPTION_MIN_SIZE: f32 = 200f32;
 
 mod captions {
     pub mod event_details_view {
@@ -1307,7 +1309,9 @@ impl<F: Frontend> App<F> {
                         .get_viewports_mut()
                         .get_mut(DESCRIPTION_TEXT_INDEX);
                     if let Some(border_rect) = maybe_viewport {
-                        border_rect.w = text_width;
+                        let field_height = (window_size.y as f32 - border_rect.y - BOTTOM_SPACE)
+                            .max(DESCRIPTION_MIN_SIZE);
+                        border_rect.h = field_height;
                     }
 
                     if let Some(offsets) =
@@ -1687,14 +1691,17 @@ impl<F: Frontend> Activities<F> {
             )?;
 
             vertical_offset += one_line_height;
+            let field_height =
+                (window_size.y as f32 - vertical_offset - BOTTOM_SPACE).max(DESCRIPTION_MIN_SIZE);
             // FIXME(alex): a long description is cropped
             let border_rect = FRect {
                 x: TEXT_FIELD_LEFT_OFFSET,
                 y: vertical_offset,
                 w: window_size.x as f32 - EVENT_DETAILS_RIGHT_OFFSET,
-                h: window_size.y as f32 - vertical_offset,
+                h: field_height,
             };
             event_details_text_object_regirsty.create(details.description, border_rect)?;
+            // the wrap is also changed upon resizing of the window
             event_details_text_object_regirsty
                 .set_wrap(DESCRIPTION_TEXT_INDEX as u32, border_rect.w)?;
             texts.push(Box::from(details.description));
