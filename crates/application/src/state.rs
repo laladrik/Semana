@@ -1155,8 +1155,9 @@ impl<F: Frontend> App<F> {
                                 .and_then(|v| v.into_iter().next());
 
                             if let Some(text_rect) = text_rect.filter(|r| r.w > position.w) {
-                                new_offset =
-                                    (current_offset + offset).clamp(position.w - text_rect.w, 0f32);
+                                let min_offset =
+                                    position.w - text_rect.w - view.text_field_padding.x * 2f32;
+                                new_offset = (current_offset + offset).clamp(min_offset, 0f32);
                             }
                         }
 
