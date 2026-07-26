@@ -21,7 +21,7 @@ use sdlext::Color;
 
 // FIXME(alex): remove this ASAP
 const DESCRIPTION_TEXT_INDEX: usize = 5;
-const TEXT_SCROLL_AMPLIFIER: f32 = 10.0;
+const TEXT_SCROLL_AMPLIFIER: f32 = 15.0;
 const EVENT_DETAILS_VIEW_PADDING: FPoint = FPoint { x: 3., y: 2. };
 const EVENT_DETAILS_RIGHT_OFFSET: f32 = 300.;
 const BOTTOM_SPACE: f32 = 50f32;
@@ -1079,12 +1079,42 @@ impl<F: Frontend> App<F> {
     ) -> Result<NewState<'wdrect, 'frontend, F>, F::Error> {
         for event in events {
             match event {
-                // TODO(alex):
-                // Add Action::Scroll.  The action changes the offset of the description.
-                // 1. Check that the mouse is over the field with the description
-                // 2. Get the height of EventDetailsView
-                // 3. Get the height of the text object
-                // 4. Adjust the vertical offset of the description
+                // Scrolling the text in the description field of the calendar event being opened.
+                Action::Scroll { offset, x, y } => {
+                    let offset = offset * TEXT_SCROLL_AMPLIFIER;
+                    let registry = frontend.get_event_details_text_object_regirsty().borrow();
+
+                    let Some(description_viewport) =
+                        registry.get_viewports().get(DESCRIPTION_TEXT_INDEX)
+                    else {
+                        continue;
+                    };
+
+                    if !description_viewport.covers_point(&FPoint { x, y }) {
+                        continue;
+                    }
+
+                    let description_field_height = description_viewport.h;
+                    let Some(text_object) = registry.get(DESCRIPTION_TEXT_INDEX) else {
+                        continue;
+                    };
+
+                    if let Some(view) = self.event_details_view.as_mut()
+                        && let Some(description_text_offset) =
+                            view.offsets.get_mut(DESCRIPTION_TEXT_INDEX)
+                    {
+                        let description_text_height =
+                            frontend.get_text_engine().calculate_height(text_object)?;
+                        let new_offset = description_text_offset.y + offset;
+                        let offset_min = description_field_height
+                            - description_text_height as f32
+                            - view.text_field_padding.y;
+                        if offset_min < 0f32 {
+                            let new_offset = new_offset.clamp(offset_min, 0f32);
+                            description_text_offset.y = new_offset;
+                        }
+                    }
+                }
 
                 // Scrolling a single line text which doesn't fit its field (a.k.a. viewport).
                 Action::TextScroll { offset, x, y } => {
