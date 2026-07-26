@@ -485,10 +485,26 @@ struct EventDetailsView {
     texts: Box<[Box<str>]>,
     /// The offsets of the text objects.  They are used for the case when a string is longer than
     /// its field (a.k.a. viewport).
+    // FIXME(alex): rename this to text_offsets
     offsets: Box<[FPoint]>,
     text_field_padding: FPoint,
     calendar_color_rectangle: FRect,
     calendar_base_rectangle: FRect,
+    height: f32,
+    /// vertical_offset is used for scrolling.  It's added to the vertical_origins which results
+    /// the positions of the elements on the view after scrolling.
+    vertical_offset: f32,
+    /// The original vertical offsets are needed to restore the original position if the view is
+    /// scrolled back to the top.  This is required because the floating arithmetic is not
+    /// associative.  Given that, x + y - y might not equal x again.
+    vertical_origins: VertOrigins,
+}
+
+struct VertOrigins {
+    texts: Box<[f32]>,
+    labels: Box<[f32]>,
+    calendar_color_rectangle: f32,
+    calendar_base_rectangle: f32,
 }
 
 const DUMB_CELL_WIDTH: f32 = 130f32;
@@ -1082,37 +1098,54 @@ impl<F: Frontend> App<F> {
                 // Scrolling the text in the description field of the calendar event being opened.
                 Action::Scroll { offset, x, y } => {
                     let offset = offset * TEXT_SCROLL_AMPLIFIER;
-                    let registry = frontend.get_event_details_text_object_regirsty().borrow();
+                    let form_field_content_registry: &mut F::TextObjectRegistry = &mut frontend
+                        .get_event_details_text_object_regirsty()
+                        .borrow_mut();
 
-                    let Some(description_viewport) =
-                        registry.get_viewports().get(DESCRIPTION_TEXT_INDEX)
+                    let Some(description_viewport) = form_field_content_registry
+                        .get_viewports()
+                        .get(DESCRIPTION_TEXT_INDEX)
                     else {
                         continue;
                     };
 
-                    if !description_viewport.covers_point(&FPoint { x, y }) {
-                        continue;
-                    }
-
-                    let description_field_height = description_viewport.h;
-                    let Some(text_object) = registry.get(DESCRIPTION_TEXT_INDEX) else {
+                    let Some(view) = self.event_details_view.as_mut() else {
                         continue;
                     };
 
-                    if let Some(view) = self.event_details_view.as_mut()
-                        && let Some(description_text_offset) =
+                    if description_viewport.covers_point(&FPoint { x, y }) {
+                        let description_field_height = description_viewport.h;
+                        let Some(text_object) =
+                            form_field_content_registry.get(DESCRIPTION_TEXT_INDEX)
+                        else {
+                            continue;
+                        };
+
+                        if let Some(description_text_offset) =
                             view.offsets.get_mut(DESCRIPTION_TEXT_INDEX)
-                    {
-                        let description_text_height =
-                            frontend.get_text_engine().calculate_height(text_object)?;
-                        let new_offset = description_text_offset.y + offset;
-                        let offset_min = description_field_height
-                            - description_text_height as f32
-                            - view.text_field_padding.y;
-                        if offset_min < 0f32 {
-                            let new_offset = new_offset.clamp(offset_min, 0f32);
-                            description_text_offset.y = new_offset;
+                        {
+                            let description_text_height =
+                                frontend.get_text_engine().calculate_height(text_object)?;
+                            let new_offset = description_text_offset.y + offset;
+                            let offset_min = description_field_height
+                                - description_text_height as f32
+                                - view.text_field_padding.y;
+                            if offset_min < 0f32 {
+                                let new_offset = new_offset.clamp(offset_min, 0f32);
+                                description_text_offset.y = new_offset;
+                            }
                         }
+                    } else {
+                        let form_field_label_registry: &mut _ = &mut frontend
+                            .get_event_details_field_label_regirsty()
+                            .borrow_mut();
+                        event_details_view_update_offsets::<F>(
+                            view,
+                            form_field_content_registry,
+                            form_field_label_registry,
+                            &window_size,
+                            offset,
+                        )?;
                     }
                 }
 
@@ -1355,11 +1388,35 @@ impl<F: Frontend> App<F> {
                         border_rect.h = field_height;
                     }
 
-                    if let Some(offsets) =
-                        self.event_details_view.as_mut().map(|v| v.offsets.as_mut())
+                    let Some(view_mut) = self.event_details_view.as_mut() else {
+                        continue;
+                    };
+
+                    view_mut.offsets.fill(FPoint { x: 0., y: 0. });
+                    if let Some(height) = registry_ref
+                        .get_viewports()
+                        .get(DESCRIPTION_TEXT_INDEX)
+                        .map(|vp| vp.y + vp.h + BOTTOM_SPACE)
                     {
-                        offsets.fill(FPoint { x: 0., y: 0. });
+                        // FIXME(alex): this is a wrong way to get the view size.  The height of
+                        // EventDetailsView is based on the height of the description text field.
+                        // It should be the other way around.
+                        view_mut.height = height;
+                        // FIXME(alex): offset must not be reset as the window resizes
+                        view_mut.vertical_offset = 0f32;
                     }
+
+                    let form_field_label_registry: &mut _ = &mut frontend
+                        .get_event_details_field_label_regirsty()
+                        .borrow_mut();
+                    event_details_view_update_offsets::<F>(
+                        view_mut,
+                        &mut registry_ref,
+                        form_field_label_registry,
+                        &window_size,
+                        // FIXME(alex): offset must not be reset as the window resizes
+                        0f32,
+                    )?;
                 }
                 next_or_previous @ (Action::NextField | Action::PreviousField) => {
                     let Some(view) = self.event_details_view.as_mut() else {
@@ -1547,11 +1604,53 @@ fn format_date_time(date: &calendar::date::Date, time: &calendar::date::Time) ->
     )
 }
 
+// The vertical offsets are changed as the view is scrolled.
+fn event_details_view_update_offsets<F: Frontend>(
+    view: &mut EventDetailsView,
+    event_details_text_object_registry: &mut F::TextObjectRegistry,
+    event_details_field_label_registry: &mut F::TextTextureRegistry,
+    window_size: &Point,
+    offset: f32,
+) -> Result<(), F::Error> {
+    let window_height = window_size.y;
+    let view_height = view.height;
+    let min_offset = window_height as f32 - view_height;
+    let origins: &_ = &view.vertical_origins;
+    // The offset is changed as long Event Details View is bigger than the window
+    if min_offset < 0f32 {
+        '_update_vertical_offset: {
+            view.vertical_offset += offset;
+            view.vertical_offset = view.vertical_offset.clamp(min_offset, 0f32);
+        }
+
+        '_update_text_fields_viewports: {
+            let viewports: &mut [_] = event_details_text_object_registry.get_viewports_mut();
+            for item in viewports.iter_mut().zip(origins.texts.iter()) {
+                let (vp, vertical_origin): (&mut FRect, &f32) = item;
+                vp.y = vertical_origin + view.vertical_offset
+            }
+        }
+
+        '_update_labels: {
+            let iter = origins.labels.iter().map(|y| y + view.vertical_offset);
+            event_details_field_label_registry.update_vertical_offsets(iter);
+        }
+
+        '_update_calendar_field: {
+            view.calendar_color_rectangle.y =
+                origins.calendar_color_rectangle + view.vertical_offset;
+            view.calendar_base_rectangle.y = origins.calendar_base_rectangle + view.vertical_offset;
+        }
+    }
+    Ok(())
+}
+
 impl<F: Frontend> Activities<F> {
     // Renders the text of the event details
     fn create_event_details_text_objects(
         details: EventDetails,
         window_size: &Point,
+        // FIXME(alex): fix the typo
         event_details_text_object_regirsty: &mut F::TextObjectRegistry,
         event_details_field_label_regirsty: &mut F::TextTextureRegistry,
         label_color: Color,
@@ -1564,6 +1663,7 @@ impl<F: Frontend> Activities<F> {
         const LABEL_LEFT_OFFSET: f32 = 100.;
         const TEXT_FIELD_LEFT_OFFSET: f32 = 150.;
         const DATE_TIME_FIELD_WIDTH: f32 = 220.0;
+        // FIXME(alex): should be calculated based on the font height
         let one_line_height = 30f32;
         let mut texts: Vec<Box<str>> = Vec::with_capacity(MAX_FIELDS);
         let mut flexible_fields: [u32; MAX_FIELDS] = [0; MAX_FIELDS];
@@ -1725,6 +1825,7 @@ impl<F: Frontend> Activities<F> {
             )?;
         }
 
+        let event_details_view_height;
         '_create_description: {
             vertical_offset += 2f32 * one_line_height;
             event_details_field_label_regirsty.create(
@@ -1751,7 +1852,23 @@ impl<F: Frontend> Activities<F> {
 
             push_flexible_field(field_counter);
             field_counter += 1;
+            event_details_view_height = vertical_offset + field_height + BOTTOM_SPACE;
         }
+
+        let vertical_origins = VertOrigins {
+            texts: event_details_text_object_regirsty
+                .get_viewports()
+                .iter()
+                .map(|r| r.y)
+                .collect(),
+            labels: event_details_field_label_regirsty
+                .get_positions()
+                .iter()
+                .map(|r| r.y)
+                .collect(),
+            calendar_color_rectangle: calendar_color_rectangle.y,
+            calendar_base_rectangle: calendar_base_rectangle.y,
+        };
 
         Ok(EventDetailsView {
             text_field_padding: EVENT_DETAILS_VIEW_PADDING,
@@ -1765,6 +1882,9 @@ impl<F: Frontend> Activities<F> {
                 .collect(),
             calendar_color_rectangle,
             calendar_base_rectangle,
+            height: event_details_view_height,
+            vertical_offset: 0f32,
+            vertical_origins,
         })
     }
 }
@@ -2173,6 +2293,10 @@ pub trait TextTextureRegistry {
         color: Color,
         position: FRect,
     ) -> Result<(), Self::Error>;
+
+    fn get_positions(&self) -> &[FRect];
+
+    fn update_vertical_offsets(&mut self, values: impl Iterator<Item = f32>);
 }
 
 pub trait TextObjectRegistry {
@@ -2186,7 +2310,6 @@ pub trait TextObjectRegistry {
     fn create(&mut self, text: impl Into<Vec<u8>>, position: FRect) -> Result<(), Self::Error>;
 
     fn get_viewports_mut(&mut self) -> &mut [FRect];
-    // NOT PLANNED
     fn get_viewports(&self) -> &[sdl3_sys::SDL_FRect];
 
     /// Sets the text wrap length

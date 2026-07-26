@@ -189,6 +189,17 @@ impl<'renderer, 'font> state::TextTextureRegistry for TextTextureRegistry<'rende
         }
         Ok(())
     }
+
+    fn get_positions(&self) -> &[sdl3_sys::SDL_FRect] {
+        &self.text_positions
+    }
+
+    fn update_vertical_offsets(&mut self, offsets: impl Iterator<Item = f32>) {
+        self.text_positions
+            .iter_mut()
+            .zip(offsets)
+            .for_each(|(r, offset)| r.y = offset);
+    }
 }
 
 struct RenderedText {
