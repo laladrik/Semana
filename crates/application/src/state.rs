@@ -494,9 +494,14 @@ struct EventDetailsView {
     /// vertical_offset is used for scrolling.  It's added to the vertical_origins which results
     /// the positions of the elements on the view after scrolling.
     vertical_offset: f32,
-    /// The original vertical offsets are needed to restore the original position if the view is
-    /// scrolled back to the top.  This is required because the floating arithmetic is not
-    /// associative.  Given that, x + y - y might not equal x again.
+    /// The original vertical offsets are needed for two things:
+    /// 1. To restore the original position if the view is scrolled back to the top.  This is
+    ///    required because the floating arithmetic is not associative.  Given that, `x + y - y`
+    ///    might not equal x again. See [`event_details_view_set_offsets`] and [`event_details_view_shift_offsets`].
+    /// 2. To calculate the height of [`EventDetailsView`] on window resizing.  As the height of
+    ///    the view is sum(description field's height, [`BOTTOM_SPACE`], description field's y),
+    ///    the calculation breaks if the y is taken after scrolling.  Given that, the y is taken
+    ///    from the original position.
     vertical_origins: VertOrigins,
 }
 
@@ -1139,7 +1144,7 @@ impl<F: Frontend> App<F> {
                         let form_field_label_registry: &mut _ = &mut frontend
                             .get_event_details_field_label_regirsty()
                             .borrow_mut();
-                        event_details_view_update_offsets::<F>(
+                        event_details_view_shift_offsets::<F>(
                             view,
                             form_field_content_registry,
                             form_field_label_registry,
@@ -1375,48 +1380,61 @@ impl<F: Frontend> App<F> {
                         }
                     }
 
-                    // The error is raised if the descrption does not exist or if SDL fails to set
-                    // the wrapping
-                    let mut registry_ref: core::cell::RefMut<_> = registry.borrow_mut();
-                    let _ = registry_ref.set_wrap(DESCRIPTION_TEXT_INDEX as u32, text_width);
-                    let maybe_viewport = registry_ref
-                        .get_viewports_mut()
-                        .get_mut(DESCRIPTION_TEXT_INDEX);
-                    if let Some(border_rect) = maybe_viewport {
-                        let field_height = (window_size.y as f32 - border_rect.y - BOTTOM_SPACE)
-                            .max(DESCRIPTION_MIN_SIZE);
-                        border_rect.h = field_height;
-                    }
-
                     let Some(view_mut) = self.event_details_view.as_mut() else {
                         continue;
                     };
 
-                    view_mut.offsets.fill(FPoint { x: 0., y: 0. });
-                    if let Some(height) = registry_ref
-                        .get_viewports()
-                        .get(DESCRIPTION_TEXT_INDEX)
-                        .map(|vp| vp.y + vp.h + BOTTOM_SPACE)
+                    // The error is raised if the descrption does not exist or if SDL fails to set
+                    // the wrapping
+                    let mut form_field_content_registry: core::cell::RefMut<_> =
+                        registry.borrow_mut();
+                    let _ = form_field_content_registry
+                        .set_wrap(DESCRIPTION_TEXT_INDEX as u32, text_width);
+                    let maybe_description_vertical_origin: Option<_> =
+                        view_mut.vertical_origins.texts.get(DESCRIPTION_TEXT_INDEX);
+
+                    let maybe_description_viewport = form_field_content_registry
+                        .get_viewports_mut()
+                        .get_mut(DESCRIPTION_TEXT_INDEX);
+                    let old_view_height = view_mut.height;
+                    // Stretch the description field and calculate the height of [`EventDetailsView`].
+                    if let Some(description_vertical_origin) = maybe_description_vertical_origin
+                        && let Some(description_viewport) = maybe_description_viewport
                     {
-                        // FIXME(alex): this is a wrong way to get the view size.  The height of
-                        // EventDetailsView is based on the height of the description text field.
-                        // It should be the other way around.
-                        view_mut.height = height;
-                        // FIXME(alex): offset must not be reset as the window resizes
-                        view_mut.vertical_offset = 0f32;
+                        let description_height =
+                            window_size.y as f32 - description_vertical_origin - BOTTOM_SPACE;
+                        description_viewport.h = description_height.max(DESCRIPTION_MIN_SIZE);
+                        view_mut.height =
+                            description_vertical_origin + description_viewport.h + BOTTOM_SPACE;
                     }
 
+                    // NOTE(alex): Reset the horizontal text offsets
+                    view_mut.offsets.fill(FPoint { x: 0., y: 0. });
+
+                    let view_new_offset =
+                        view_mut.vertical_offset / old_view_height * view_mut.height;
+                    // FIXME(alex): remove this poor logic
+                    let offset_delta = view_new_offset - view_mut.vertical_offset;
                     let form_field_label_registry: &mut _ = &mut frontend
                         .get_event_details_field_label_regirsty()
                         .borrow_mut();
-                    event_details_view_update_offsets::<F>(
-                        view_mut,
-                        &mut registry_ref,
-                        form_field_label_registry,
-                        &window_size,
-                        // FIXME(alex): offset must not be reset as the window resizes
-                        0f32,
-                    )?;
+
+                    if view_mut.height.floor() as i32 <= window_size.y {
+                        view_mut.vertical_offset = 0.;
+                        event_details_view_set_offsets::<F>(
+                            view_mut,
+                            &mut form_field_content_registry,
+                            form_field_label_registry,
+                        )?;
+                    } else {
+                        event_details_view_shift_offsets::<F>(
+                            view_mut,
+                            &mut form_field_content_registry,
+                            form_field_label_registry,
+                            &window_size,
+                            offset_delta,
+                        )?;
+                    }
                 }
                 next_or_previous @ (Action::NextField | Action::PreviousField) => {
                     let Some(view) = self.event_details_view.as_mut() else {
@@ -1604,43 +1622,55 @@ fn format_date_time(date: &calendar::date::Date, time: &calendar::date::Time) ->
     )
 }
 
+fn event_details_view_set_offsets<F: Frontend>(
+    view: &mut EventDetailsView,
+    event_details_text_object_registry: &mut F::TextObjectRegistry,
+    event_details_field_label_registry: &mut F::TextTextureRegistry,
+) -> Result<(), F::Error> {
+    let origins: &_ = &view.vertical_origins;
+    '_update_text_fields_viewports: {
+        let viewports: &mut [_] = event_details_text_object_registry.get_viewports_mut();
+        for item in viewports.iter_mut().zip(origins.texts.iter()) {
+            let (vp, vertical_origin): (&mut FRect, &f32) = item;
+            vp.y = vertical_origin + view.vertical_offset
+        }
+    }
+
+    '_update_labels: {
+        let iter = origins.labels.iter().map(|y| y + view.vertical_offset);
+        event_details_field_label_registry.update_vertical_offsets(iter);
+    }
+
+    '_update_calendar_field: {
+        view.calendar_color_rectangle.y = origins.calendar_color_rectangle + view.vertical_offset;
+        view.calendar_base_rectangle.y = origins.calendar_base_rectangle + view.vertical_offset;
+    }
+    Ok(())
+}
+
 // The vertical offsets are changed as the view is scrolled.
-fn event_details_view_update_offsets<F: Frontend>(
+fn event_details_view_shift_offsets<F: Frontend>(
     view: &mut EventDetailsView,
     event_details_text_object_registry: &mut F::TextObjectRegistry,
     event_details_field_label_registry: &mut F::TextTextureRegistry,
     window_size: &Point,
-    offset: f32,
+    offset_delta: f32,
 ) -> Result<(), F::Error> {
     let window_height = window_size.y;
     let view_height = view.height;
     let min_offset = window_height as f32 - view_height;
-    let origins: &_ = &view.vertical_origins;
     // The offset is changed as long Event Details View is bigger than the window
     if min_offset < 0f32 {
         '_update_vertical_offset: {
-            view.vertical_offset += offset;
+            view.vertical_offset += offset_delta;
             view.vertical_offset = view.vertical_offset.clamp(min_offset, 0f32);
         }
 
-        '_update_text_fields_viewports: {
-            let viewports: &mut [_] = event_details_text_object_registry.get_viewports_mut();
-            for item in viewports.iter_mut().zip(origins.texts.iter()) {
-                let (vp, vertical_origin): (&mut FRect, &f32) = item;
-                vp.y = vertical_origin + view.vertical_offset
-            }
-        }
-
-        '_update_labels: {
-            let iter = origins.labels.iter().map(|y| y + view.vertical_offset);
-            event_details_field_label_registry.update_vertical_offsets(iter);
-        }
-
-        '_update_calendar_field: {
-            view.calendar_color_rectangle.y =
-                origins.calendar_color_rectangle + view.vertical_offset;
-            view.calendar_base_rectangle.y = origins.calendar_base_rectangle + view.vertical_offset;
-        }
+        return event_details_view_set_offsets::<F>(
+            view,
+            event_details_text_object_registry,
+            event_details_field_label_registry,
+        );
     }
     Ok(())
 }
