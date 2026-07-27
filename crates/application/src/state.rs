@@ -485,8 +485,7 @@ struct EventDetailsView {
     texts: Box<[Box<str>]>,
     /// The offsets of the text objects.  They are used for the case when a string is longer than
     /// its field (a.k.a. viewport).
-    // FIXME(alex): rename this to text_offsets
-    offsets: Box<[FPoint]>,
+    text_offsets: Box<[FPoint]>,
     text_field_padding: FPoint,
     calendar_color_rectangle: FRect,
     calendar_base_rectangle: FRect,
@@ -943,7 +942,7 @@ impl<F: Frontend> App<F> {
                         activity: Activity::EventView,
                         render_data: RenderData::EventView(EventViewRenderData {
                             text_field_padding: view.text_field_padding,
-                            offsets: view.offsets.as_ref(),
+                            text_offsets: view.text_offsets.as_ref(),
                             text_selection: view.selection_highlight.as_ref().map(
                                 |sel: &SelectionHighlight| TextSelection {
                                     highlight: Vec::new(),
@@ -1127,7 +1126,7 @@ impl<F: Frontend> App<F> {
                         };
 
                         if let Some(description_text_offset) =
-                            view.offsets.get_mut(DESCRIPTION_TEXT_INDEX)
+                            view.text_offsets.get_mut(DESCRIPTION_TEXT_INDEX)
                         {
                             let description_text_height =
                                 frontend.get_text_engine().calculate_height(text_object)?;
@@ -1170,7 +1169,7 @@ impl<F: Frontend> App<F> {
                             // The offsets are as many as text objects.  Given that, the default
                             // value is not expected to be set.
                             let current_offset = view
-                                .offsets
+                                .text_offsets
                                 .get(scrolled_text_index)
                                 .map(|o| o.x)
                                 .unwrap_or_default();
@@ -1202,7 +1201,7 @@ impl<F: Frontend> App<F> {
                         if let Some(offset) = self
                             .event_details_view
                             .as_mut()
-                            .and_then(|view| view.offsets.get_mut(scrolled_text_index))
+                            .and_then(|view| view.text_offsets.get_mut(scrolled_text_index))
                         {
                             offset.x = new_offset;
                         }
@@ -1241,7 +1240,7 @@ impl<F: Frontend> App<F> {
                             let text_engine = frontend.get_text_engine();
                             // The position is relative to the rectangle shaping of the text.
                             // Currently it's the border of it.
-                            let offset = view.offsets[selected_text_field_index];
+                            let offset = view.text_offsets[selected_text_field_index];
                             // FIXME(alex): the _offset_ is only for the horizontal scrolling.
                             // This does not work for the description field which will be scrolled
                             // vertically.
@@ -1301,7 +1300,7 @@ impl<F: Frontend> App<F> {
                             );
 
                             let scroll_offset: FPoint = view
-                                .offsets
+                                .text_offsets
                                 .get(field_position)
                                 .cloned()
                                 .unwrap_or(FPoint { x: 0., y: 0. });
@@ -1409,7 +1408,7 @@ impl<F: Frontend> App<F> {
                     }
 
                     // NOTE(alex): Reset the horizontal text offsets
-                    view_mut.offsets.fill(FPoint { x: 0., y: 0. });
+                    view_mut.text_offsets.fill(FPoint { x: 0., y: 0. });
 
                     let view_new_offset =
                         view_mut.vertical_offset / old_view_height * view_mut.height;
@@ -1497,7 +1496,7 @@ impl<F: Frontend> App<F> {
                     let text_engine = frontend.get_text_engine();
                     let selected_text_field_index = text_selection.selected_text_field as usize;
                     let text_object = registry.get(selected_text_field_index);
-                    let offset = view.offsets[selected_text_field_index];
+                    let offset = view.text_offsets[selected_text_field_index];
 
                     match text_object {
                         Some(text_object) => {
@@ -1562,7 +1561,7 @@ impl<F: Frontend> App<F> {
                     selections_highlights.and_then(|r| r.into_iter().next())
                 {
                     // Adjust the position where the cursor is rendered.
-                    let offset = view_mut.offsets[selected_text_field_index];
+                    let offset = view_mut.text_offsets[selected_text_field_index];
                     cursor_rect = cursor_rect
                         .move_frect(view_mut.text_field_padding.x, view_mut.text_field_padding.y)
                         .move_frect(offset.x, offset.y);
@@ -1587,7 +1586,7 @@ impl<F: Frontend> App<F> {
                 activity: Activity::EventView,
                 render_data: RenderData::EventView(EventViewRenderData {
                     text_field_padding: view.text_field_padding,
-                    offsets: view.offsets.as_ref(),
+                    text_offsets: view.text_offsets.as_ref(),
                     frontend,
                     text_selection: view.selection_highlight.as_ref().map(
                         |sel: &SelectionHighlight| {
@@ -1907,7 +1906,7 @@ impl<F: Frontend> Activities<F> {
             event_kind: details.event_kind,
             flexible_fields: Box::from(&flexible_fields[..flexible_fields_cursor]),
             texts: texts.into_boxed_slice(),
-            offsets: (0..field_counter)
+            text_offsets: (0..field_counter)
                 .map(|_| FPoint { x: 0., y: 0. })
                 .collect(),
             calendar_color_rectangle,
