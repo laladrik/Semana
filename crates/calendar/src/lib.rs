@@ -125,10 +125,13 @@ impl CalendarTable {
     }
 
     fn get_handle(&self, name: &str) -> Option<u32> {
+        if self.indexes.is_empty() {
+            return None;
+        }
+
         for (count, index_pair) in self.indexes.windows(2).enumerate() {
             let range: Range<usize> = match index_pair {
                 [x, y] => (*x as usize)..(*y as usize),
-                [x] => (*x as usize)..self.names.len(),
                 _ => return None,
             };
 
@@ -136,7 +139,17 @@ impl CalendarTable {
                 return Some(count as u32);
             }
         }
-        None
+
+        // This covers two cases
+        // 1. When there's only one calendar.  Given that the loop from above won't run
+        // 2. When all of the calendar names except the last one aren't equal to `name`.  Given that,
+        //    that last one is checked here.
+        self.indexes.last().and_then(|i| {
+            self.names
+                .get(*i as usize..self.names.len())
+                .filter(|x| *x == name)
+                .map(|_| *i)
+        })
     }
 
     fn push(&mut self, name: &str) -> u32 {
