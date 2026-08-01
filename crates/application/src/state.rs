@@ -1208,6 +1208,7 @@ impl<F: Frontend> App<F> {
                     }
                 }
                 Action::Escape => {
+                    self.calendar.request_render();
                     return self.create_week_view_render_data(
                         frontend,
                         window_size,
